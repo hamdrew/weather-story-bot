@@ -3,6 +3,29 @@
 An AWS Lambda service that periodically retrieves National Weather Service Weather
 Stories and publishes approved updates to Telegram.
 
+> This project is not an emergency alerting service. For urgent weather
+> information and emergencies, use official National Weather Service channels.
+
+## Project status
+
+Weather Story Bot is under active, spec-driven development. The initial MVP
+polls the NWS Milwaukee/Sullivan office (MKX) every 15 minutes and publishes
+validated Weather Stories to an environment-specific Telegram destination.
+Development delivery is mock-only; staging and production destinations are
+isolated and never committed here.
+
+## Documentation and community
+
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
+- [Support](SUPPORT.md)
+- [Apache License 2.0](LICENSE)
+
+Do not publish Telegram tokens, AWS credentials, private identifiers, invite
+links, raw payloads, or unbounded operational logs in public collaboration
+surfaces.
+
 ## Local development
 
 This repository pins Python 3.13.7 and `uv` 0.12.3 in `mise.toml`. With

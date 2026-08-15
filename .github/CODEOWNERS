@@ -1,0 +1,11 @@
+# Default ownership
+* @hamdrew
+
+# Delivery and policy controls require owner review.
+/.github/ @hamdrew
+/template.yaml @hamdrew
+/infrastructure/ @hamdrew
+/config/ @hamdrew
+/openspec/ @hamdrew
+/pyproject.toml @hamdrew
+/uv.lock @hamdrew
