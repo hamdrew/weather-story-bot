@@ -193,6 +193,8 @@ The system SHALL redact the raw Telegram token and any URL, header, body, error,
 ### Requirement: Emit allowlisted, non-sensitive CloudWatch Logs
 Each Lambda SHALL emit structured CloudWatch log events using only this allowlisted schema: event timestamp, log level, event type, component, `office_id`, `run_id`, `attempt_id`, revision hash, outcome/status, HTTP status, stable error class/code, sanitizer-produced error summary of at most 256 characters, latency, retry ordinal, retry/defer decision, and aggregate outcome counts. Fields that do not apply to an event MAY be omitted. The system SHALL NOT emit raw or token-bearing URLs; Telegram chat or message IDs; story IDs; S3 keys; story text, titles, descriptions, alt text, or image metadata; secret values; request or response bodies; headers; raw exception objects or stack traces; or unbounded upstream error text. Sensitive identifiers SHALL be omitted rather than hashed; authorized operators SHALL use the durable history store, correlated through the logged `run_id`, `attempt_id`, or revision hash, when raw references are needed for investigation.
 
+The non-secret environment-scoped `log_level` SHALL be one of `DEBUG`, `INFO`, `WARNING`, or `ERROR`. Dev and staging SHALL default to `DEBUG`; prod SHALL default to `INFO` and reject `DEBUG`. At DEBUG, each Lambda SHALL additionally emit only allowlisted lifecycle and decision events for request start/completion and latency, validation stage and stable code, retry-budget decisions, and deduplication/reservation decisions. DEBUG SHALL NOT widen the log schema or permit raw tracing, arbitrary context, or sensitive data.
+
 CloudWatch Logs groups for the publisher, alert dispatcher, reconciliation, and rotation-smoke Lambdas SHALL retain events for 90 days.
 
 #### Scenario: A Telegram request fails with sensitive context
@@ -202,6 +204,14 @@ CloudWatch Logs groups for the publisher, alert dispatcher, reconciliation, and 
 #### Scenario: An operator investigates a logged event
 - **WHEN** an operator needs a raw operational reference omitted from a log event
 - **THEN** the operator uses the logged `run_id`, `attempt_id`, or revision hash to retrieve the authorized durable-history record rather than relying on a reversible logged identifier
+
+#### Scenario: Development tracing is enabled
+- **WHEN** a dev or staging Lambda uses its default `DEBUG` log level
+- **THEN** it emits the additional allowlisted lifecycle and decision events without emitting a raw request, response, exception, URL, header, or sensitive identifier
+
+#### Scenario: Production debug logging is requested
+- **WHEN** prod configuration specifies `DEBUG` as its log level
+- **THEN** configuration validation rejects the deployment or invocation before the Lambda emits application logs
 
 #### Scenario: Log retention is configured
 - **WHEN** the AWS SAM application provisions a Lambda log group
