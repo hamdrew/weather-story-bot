@@ -53,22 +53,28 @@ jobs:
       - name: Run unit tests
         run: make test
 
-      - name: Generate coverage summary
-        uses: irongut/CodeCoverageSummary@51cc3a756ddcd398d447c044c02cb6aa83fdae95 # v1.3.0
-        with:
-          filename: coverage/coverage.xml
-          badge: true
-          fail_below_min: true
-          format: markdown
-          hide_branch_rate: false
-          hide_complexity: true
-          indicators: true
-          output: both
-          thresholds: "75 90"
-
-      - name: Add coverage summary to workflow report
+      - name: Publish coverage summary
         if: always()
         run: |
-          if [ -f code-coverage-results.md ]; then
-            cat code-coverage-results.md >> "$GITHUB_STEP_SUMMARY"
-          fi
+          uv run --locked python - <<'PY'
+          import os
+          from pathlib import Path
+          from xml.etree import ElementTree
+
+          root = ElementTree.parse("coverage/coverage.xml").getroot()
+          line_rate = float(root.attrib["line-rate"]) * 100
+          branch_rate = float(root.attrib["branch-rate"]) * 100
+          indicator = "🟢" if line_rate >= 90 else "🟡" if line_rate >= 75 else "🔴"
+          summary = (
+              "## Coverage\n\n"
+              "| Metric | Result | Target |\n"
+              "| --- | ---: | ---: |\n"
+              f"| Line rate | {line_rate:.2f}% | ≥ 75% (≥ 90% healthy) |\n"
+              f"| Branch rate | {branch_rate:.2f}% | visible; no gate |\n\n"
+              f"{indicator} Line-rate status\n"
+          )
+          print(summary)
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(summary, encoding="utf-8")
+          if line_rate < 75:
+              raise SystemExit("Coverage line rate is below the 75% minimum.")
+          PY
