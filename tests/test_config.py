@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from weather_story_bot.config import (
     ConfigurationError,
     EnvironmentConfig,
+    NWSOfficeSeedSet,
     OfficeCoordinates,
     OfficeRegistry,
     OfficeRegistryRecord,
@@ -18,6 +19,16 @@ from weather_story_bot.config import (
 )
 
 ROOT = Path(__file__).parent.parent
+
+
+def test_seed_set_rejects_duplicate_ids_and_missing_mkx() -> None:
+    base = {"schema_version": 1, "source": "https://example.test/offices"}
+
+    with pytest.raises(ValidationError, match="office_ids must be unique"):
+        NWSOfficeSeedSet.model_validate(base | {"office_ids": ("MKX", "MKX")})
+
+    with pytest.raises(ValidationError, match="office_ids must include MKX"):
+        NWSOfficeSeedSet.model_validate(base | {"office_ids": ("GRB",)})
 
 
 def test_versioned_seed_set_contains_every_current_wfo_and_mkx() -> None:
@@ -107,7 +118,48 @@ def test_active_registry_channels_must_be_present_and_unique() -> None:
         OfficeRegistry(schema_version=1, offices=(first, second))
 
 
+def test_registry_rejects_non_https_urls_and_invalid_timezones() -> None:
+    base = {
+        "office_id": "MKX",
+        "weather_stories_url": "http://api.weather.gov/offices/MKX/weatherstories",
+        "display_name": "Milwaukee/Sullivan, WI",
+        "address": {
+            "street_address": "N3533 Hardscrabble Road",
+            "locality": "Dousman",
+            "region": "WI",
+            "postal_code": "53118",
+        },
+        "coordinates": {"latitude": 43.04, "longitude": -88.46},
+        "timezone": "America/Chicago",
+        "telegram_channel_id": "-1001",
+        "active": True,
+    }
+
+    with pytest.raises(ValidationError, match="URL must use HTTPS"):
+        OfficeRegistryRecord.model_validate(base)
+
+    with pytest.raises(ValidationError, match="timezone must be a valid IANA timezone"):
+        OfficeRegistryRecord.model_validate(
+            base
+            | {
+                "weather_stories_url": "https://api.weather.gov/offices/MKX/weatherstories",
+                "timezone": "Not/A-Timezone",
+            }
+        )
+
+
 def test_environment_rejects_invalid_telegram_modes_for_every_destination() -> None:
+    with pytest.raises(ValidationError, match="nws_image_host_allowlist"):
+        EnvironmentConfig(
+            schema_version=1,
+            environment="dev",
+            telegram_mode="mock",
+            nws_image_host_allowlist=("weather.gov",),
+            active_office_ids=("MKX",),
+            office_channels={"MKX": "mock:weather-story-mkx"},
+            alert_recipient="mock:weather-story-operator",
+        )
+
     with pytest.raises(ValidationError, match="only MKX may be active"):
         EnvironmentConfig(
             schema_version=1,
@@ -184,3 +236,21 @@ def test_timezone_and_versioned_secret_validation() -> None:
     assert validate_telegram_secret(secret) == "test-token"
     with pytest.raises(ConfigurationError):
         validate_telegram_secret('{"schema_version": 2, "telegram_bot_token": "test-token"}')
+
+
+@pytest.mark.parametrize(
+    ("secret_json", "message"),
+    [
+        ("not-json", "not valid JSON"),
+        ("[]", "must be an object"),
+        (
+            '{"schema_version": 1, "telegram_bot_token": "token", "extra": true}',
+            "invalid field set",
+        ),
+        ('{"schema_version": 1, "telegram_bot_token": 42}', "does not match schema version 1"),
+        ('{"schema_version": 1, "telegram_bot_token": "   "}', "cannot be blank"),
+    ],
+)
+def test_versioned_secret_rejects_malformed_json_shapes(secret_json: str, message: str) -> None:
+    with pytest.raises(ConfigurationError, match=message):
+        validate_telegram_secret(secret_json)
