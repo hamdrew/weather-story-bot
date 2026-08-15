@@ -42,7 +42,7 @@ Terraform is not used for this change; no Terraform state, backend, provider, or
 
 ### Public GitHub repository governance
 
-Keep application source, SAM templates, dependency manifests/lockfiles, workflow definitions, policy configuration, tests, runbooks, and release metadata in one public repository. Establish the public remote and a baseline pull-request validation workflow before continuing MVP implementation. Add an explicit license, README/project metadata, contribution and security policies, code ownership, issue/PR templates, and a code of conduct. After the one documented initial bootstrap push, protect the default branch with pull requests, required checks, authorized review, and stricter ownership for workflow, IAM, OIDC, secret, and release-policy changes; all source and policy changes merge through a pull request. Enable available Dependabot alerts/security updates, secret scanning/push protection, code scanning, and dependency review.
+Keep application source, SAM templates, dependency manifests/lockfiles, workflow definitions, policy configuration, tests, runbooks, and release metadata in one public repository. Establish the public remote and a baseline pull-request validation workflow before continuing MVP implementation. Add an explicit license, README/project metadata, contribution and security policies, code ownership, issue/PR templates, and a code of conduct. After the one documented initial bootstrap push, protect the default branch with pull requests, required checks, authorized review, and stricter ownership for workflow, IAM, OIDC, secret, and release-policy changes. Squash is the repository's only enabled pull-request merge method. All contributors other than the sole maintainer, `@hamdrew`, merge source and policy changes through a squash pull request; the active ruleset grants only `@hamdrew` an audited always-bypass for self-approval, self-merge, and occasional direct default-branch pushes. Enable available Dependabot alerts/security updates, secret scanning/push protection, code scanning, and dependency review.
 
 Alternative considered: keep deployment workflows in a private operations repository. Rejected for this service because public source users need reproducible contribution and release context, and splitting workflow policy from the infrastructure source increases traceability and review friction.
 
@@ -205,7 +205,7 @@ Sensitive operational identifiers are omitted, not hashed: a hash would support 
 
 ## Migration Plan
 
-1. Establish the public GitHub remote, baseline pull-request validation, and default-branch protection; after the documented bootstrap push, make pull requests the required path for source and policy changes.
+1. Establish the public GitHub remote, baseline pull-request validation, and default-branch protection; after the documented bootstrap push, make pull requests the required path for source and policy changes except for the documented, audited `@hamdrew` sole-maintainer ruleset bypass.
 2. Create the Telegram bot, add it as a channel administrator, obtain the channel ID, and initiate a private chat with the bot to obtain the alert-recipient ID.
 3. Create the Secrets Manager secret and configure the SNS topic subscription/email endpoint; confirm the email subscription.
 4. Deploy the SAM application to dev and, when ready, staging through the documented audited workstation bootstrap path; do not deploy to prod from a workstation.

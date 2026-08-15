@@ -276,19 +276,23 @@ The deployment SHALL provide a protected Lambda invocation path for an operator 
 
 ### Requirement: Govern the public source repository
 
-The service source SHALL be hosted in a public GitHub repository with an explicit open-source license, project documentation, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CODEOWNERS`, issue templates, and pull-request templates. The public remote and baseline pull-request validation SHALL be established before continuing MVP implementation. After the documented initial repository-bootstrap push, all application code, infrastructure, dependency manifests and lockfiles, workflow definitions, and repository-policy changes SHALL merge through a pull request that satisfies required status checks and applicable `CODEOWNERS` review. The default branch SHALL prohibit direct pushes and unreviewed workflow-file changes.
+The service source SHALL be hosted in a public GitHub repository with an explicit open-source license, project documentation, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CODEOWNERS`, issue templates, and pull-request templates. The public remote and baseline pull-request validation SHALL be established before continuing MVP implementation. Squash SHALL be the repository's only enabled pull-request merge method, and the active default-branch ruleset SHALL permit only squash merges. After the documented initial repository-bootstrap push, application code, infrastructure, dependency manifests and lockfiles, workflow definitions, and repository-policy changes from all contributors other than `@hamdrew` SHALL merge through a squash pull request that satisfies required status checks and applicable `CODEOWNERS` review. The active default-branch ruleset SHALL prohibit direct pushes and unreviewed workflow-file changes for all other contributors, while granting only sole maintainer `@hamdrew` an audited always-bypass for self-approval, self-merge, and occasional direct default-branch pushes.
 
 #### Scenario: A change is proposed
 - **WHEN** a contributor submits a pull request to the default branch
-- **THEN** the repository requires the configured checks and an authorized review before the change can merge
+- **THEN** the repository requires the configured checks and an authorized review before the change can merge by squash only
 
 #### Scenario: A workflow or deployment policy changes
 - **WHEN** a pull request changes GitHub Actions, deployment configuration, IAM/OIDC trust, secrets configuration, or release policy
 - **THEN** the repository applies the stricter ownership and review requirements for protected delivery controls
 
 #### Scenario: A direct change is attempted after bootstrap
-- **WHEN** a contributor attempts to push application, infrastructure, dependency, workflow, or repository-policy changes directly to the default branch after the repository bootstrap
-- **THEN** branch protection rejects the push and requires the configured pull-request checks and applicable ownership review
+- **WHEN** a contributor other than `@hamdrew` attempts to push application, infrastructure, dependency, workflow, or repository-policy changes directly to the default branch after the repository bootstrap
+- **THEN** the active ruleset rejects the push and requires the configured pull-request checks and applicable ownership review
+
+#### Scenario: The sole maintainer needs an exceptional change path
+- **WHEN** `@hamdrew` self-approves or self-merges a pull request, or occasionally pushes directly to the default branch
+- **THEN** the sole-maintainer ruleset bypass permits the action and GitHub records it as a bypass, while no other actor has bypass permission
 
 ### Requirement: Validate changes through GitHub Actions
 
@@ -338,7 +342,7 @@ The repository SHALL configure Dependabot for the application dependency manifes
 
 #### Scenario: A security update is available
 - **WHEN** Dependabot identifies a security update
-- **THEN** the repository creates or surfaces an update through the configured security workflow without bypassing protected-branch checks or production approval
+- **THEN** the repository creates or surfaces an update through the configured security workflow without granting Dependabot a protected-branch bypass or bypassing production approval
 
 ### Requirement: Produce traceable, integrity-protected releases
 
