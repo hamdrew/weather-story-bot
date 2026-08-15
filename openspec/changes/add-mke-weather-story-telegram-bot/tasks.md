@@ -9,8 +9,8 @@
 - [x] 1.7 Verify the default-branch ruleset, CODEOWNERS coverage, baseline required checks, workflow-file review requirements, and public issue/PR template behavior; confirm direct changes to the default branch are rejected after bootstrap for every contributor except the documented `@hamdrew` sole-maintainer bypass.
 - [x] 1.8 Enable and configure Dependabot alerts/security updates and update pull requests for Python/uv manifests, lockfiles, GitHub Actions, and supported package ecosystems; group only approved low-risk updates and preserve `uv sync --locked` validation.
 - [x] 1.9 Enable secret scanning/push protection, CodeQL or equivalent code scanning, dependency review, license checks, and documented vulnerability-reporting/credential-rotation procedures; verify public issue/discussion templates prohibit secrets and sensitive operational logs.
-- [ ] 1.10 Test CodeQL/dependency/license/secret scanning, push protection, redaction, vulnerability-reporting guidance, and rejection of credentials or sensitive identifiers in logs, artifacts, comments, and release assets.
-- [ ] 1.11 Test pull-request workflows on application, infrastructure, dependency, workflow, and documentation changes, including fork behavior, least-privilege permissions, pinned Actions, concurrency, and the applicable required validation, Infracost, SAM, and security checks.
+- [x] 1.10 Test the currently configured CodeQL, dependency/license review, secret-scanning/push-protection, redaction, and vulnerability-reporting controls, including public-template guidance that excludes credentials and sensitive operational identifiers.
+- [x] 1.11 Test baseline pull-request workflows on application, dependency, workflow, and documentation changes, including fork behavior, least-privilege permissions, pinned Actions, concurrency, and the currently applicable validation and security checks.
 
 ## 2. Story ingestion and durable history
 
@@ -71,6 +71,8 @@
 - [ ] 7.2 Extend GitHub Actions with separate Infracost/security-evidence, deployment, and release-publication workflows. Run formatting, static checks, unit/integration tests, SAM validation/build, dependency scans, SBOM generation, and artifact retention with least-privilege permissions; pin every GitHub Action to the full commit hash of its latest release with an inline release-tag comment, define safe concurrency/cancellation rules, restrict workflow token permissions, redact secrets from logs/artifacts/comments, and add workflow-policy tests for changed-file coverage and fork behavior.
 - [ ] 7.3 Implement the release workflow with protected semantic-version tags, generated release notes/changelog entries, signed tags and/or verifiable build provenance, packaged Lambda artifacts, SBOMs, scan results, Infracost results, source/lock/template digests, and CloudFormation change-set/deployment traceability.
 - [ ] 7.4 Document release promotion, rollback, compromised-workflow response, secret rotation, artifact verification, and the distinction between selecting a prior artifact and reversing external Telegram effects.
+- [ ] 7.5 Test full security and release surfaces, including CodeQL/dependency/license/secret scanning, push protection, redaction, vulnerability-reporting guidance, and rejection of credentials or sensitive identifiers in workflow logs, artifacts, comments, and release assets.
+- [ ] 7.6 Test extended pull-request workflows on application, infrastructure, dependency, workflow, and documentation changes, including fork behavior, least-privilege permissions, pinned Actions, concurrency, and the applicable required validation, Infracost, SAM, and security checks.
 
 ## 8. GitHub deployment and release verification
 
