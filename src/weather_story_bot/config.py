@@ -19,6 +19,7 @@ TelegramMode = Literal["mock", "live"]
 OFFICE_ID_PATTERN = re.compile(r"^[A-Z]{3}$")
 MOCK_IDENTIFIER_PREFIX = "mock:"
 DEFAULT_NWS_IMAGE_HOST_ALLOWLIST = frozenset({"weather.gov", "*.weather.gov"})
+TIMEZONE_FINDER = TimezoneFinder()
 
 
 class ConfigurationError(ValueError):
@@ -196,7 +197,7 @@ class EnvironmentConfig(BaseModel):
 
 def derive_timezone(coordinates: OfficeCoordinates) -> str:
     """Derive a validated IANA timezone from NWS-geocoded office coordinates."""
-    timezone = TimezoneFinder().timezone_at(lat=coordinates.latitude, lng=coordinates.longitude)
+    timezone = TIMEZONE_FINDER.timezone_at(lat=coordinates.latitude, lng=coordinates.longitude)
     if timezone is None:
         raise ConfigurationError("no IANA timezone found for office coordinates")
     try:
