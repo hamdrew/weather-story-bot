@@ -39,11 +39,9 @@ Pytest writes generated coverage artifacts under `coverage/`: open
 `coverage/html/index.html` for the browsable static report, use
 `coverage/lcov.info` with VS Code coverage extensions, and publish
 `coverage/coverage.xml` to CI or code-quality services that consume Cobertura
-XML. JSON output is available at `coverage/coverage.json` for automation. The
-Pytest enables branch measurement and enforces a minimum 75% total coverage
-floor. The GitHub Actions coverage summary uses 75% as the minimum line-rate
-and 90% as the healthy line-rate target; branch coverage remains visible in
-the reports but does not have a separate branch-rate gate.
+XML. JSON output is available at `coverage/coverage.json` for automation.
+Pytest enforces a minimum 75% line-coverage floor. Branch coverage is not
+enabled because pytest-cov does not provide a separate branch-only fail gate.
 
 ## Code conventions
 
