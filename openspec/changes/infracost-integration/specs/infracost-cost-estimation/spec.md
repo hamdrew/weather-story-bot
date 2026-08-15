@@ -102,3 +102,17 @@ The cost workflow MUST use least-privilege credentials, MUST redact tokens and s
 
 - **WHEN** a provider price is unavailable, a resource is unsupported, or usage assumptions are required
 - **THEN** the workflow reports the limitation and assumption explicitly and applies the configured fail-open or fail-closed policy, never silently treating the resource as free
+
+### Requirement: Gate every AWS application-resource deployment
+
+Before any mechanism creates, updates, or deletes an AWS application resource, it MUST verify a current cost-policy result for the exact deployable infrastructure revision and target environment. The result MUST be `pass` or a documented authorized, unexpired override that preserves the underlying result. Missing, stale, malformed, failed, unauthorized-overridden, or revision/environment-mismatched evidence MUST block the deployment before an AWS application mutation is attempted. This requirement applies to the first AWS application-resource deployment, workstation bootstrap, CI verification stacks, and ordinary deployment/release workflows; local template authoring, validation, and non-mutating estimation remain permitted before the gate is established.
+
+#### Scenario: First AWS application resource is requested
+
+- **WHEN** a deployment mechanism would create the first AWS application resource for an environment
+- **THEN** it verifies the required exact-revision/environment cost-policy result and performs no AWS application mutation unless that result passes or has a documented authorized override
+
+#### Scenario: Deployment evidence is absent or mismatched
+
+- **WHEN** a deployment mechanism cannot obtain a current successful or authorized-overridden cost-policy result for its exact infrastructure revision and target environment
+- **THEN** it fails before obtaining or using an AWS apply path and reports bounded actionable diagnostics

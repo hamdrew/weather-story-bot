@@ -13,6 +13,7 @@ Infracost supports CloudFormation YAML/JSON and the AWS SAM transform, making th
 - Keep policy thresholds, environment assumptions, and baseline updates explicit and reviewable.
 - Produce bounded, secret-free evidence suitable for release/change-set review.
 - Handle unsupported resources and usage-dependent assumptions visibly.
+- Establish and require the cost gate before any AWS application resource is created, while allowing local template authoring and non-mutating estimation beforehand.
 
 **Non-Goals:**
 
@@ -57,7 +58,7 @@ The workflow will use the minimum GitHub token permission needed to update its o
 
 ### Treat estimation as a pre-deployment gate
 
-The cost check becomes a required status for infrastructure pull requests and a prerequisite to the existing change-set review path. It does not itself deploy or mutate the AWS account. Prod still requires the existing human approval, and a passing estimate does not authorize scheduler enablement.
+The cost check becomes a required status for infrastructure pull requests and a prerequisite to every deployment entry point and the existing change-set review path. Before an AWS application resource can be created, updated, or deleted, the deployment mechanism MUST verify a current successful or explicitly approved-overridden cost-policy result for the exact template revision and target environment; missing, stale, malformed, or mismatched evidence fails closed. This includes the first dev resource, documented workstation bootstrap, and any CI verification stack. The check does not itself deploy or mutate the AWS account. Prod still requires the existing human approval, and a passing estimate does not authorize scheduler enablement.
 
 ## Risks / Trade-offs
 
@@ -70,11 +71,11 @@ The cost check becomes a required status for infrastructure pull requests and a 
 
 ## Migration Plan
 
-1. Add the version-pinned workflow, environment inputs, policy configuration, evaluator, and test fixtures in a non-blocking observation mode.
-2. Generate initial baselines for all supported environments from the reviewed infrastructure revision and verify estimates against the AWS Budget context.
+1. Add the version-pinned workflow, environment inputs, policy configuration, evaluator, and test fixtures; observation runs use local/rendered templates and other non-mutating inputs only.
+2. Generate initial baselines for all supported environments from the reviewed infrastructure revision and verify estimates against the AWS Budget context without deploying AWS application resources.
 3. Enable PR comments and artifact retention; exercise over-limit, missing-baseline, unsupported-resource, and secret-redaction cases.
-4. Make the cost check required for infrastructure pull requests after the results are accepted by the service owner.
-5. Add the cost check to the pre-deployment/release evidence path while retaining CloudFormation change-set and production-approval gates.
+4. Make the cost check required for infrastructure pull requests and wire the deployment entry points to fail closed on absent, stale, mismatched, or unsuccessful evidence.
+5. Verify that the first AWS application-resource deployment, and every later deployment, is preceded by the required successful or reviewed-overridden result while retaining CloudFormation change-set and production-approval gates.
 
 Rollback is configuration-only: disable the required status or workflow gate while preserving the workflow and artifacts for diagnosis. Removing the integration does not affect deployed AWS resources or the account budget.
 
