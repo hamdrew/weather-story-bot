@@ -292,7 +292,7 @@ The service source SHALL be hosted in a public GitHub repository with an explici
 
 ### Requirement: Validate changes through GitHub Actions
 
-The repository SHALL provide GitHub Actions workflows that run formatting, static analysis, unit tests, integration tests, SAM/template validation, reproducible packaging checks, dependency/security/license scans, and infrastructure cost checks as applicable. Deployment workflows SHALL use the reviewed artifact and SHALL publish bounded test, scan, SBOM, cost, and change-set evidence. Workflow permissions SHALL be least-privilege, third-party Actions SHALL be pinned to reviewed immutable references where practical, and concurrent superseded runs SHALL be cancelled when safe.
+The repository SHALL provide GitHub Actions workflows that run formatting, static analysis, unit tests, integration tests, SAM/template validation, reproducible packaging checks, dependency/security/license scans, and infrastructure cost checks as applicable. The baseline Python validation workflow SHALL enforce a minimum 75% line-coverage floor through pytest-cov, generate the committed test suite's Cobertura XML and JSON reports, and retain those artifacts for tooling consumption without a pull-request coverage summary. A separate branch-only fail threshold is not required because pytest-cov does not provide one. Deployment workflows SHALL use the reviewed artifact and SHALL publish bounded test, scan, SBOM, cost, and change-set evidence. Workflow permissions SHALL be least-privilege. Every GitHub Action reference SHALL use the full commit hash corresponding to its latest released version and SHALL include an inline comment with that release tag; floating tags, branches, and unannotated commit references are prohibited. Concurrent superseded runs SHALL be cancelled when safe.
 
 #### Scenario: A pull request is opened
 - **WHEN** a pull request changes application, infrastructure, dependency, or workflow files
@@ -301,6 +301,10 @@ The repository SHALL provide GitHub Actions workflows that run formatting, stati
 #### Scenario: A validation check fails
 - **WHEN** tests, SAM validation, packaging, security/license scans, or required cost checks fail
 - **THEN** the pull request cannot satisfy the protected-branch merge gate until the failure is resolved or an authorized exception is recorded
+
+#### Scenario: Line coverage falls below the baseline
+- **WHEN** pytest-cov reports line coverage below 75%
+- **THEN** the validation workflow fails and the pull request cannot satisfy the protected-branch merge gate
 
 ### Requirement: Deploy through protected GitHub environments
 

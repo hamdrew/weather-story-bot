@@ -40,6 +40,8 @@ Pytest writes generated coverage artifacts under `coverage/`: open
 `coverage/lcov.info` with VS Code coverage extensions, and publish
 `coverage/coverage.xml` to CI or code-quality services that consume Cobertura
 XML. JSON output is available at `coverage/coverage.json` for automation.
+Pytest enforces a minimum 75% line-coverage floor. Branch coverage is not
+enabled because pytest-cov does not provide a separate branch-only fail gate.
 
 ## Code conventions
 
@@ -80,6 +82,27 @@ openspec validate <change-name> --type change --strict
 - Do not silently weaken specification requirements. If implementation reveals
   an ambiguity or a required design change, update the OpenSpec artifacts or
   request direction before proceeding.
+
+## Git workflow
+
+- Make code changes on a feature branch; do not commit directly to the default
+  branch.
+- Name branches according to [Conventional Branch](https://conventionalbranch.org/),
+  using a purpose prefix such as `feature/`, `fix/`, `chore/`, or `codex/` and a
+  lowercase, hyphen-separated description.
+- Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
+  for commit messages.
+- Submit completed changes as a pull request for review. Do not merge directly
+  unless explicitly authorized.
+- Pin every GitHub Action reference to the full commit hash for a released
+  action version, followed by an inline comment naming that release tag (for
+  example, `# v1.0.0`). Look up the latest release on GitHub before adding or
+  updating an action reference.
+- For `/review` commands, use the detailed checklist in
+  [`docs/code-revew.md`](docs/code-revew.md) after reading the active OpenSpec
+  artifacts. Report only actionable findings, ordered by severity, with
+  concrete impact and file/line references; if there are no findings, state
+  that explicitly and list residual risks or untested assumptions.
 
 ## Tooling maintenance
 
