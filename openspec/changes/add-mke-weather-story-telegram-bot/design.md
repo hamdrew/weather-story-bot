@@ -42,7 +42,7 @@ Terraform is not used for this change; no Terraform state, backend, provider, or
 
 ### Public GitHub repository governance
 
-Keep application source, SAM templates, dependency manifests/lockfiles, workflow definitions, policy configuration, tests, runbooks, and release metadata in one public repository. Add an explicit license, README/project metadata, contribution and security policies, code ownership, issue/PR templates, and a code of conduct. Protect the default branch with pull requests, required checks, authorized review, and stricter ownership for workflow, IAM, OIDC, secret, and release-policy changes. Enable available Dependabot alerts/security updates, secret scanning/push protection, code scanning, and dependency review.
+Keep application source, SAM templates, dependency manifests/lockfiles, workflow definitions, policy configuration, tests, runbooks, and release metadata in one public repository. Establish the public remote and a baseline pull-request validation workflow before continuing MVP implementation. Add an explicit license, README/project metadata, contribution and security policies, code ownership, issue/PR templates, and a code of conduct. After the one documented initial bootstrap push, protect the default branch with pull requests, required checks, authorized review, and stricter ownership for workflow, IAM, OIDC, secret, and release-policy changes; all source and policy changes merge through a pull request. Enable available Dependabot alerts/security updates, secret scanning/push protection, code scanning, and dependency review.
 
 Alternative considered: keep deployment workflows in a private operations repository. Rejected for this service because public source users need reproducible contribution and release context, and splitting workflow policy from the infrastructure source increases traceability and review friction.
 
@@ -80,7 +80,7 @@ Create one AWS Budget for the application across the account's tagged resources 
 
 Dev uses an injected mock for every Telegram message operation, including private alerts; it may use its own credential only for a protected `getMe` check. Staging sends real photo messages and private alerts only through its distinct bot to its dedicated test destinations. Prod has distinct credentials and destinations and is the only environment allowed to publish to the production channel.
 
-Every staging/prod update begins with a CloudFormation change set. Dev/staging execution may be automated after review checks; prod execution requires a human approval after review. Run drift detection at least monthly and before a production change set; unresolved drift blocks promotion. Use normal CloudFormation create/update rollback behavior, with retain-on-delete and retain-on-replacement protection for DynamoDB and S3. Create or update Scheduler schedules disabled. After deployment, authorize enablement only after the environment's smoke gate: mock delivery in dev, real dedicated-channel photo delivery in staging, and non-publishing configuration/authentication verification in prod.
+Every staging/prod update begins with a CloudFormation change set. Before GitHub OIDC deployment is available, a documented, audited bootstrap permits workstation deployments only to dev and staging: dev remains mock-only and staging is limited to its dedicated-channel smoke test. Workstation deployment to prod is prohibited. After GitHub OIDC deployment is available, dev/staging execution may be automated after review checks, and prod execution requires the protected GitHub environment's human approval after review. Run drift detection at least monthly and before a production change set; unresolved drift blocks promotion. Use normal CloudFormation create/update rollback behavior, with retain-on-delete and retain-on-replacement protection for DynamoDB and S3. Create or update Scheduler schedules disabled. After deployment, authorize enablement only after the environment's smoke gate: mock delivery in dev, real dedicated-channel photo delivery in staging, and non-publishing configuration/authentication verification in prod.
 
 Infrastructure rollback is not an external-message rollback. If a function ran before a failed deployment or version rollback, disable schedules, consult durable attempt history, and use the existing reconciliation or history-recovery procedure as applicable; never assert that Telegram content was undone. Re-enable only after the chosen roll-forward, function rollback, or recovery action has been validated.
 
@@ -203,9 +203,11 @@ Sensitive operational identifiers are omitted, not hashed: a hash would support 
 
 ## Migration Plan
 
-1. Create the Telegram bot, add it as a channel administrator, obtain the channel ID, and initiate a private chat with the bot to obtain the alert-recipient ID.
-2. Create the Secrets Manager secret and configure the SNS topic subscription/email endpoint; confirm the email subscription.
-3. Deploy the SAM application to provision the Lambda functions, 15-minute scheduler, DynamoDB history, encrypted S3 image bucket, logging, alarms, SNS topic, and IAM roles.
-4. Invoke the publisher with a controlled MKX story/API fixture and verify one retained image, one channel publication, one history record, and no duplicate after a second run.
-5. Verify a long story is truncated with `…`; force a private Telegram alert failure and verify an SNS/email notification.
-6. Verify the reconciliation Lambda from the AWS console or CLI for both `confirmed_received` and `confirmed_not_received`; then roll back by disabling the EventBridge Scheduler if needed. Retain DynamoDB and S3 history so prior publication decisions and images remain available before any later re-enable.
+1. Establish the public GitHub remote, baseline pull-request validation, and default-branch protection; after the documented bootstrap push, make pull requests the required path for source and policy changes.
+2. Create the Telegram bot, add it as a channel administrator, obtain the channel ID, and initiate a private chat with the bot to obtain the alert-recipient ID.
+3. Create the Secrets Manager secret and configure the SNS topic subscription/email endpoint; confirm the email subscription.
+4. Deploy the SAM application to dev and, when ready, staging through the documented audited workstation bootstrap path; do not deploy to prod from a workstation.
+5. Invoke the publisher with a controlled MKX story/API fixture and verify one retained image, one channel publication, one history record, and no duplicate after a second run.
+6. Verify a long story is truncated with `…`; force a private Telegram alert failure and verify an SNS/email notification.
+7. Configure GitHub OIDC and protected environments, then deploy prod only through the reviewed, human-approved GitHub workflow.
+8. Verify the reconciliation Lambda from the AWS console or CLI for both `confirmed_received` and `confirmed_not_received`; then roll back by disabling the EventBridge Scheduler if needed. Retain DynamoDB and S3 history so prior publication decisions and images remain available before any later re-enable.

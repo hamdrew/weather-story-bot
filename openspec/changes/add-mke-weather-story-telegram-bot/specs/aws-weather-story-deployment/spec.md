@@ -266,7 +266,7 @@ The deployment SHALL provide a protected Lambda invocation path for an operator 
 
 ### Requirement: Govern the public source repository
 
-The service source SHALL be hosted in a public GitHub repository with an explicit open-source license, project documentation, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CODEOWNERS`, issue templates, and pull-request templates. The default branch SHALL require pull requests, required status checks, and authorized review; direct pushes and unreviewed workflow-file changes SHALL be prohibited.
+The service source SHALL be hosted in a public GitHub repository with an explicit open-source license, project documentation, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CODEOWNERS`, issue templates, and pull-request templates. The public remote and baseline pull-request validation SHALL be established before continuing MVP implementation. After the documented initial repository-bootstrap push, all application code, infrastructure, dependency manifests and lockfiles, workflow definitions, and repository-policy changes SHALL merge through a pull request that satisfies required status checks and applicable `CODEOWNERS` review. The default branch SHALL prohibit direct pushes and unreviewed workflow-file changes.
 
 #### Scenario: A change is proposed
 - **WHEN** a contributor submits a pull request to the default branch
@@ -275,6 +275,10 @@ The service source SHALL be hosted in a public GitHub repository with an explici
 #### Scenario: A workflow or deployment policy changes
 - **WHEN** a pull request changes GitHub Actions, deployment configuration, IAM/OIDC trust, secrets configuration, or release policy
 - **THEN** the repository applies the stricter ownership and review requirements for protected delivery controls
+
+#### Scenario: A direct change is attempted after bootstrap
+- **WHEN** a contributor attempts to push application, infrastructure, dependency, workflow, or repository-policy changes directly to the default branch after the repository bootstrap
+- **THEN** branch protection rejects the push and requires the configured pull-request checks and applicable ownership review
 
 ### Requirement: Validate changes through GitHub Actions
 
@@ -292,6 +296,8 @@ The repository SHALL provide GitHub Actions workflows that run formatting, stati
 
 The deployment pipeline SHALL authenticate to AWS using GitHub OIDC with a trust policy restricted to this repository, approved workflow/ref or environment claims, and the authorized AWS account. It SHALL use separate protected GitHub environments for `dev`, `staging`, and `prod`; environment secrets and variables SHALL be isolated; production SHALL require an authorized human approval; and deployment jobs SHALL use the environment-specific CloudFormation change-set and smoke-gate procedure. Long-lived AWS access keys SHALL NOT be stored as repository or environment secrets.
 
+Before the GitHub OIDC deployment workflow is available, documented and audited workstation deployment SHALL be permitted only for dev and staging bootstrap: dev SHALL remain mock-only and staging SHALL be limited to its dedicated test-channel smoke procedure. Workstation deployment to prod SHALL NOT be permitted. Once the OIDC workflow is available, every production deployment SHALL originate from the reviewed workflow and protected production environment.
+
 #### Scenario: A staging deployment is requested
 - **WHEN** the reviewed deployment workflow targets `staging`
 - **THEN** it obtains short-lived AWS credentials through the staging OIDC trust, creates/reviews the environment-scoped change set, and runs the staging smoke gate before schedule enablement
@@ -303,6 +309,10 @@ The deployment pipeline SHALL authenticate to AWS using GitHub OIDC with a trust
 #### Scenario: An untrusted workflow requests AWS access
 - **WHEN** a fork, unapproved branch, or unrelated workflow attempts to assume the deployment role
 - **THEN** the OIDC trust policy denies the request
+
+#### Scenario: A bootstrap operator attempts a production deployment
+- **WHEN** an operator attempts to deploy to prod from a workstation before or after GitHub OIDC is configured
+- **THEN** the documented deployment procedure rejects that path and requires the reviewed GitHub workflow and protected production-environment approval
 
 ### Requirement: Automate dependency and action maintenance
 
