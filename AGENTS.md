@@ -94,6 +94,8 @@ openspec validate <change-name> --type change --strict
   for commit messages.
 - Submit completed changes as a pull request for review. Do not merge directly
   unless explicitly authorized.
+- Create pull requests ready for review by default; use Draft mode only when
+  the user specifically requests a draft pull request.
 - Pin every GitHub Action reference to the full commit hash for a released
   action version, followed by an inline comment naming that release tag (for
   example, `# v1.0.0`). Look up the latest release on GitHub before adding or
