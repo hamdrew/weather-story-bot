@@ -1,0 +1,13 @@
+{
+  "coverage-gutters.coverageFileNames": [
+    "coverage/lcov.info",
+    "coverage/coverage.xml"
+  ],
+  "coverage-gutters.coverageReportFileName": "coverage/lcov.info",
+  "makefile.configureOnOpen": false,
+  "python.testing.pytestArgs": [
+    "tests"
+  ],
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestEnabled": true
+}

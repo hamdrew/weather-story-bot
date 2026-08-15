@@ -1,0 +1,186 @@
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from weather_story_bot.config import (
+    ConfigurationError,
+    EnvironmentConfig,
+    OfficeCoordinates,
+    OfficeRegistry,
+    OfficeRegistryRecord,
+    derive_timezone,
+    load_environment_config,
+    load_seed_set,
+    validate_environment_isolation,
+    validate_telegram_secret,
+    weather_stories_url,
+)
+
+ROOT = Path(__file__).parent.parent
+
+
+def test_versioned_seed_set_contains_every_current_wfo_and_mkx() -> None:
+    seeds = load_seed_set(ROOT / "data/nws_office_ids.v1.json")
+
+    assert len(seeds.office_ids) == 124
+    assert len(set(seeds.office_ids)) == 124
+    assert "MKX" in seeds.office_ids
+    assert weather_stories_url("MKX") == "https://api.weather.gov/offices/MKX/weatherstories"
+
+
+def test_environment_configuration_is_isolated_and_mkx_only() -> None:
+    configs = [
+        load_environment_config(ROOT / "config/environments" / f"{environment}.json")
+        for environment in ("dev", "staging", "prod")
+    ]
+
+    validate_environment_isolation(configs)
+    assert all(config.active_office_ids == ("MKX",) for config in configs)
+    assert all(
+        set(config.nws_image_host_allowlist) == {"weather.gov", "*.weather.gov"}
+        for config in configs
+    )
+    assert configs[0].telegram_mode == "mock"
+
+
+def test_active_registry_channels_must_be_present_and_unique() -> None:
+    base = {
+        "weather_stories_url": "https://api.weather.gov/offices/MKX/weatherstories",
+        "display_name": "Milwaukee/Sullivan, WI",
+        "address": {
+            "street_address": "N3533 Hardscrabble Road",
+            "locality": "Dousman",
+            "region": "WI",
+            "postal_code": "53118",
+        },
+        "coordinates": {"latitude": 43.04, "longitude": -88.46},
+        "timezone": "America/Chicago",
+        "active": True,
+    }
+    with pytest.raises(ValidationError, match="requires a telegram_channel_id"):
+        OfficeRegistryRecord.model_validate(base | {"office_id": "MKX"})
+
+    for invalid_url in (
+        "https://evil.example/story",
+        "https://api.weather.gov/offices/MKX/weatherstories?unexpected=value",
+        "https://user:password@api.weather.gov/offices/MKX/weatherstories",
+        "https://api.weather.gov/offices/GRB/weatherstories",
+    ):
+        with pytest.raises(ValidationError, match="canonical NWS"):
+            OfficeRegistryRecord.model_validate(
+                base | {"office_id": "MKX", "weather_stories_url": invalid_url}
+            )
+
+    with pytest.raises(ValidationError, match="derived from the geocoded"):
+        OfficeRegistryRecord.model_validate(
+            base
+            | {
+                "office_id": "MKX",
+                "telegram_channel_id": "-1001",
+                "timezone": "America/New_York",
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        OfficeRegistryRecord.model_validate(
+            base
+            | {
+                "office_id": "MKX",
+                "telegram_channel_id": "-1001",
+                "coordinates": {"latitude": 91, "longitude": -88.46},
+            }
+        )
+
+    first = OfficeRegistryRecord.model_validate(
+        base | {"office_id": "MKX", "telegram_channel_id": "-1001"}
+    )
+    second = OfficeRegistryRecord.model_validate(
+        base
+        | {
+            "office_id": "GRB",
+            "weather_stories_url": "https://api.weather.gov/offices/GRB/weatherstories",
+            "telegram_channel_id": "-1001",
+        }
+    )
+    with pytest.raises(ValidationError, match="must be unique"):
+        OfficeRegistry(schema_version=1, offices=(first, second))
+
+
+def test_environment_rejects_invalid_telegram_modes_for_every_destination() -> None:
+    with pytest.raises(ValidationError, match="only MKX may be active"):
+        EnvironmentConfig(
+            schema_version=1,
+            environment="staging",
+            telegram_mode="live",
+            nws_image_host_allowlist=("weather.gov", "*.weather.gov"),
+            active_office_ids=("GRB",),
+            office_channels={"GRB": "-1001"},
+            alert_recipient="-1002",
+        )
+
+    with pytest.raises(ValidationError, match="dev must use mock"):
+        EnvironmentConfig(
+            schema_version=1,
+            environment="dev",
+            telegram_mode="live",
+            nws_image_host_allowlist=("weather.gov", "*.weather.gov"),
+            active_office_ids=("MKX",),
+            office_channels={"MKX": "-1001"},
+            alert_recipient="-1002",
+        )
+
+    with pytest.raises(ValidationError, match="dev must use mock"):
+        EnvironmentConfig(
+            schema_version=1,
+            environment="dev",
+            telegram_mode="mock",
+            nws_image_host_allowlist=("weather.gov", "*.weather.gov"),
+            active_office_ids=("MKX",),
+            office_channels={"MKX": "mock:weather-story-mkx"},
+            alert_recipient="-1002",
+        )
+
+    with pytest.raises(ValidationError, match="staging and prod must use live"):
+        EnvironmentConfig(
+            schema_version=1,
+            environment="staging",
+            telegram_mode="live",
+            nws_image_host_allowlist=("weather.gov", "*.weather.gov"),
+            active_office_ids=("MKX",),
+            office_channels={"MKX": "-1001"},
+            alert_recipient="mock:weather-story-operator",
+        )
+
+    staging = EnvironmentConfig(
+        schema_version=1,
+        environment="staging",
+        telegram_mode="live",
+        nws_image_host_allowlist=("weather.gov", "*.weather.gov"),
+        active_office_ids=("MKX",),
+        office_channels={"MKX": "-1001"},
+        alert_recipient="-1002",
+    )
+    prod = staging.model_copy(update={"environment": "prod"})
+    dev = load_environment_config(ROOT / "config/environments/dev.json")
+    with pytest.raises(ConfigurationError, match="must be distinct"):
+        validate_environment_isolation((dev, staging, prod))
+
+    with pytest.raises(ConfigurationError, match="exactly once"):
+        validate_environment_isolation((dev, staging, staging, prod))
+
+
+def test_environment_channel_destinations_are_immutable_after_validation() -> None:
+    config = load_environment_config(ROOT / "config/environments/dev.json")
+
+    with pytest.raises(TypeError):
+        config.office_channels["MKX"] = "-1000000000001"  # type: ignore[index]
+
+
+def test_timezone_and_versioned_secret_validation() -> None:
+    coordinates = OfficeCoordinates(latitude=43.04, longitude=-88.46)
+    assert derive_timezone(coordinates) == "America/Chicago"
+    secret = '{"schema_version": 1, "telegram_bot_token": "test-token"}'
+    assert validate_telegram_secret(secret) == "test-token"
+    with pytest.raises(ConfigurationError):
+        validate_telegram_secret('{"schema_version": 2, "telegram_bot_token": "test-token"}')

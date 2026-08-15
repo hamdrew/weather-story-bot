@@ -28,11 +28,12 @@ dev = [
 packages = ["src/weather_story_bot"]
 
 [tool.pytest.ini_options]
-addopts = "--strict-config --strict-markers --cov=weather_story_bot --cov-report=term-missing"
+addopts = "--strict-config --strict-markers --cov=weather_story_bot --cov-report=term-missing --cov-report=html:coverage/html --cov-report=xml:coverage/coverage.xml --cov-report=json:coverage/coverage.json --cov-report=lcov:coverage/lcov.info"
 testpaths = ["tests"]
 
 [tool.coverage.run]
 branch = true
+relative_files = true
 source = ["weather_story_bot"]
 
 [tool.mypy]

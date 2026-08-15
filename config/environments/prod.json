@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "environment": "prod",
+  "telegram_mode": "live",
+  "nws_image_host_allowlist": ["weather.gov", "*.weather.gov"],
+  "active_office_ids": ["MKX"],
+  "office_channels": {"MKX": "-1000000000002"},
+  "alert_recipient": "-1000000000012"
+}

@@ -12,14 +12,14 @@ The test plan SHALL maintain sanitized, versioned NWS collection fixtures captur
 - **THEN** the contract test fails with the affected fixture and the implementation does not silently claim complete retrieval
 
 ### Requirement: Maintain a seeded and validated office registry
-The system SHALL seed one registry entry for every NWS office from a versioned office-ID seed set and SHALL use `https://api.weather.gov/offices/{office_id}` and the referenced region resource to verify and enrich each entry. Each entry SHALL contain a unique `office_id`, absolute HTTPS `weather_stories_url`, `display_name`, postal address, IANA `timezone`, distinct `telegram_channel_id`, and `active` state, plus the NWS telephone, email, office-home URL, region name, and region-home URL when supplied. An inactive entry MAY have no Telegram channel identifier; an active entry SHALL have a non-empty, distinct Telegram channel identifier. The system SHALL poll and publish only active entries.
+The system SHALL seed one registry entry for every NWS office from a versioned office-ID seed set and SHALL use `https://api.weather.gov/offices/{office_id}` and the referenced region resource to verify and enrich each entry. Each entry SHALL contain a unique `office_id`, absolute HTTPS `weather_stories_url`, `display_name`, postal address, geocoded latitude and longitude, IANA `timezone` derived from those coordinates, distinct `telegram_channel_id`, and `active` state, plus the NWS telephone, email, office-home URL, region name, and region-home URL when supplied. An inactive entry MAY have no Telegram channel identifier; an active entry SHALL have a non-empty, distinct Telegram channel identifier. The system SHALL poll and publish only active entries.
 
 #### Scenario: An office is onboarded
 - **WHEN** the versioned office-ID seed set is loaded or refreshed
-- **THEN** the system retrieves `https://api.weather.gov/offices/{office_id}` for each entry to seed and verify the office ID, NWS display name, postal address, telephone, email, office-home URL, and region reference/details; derives the registry timezone from that address using a timezone lookup tool; and requires the resulting IANA timezone, absolute HTTPS Weather Stories URL, office-home URL, and Telegram channel before activating an office
+- **THEN** the system retrieves `https://api.weather.gov/offices/{office_id}` for each entry to seed and verify the office ID, NWS display name, postal address, telephone, email, office-home URL, and region reference/details; geocodes the postal address, persists the validated latitude and longitude, derives the registry timezone from those coordinates using a timezone lookup tool; and requires the resulting coordinates/IANA timezone, absolute HTTPS Weather Stories URL, office-home URL, and Telegram channel before activating an office
 
 #### Scenario: An office registry entry is invalid
-- **WHEN** an entry has a duplicate or missing office ID, a non-HTTPS or missing Weather Stories URL, a missing display name/timezone, an invalid IANA timezone, or a failed NWS office lookup
+- **WHEN** an entry has a duplicate or missing office ID, a non-HTTPS or missing Weather Stories URL, missing display name/geocoded coordinates/timezone, out-of-range coordinates, an invalid IANA timezone, or a failed NWS office lookup
 - **THEN** the system rejects the entry and does not poll or publish for that office
 
 #### Scenario: An active office lacks a channel

@@ -1,4 +1,4 @@
-.PHONY: check format lint test typecheck sync sync-production
+.PHONY: check format lint test coverage typecheck sync sync-production
 
 sync:
 	uv sync
@@ -18,5 +18,7 @@ typecheck:
 
 test:
 	uv run --locked pytest
+
+coverage: test
 
 check: lint typecheck test
