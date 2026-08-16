@@ -1,0 +1,16 @@
+{
+  "stories": [
+    {
+      "officeId": "MKX",
+      "startTime": "2026-08-15T12:00:00+00:00",
+      "endTime": "2026-08-15T18:00:00+00:00",
+      "updateTime": "2026-08-15T12:05:00+00:00",
+      "title": "Heat advisory",
+      "description": "Dangerous heat this afternoon.",
+      "altText": "Heat index map",
+      "priority": true,
+      "order": 1,
+      "download": "https://www.weather.gov/images/mkx/123e4567-e89b-12d3-a456-426614174000"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "@context": {
+    "@version": "1.1",
+    "@vocab": "https://schema.org/"
+  },
+  "@type": "GovernmentOrganization",
+  "@id": "https://api.weather.gov/offices/CRH",
+  "id": "CRH",
+  "name": "Central Region Headquarters",
+  "address": {
+    "@type": "PostalAddress",
+    "streetAddress": "7220 NW 101st Terrace",
+    "addressLocality": "Kansas City",
+    "addressRegion": "MO",
+    "postalCode": "64153"
+  },
+  "telephone": "",
+  "faxNumber": "",
+  "email": "w-crh.webmaster@noaa.gov",
+  "sameAs": "https://www.weather.gov/crh",
+  "nwsRegion": "cr",
+  "parentOrganization": "https://api.weather.gov/offices/NWS"
+}

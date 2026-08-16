@@ -4,19 +4,38 @@ Retrieve current Weather Stories from configured NWS offices and make their cont
 
 ## ADDED Requirements
 
-### Requirement: Maintain versioned source-contract fixtures
-The test plan SHALL maintain sanitized, versioned NWS collection fixtures captured from representative successful and error responses. Fixtures SHALL cover complete collections, empty collections, unsupported pagination, missing required fields, unknown fields, changed revisions, and story omission from a later successful collection. Contract tests SHALL validate that normalization, identity, revision detection, expiration/omission handling, quarantine, and run-result classification remain compatible with those fixtures. Fixtures SHALL contain no credentials or sensitive operational identifiers.
+### Requirement: Maintain an explicit versioned NWS source contract
+The test plan SHALL maintain a sanitized, versioned NWS source contract and fixtures for representative successful and error responses. The implementation SHALL represent each supported external response shape with a dedicated immutable Pydantic source model that uses the NWS JSON field aliases, rejects missing or invalid required fields, and ignores unknown fields for forward compatibility. The contract SHALL explicitly describe the flat JSON-LD shapes returned by `GET /offices/{office_id}` and its referenced `parentOrganization` regional-office resource, including the resource identifier, office/region name, postal address, telephone, email, `sameAs`, `nwsRegion`, and regional-office reference fields, as well as the Weather Story collection envelope and item fields. Collection fixtures SHALL cover complete collections, empty collections, unsupported pagination, missing required fields, unknown fields, changed revisions, and story omission from a later successful collection. Contract tests SHALL validate that source-model validation, office enrichment, collection normalization, identity, revision detection, expiration/omission handling, quarantine, and run-result classification remain compatible with the versioned contract. Fixtures SHALL contain no credentials or sensitive operational identifiers.
 
 #### Scenario: An NWS contract changes unexpectedly
 - **WHEN** a captured response no longer satisfies the supported envelope or item contract
 - **THEN** the contract test fails with the affected fixture and the implementation does not silently claim complete retrieval
 
+#### Scenario: The office response is flat JSON-LD
+- **WHEN** a captured office response contains top-level `id`, `name`, `address`, `sameAs`, `nwsRegion`, and `parentOrganization` fields without a `properties` wrapper
+- **THEN** the dedicated source model accepts those fields as the supported office shape and rejects assumptions that require `properties`, `region`, or `url`
+
+#### Scenario: The regional-office reference changes
+- **WHEN** the office response's `parentOrganization` reference or the regional-office response's supported fields no longer satisfy the versioned contract
+- **THEN** the enrichment contract test fails before registry records are produced and identifies the affected resource shape
+
+### Requirement: Provide opt-in live NWS contract tests
+The test plan SHALL provide read-only live contract tests for representative NWS office, regional-office, and Weather Story collection endpoints. Live tests SHALL be explicitly opt-in through a documented environment switch, use the identifying service `User-Agent`, bounded request timeouts, and no credentials or mutating operations, and SHALL remain excluded from the default unit/integration test and pull-request commands. The tests SHALL verify the currently supported flat JSON-LD office/region fields and the Weather Story collection envelope against the normalization contract.
+
+#### Scenario: A developer runs live NWS contract checks
+- **WHEN** the documented live-test environment switch is enabled
+- **THEN** the test suite makes bounded read-only requests for representative NWS office, regional-office, and Weather Story collection endpoints and reports any contract mismatch without publishing, downloading retained images, or requiring secrets
+
+#### Scenario: Live tests are not enabled
+- **WHEN** the live-test environment switch is absent or disabled
+- **THEN** live NWS tests are skipped and the default test and pull-request commands remain network-independent
+
 ### Requirement: Maintain a seeded and validated office registry
-The system SHALL seed one registry entry for every NWS office from a versioned office-ID seed set and SHALL use `https://api.weather.gov/offices/{office_id}` and the referenced region resource to verify and enrich each entry. Each entry SHALL contain a unique `office_id`, absolute HTTPS `weather_stories_url`, `display_name`, postal address, geocoded latitude and longitude, IANA `timezone` derived from those coordinates, distinct `telegram_channel_id`, and `active` state, plus the NWS telephone, email, office-home URL, region name, and region-home URL when supplied. An inactive entry MAY have no Telegram channel identifier; an active entry SHALL have a non-empty, distinct Telegram channel identifier. The system SHALL poll and publish only active entries.
+The system SHALL seed one registry entry for every NWS office from a versioned office-ID seed set and SHALL use `https://api.weather.gov/offices/{office_id}` and the referenced regional-office resource to verify and enrich each entry. Every enrichment request SHALL send the identifying NWS `User-Agent` and JSON-compatible content negotiation. Before following a source `parentOrganization` reference, the source model SHALL require an exact HTTPS `https://api.weather.gov/offices/{office_id}` resource URL with no user info, port, query, or fragment. Each entry SHALL contain a unique `office_id`, absolute HTTPS `weather_stories_url`, `display_name`, postal address, geocoded latitude and longitude, IANA `timezone` derived from those coordinates, distinct `telegram_channel_id`, and `active` state, plus the NWS telephone, email, office-home URL, region name, and region-home URL when supplied. An inactive entry MAY have no Telegram channel identifier; an active entry SHALL have a non-empty, distinct Telegram channel identifier. The system SHALL poll and publish only active entries.
 
 #### Scenario: An office is onboarded
 - **WHEN** the versioned office-ID seed set is loaded or refreshed
-- **THEN** the system retrieves `https://api.weather.gov/offices/{office_id}` for each entry to seed and verify the office ID, NWS display name, postal address, telephone, email, office-home URL, and region reference/details; geocodes the postal address, persists the validated latitude and longitude, derives the registry timezone from those coordinates using a timezone lookup tool; and requires the resulting coordinates/IANA timezone, absolute HTTPS Weather Stories URL, office-home URL, and Telegram channel before activating an office
+- **THEN** the system retrieves `https://api.weather.gov/offices/{office_id}` for each entry with the identifying NWS `User-Agent` to seed and verify the office ID, NWS display name, postal address, telephone, email, office-home URL, and regional-office reference/details; validates the referenced resource is an exact HTTPS NWS office URL before requesting it; geocodes the postal address, persists the validated latitude and longitude, derives the registry timezone from those coordinates using a timezone lookup tool; and requires the resulting coordinates/IANA timezone, absolute HTTPS Weather Stories URL, office-home URL, and Telegram channel before activating an office
 
 #### Scenario: An office registry entry is invalid
 - **WHEN** an entry has a duplicate or missing office ID, a non-HTTPS or missing Weather Stories URL, missing display name/geocoded coordinates/timezone, out-of-range coordinates, an invalid IANA timezone, or a failed NWS office lookup

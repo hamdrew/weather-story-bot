@@ -1,0 +1,23 @@
+{
+  "@context": {
+    "@version": "1.1",
+    "@vocab": "https://schema.org/"
+  },
+  "@type": "GovernmentOrganization",
+  "@id": "https://api.weather.gov/offices/MKX",
+  "id": "MKX",
+  "name": "Milwaukee/Sullivan, WI",
+  "address": {
+    "@type": "PostalAddress",
+    "streetAddress": "N3533 Hardscrabble Road",
+    "addressLocality": "Dousman",
+    "addressRegion": "WI",
+    "postalCode": "53118"
+  },
+  "telephone": "262-965-2074",
+  "faxNumber": "",
+  "email": "nws.milwaukee@noaa.gov",
+  "sameAs": "https://www.weather.gov/mkx",
+  "nwsRegion": "cr",
+  "parentOrganization": "https://api.weather.gov/offices/CRH"
+}
