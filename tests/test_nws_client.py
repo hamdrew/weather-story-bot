@@ -45,6 +45,22 @@ def test_collection_request_uses_identifying_headers_and_ten_second_timeout() ->
     assert NWS_REQUEST_TIMEOUT_SECONDS == 10
 
 
+@pytest.mark.parametrize("request_timeout_seconds", [0, -1])
+def test_constructor_rejects_non_positive_request_timeout(request_timeout_seconds: float) -> None:
+    with pytest.raises(ValueError, match="request_timeout_seconds must be positive"):
+        NWSCollectionClient(
+            client_for(lambda request: httpx.Response(200)),
+            request_timeout_seconds=request_timeout_seconds,
+        )
+
+
+def test_constructor_rejects_negative_shutdown_reserve() -> None:
+    with pytest.raises(ValueError, match="shutdown_reserve_seconds cannot be negative"):
+        NWSCollectionClient(
+            client_for(lambda request: httpx.Response(200)), shutdown_reserve_seconds=-1
+        )
+
+
 @pytest.mark.parametrize(
     ("status", "error_class", "error_code"),
     [
@@ -72,6 +88,28 @@ def test_non_rate_limited_4xx_fail_without_a_retry(
     assert caught.value.failure.error_class is error_class
     assert caught.value.failure.error_code == error_code
     assert caught.value.failure.retry_decision is RetryDecision.NOT_RETRYABLE
+    assert "untrusted" not in caught.value.failure.error_summary
+
+
+def test_unexpected_status_is_classified_as_a_transient_failure() -> None:
+    requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        return httpx.Response(302, text="untrusted upstream response body")
+
+    with pytest.raises(NWSCollectionRequestError) as caught:
+        NWSCollectionClient(client_for(handler), clock=lambda: 0).fetch(
+            URL, processing_deadline=100
+        )
+
+    assert requests == 2
+    assert caught.value.failure.error_class is NWSCollectionFailureClass.SERVER_ERROR
+    assert caught.value.failure.error_code == "nws_unexpected_status"
+    assert caught.value.failure.http_status == 302
+    assert caught.value.failure.retry_ordinal == 1
+    assert caught.value.failure.retry_decision is RetryDecision.RETRY_FAILED
     assert "untrusted" not in caught.value.failure.error_summary
 
 
