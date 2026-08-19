@@ -1,39 +1,39 @@
 ## Purpose
 
-Maintain a durable, queryable history of NWS Weather Stories and their publication outcomes for deduplication, audit, and analytics.
+Maintain durable current Weather Story state, lightweight story facts, and publication outcomes for deduplication, operational audit, and fun-fact analysis.
 
 ## ADDED Requirements
 
-### Requirement: Persist Weather Story history
-The system SHALL durably retain an immutable discovery snapshot for every distinct normalized Weather Story revision, keyed by canonical `(office_id, source_story_id)` and deterministic revision hash. The system SHALL also maintain a current-story projection derived from immutable history for each canonical identity, including the current revision, source `updateTime`, source `endTime`, lifecycle status, retained image location and metadata when available, the office-specific Telegram channel/message reference, and latest publication status. The projection SHALL be used for fast deduplication and processing decisions and SHALL NOT replace the immutable history.
+### Requirement: Persist current Weather Story state and lightweight facts
+The system SHALL durably retain one mutable current-story record for each canonical `(office_id, source_story_id)` identity. The record SHALL include its first-seen time; current revision hash; source `updateTime` and `endTime`; lifecycle status; current retained-image location and metadata when available; office-specific Telegram channel/message reference; and latest publication status. The record SHALL support fast deduplication and processing decisions, while first-seen time and publication outcomes support lightweight fun-fact analysis. The system SHALL NOT retain superseded story source content, metadata, or images.
 
 #### Scenario: A story is first discovered
 - **WHEN** the system processes a Weather Story identity not already present in history
-- **THEN** it creates an immutable discovery snapshot, a current-story projection, and a revision hash for that story
+- **THEN** it creates one current-story record with a revision hash and first-seen time
 
 #### Scenario: A changed story is discovered
-- **WHEN** the system processes a previously known story identity with a revision hash not already present in history
-- **THEN** it creates a new immutable snapshot and advances the current-story projection without modifying earlier snapshots or publication-attempt records
+- **WHEN** the system processes a previously known story identity with a revision hash different from its current record
+- **THEN** it conditionally replaces the current source and image state while preserving first-seen, message, and publication state; it does not retain the superseded source state or modify publication-attempt records
 
 #### Scenario: An unchanged story is discovered again
 - **WHEN** the system processes a story identity and revision hash already present in history
-- **THEN** it records the observation or last-seen time without creating a duplicate snapshot or revision
+- **THEN** it records the observation or last-seen time without changing the current source state or creating a publication event
 
 #### Scenario: A story expires
 - **WHEN** the current time reaches or passes the source `endTime`
-- **THEN** it marks the current-story projection expired while retaining all snapshots, images, and Telegram publication history
+- **THEN** it marks the current-story record expired while retaining its committed image reference and S3 object, lightweight story facts, and Telegram publication history indefinitely
 
 #### Scenario: A story is absent before expiration
 - **WHEN** a story is absent from a successful collection and its source `endTime` is in the future
-- **THEN** it remains in the current-story projection and is not tombstoned or deleted
+- **THEN** it remains in the current-story record and is not tombstoned or deleted
 
 #### Scenario: Two offices expose the same source story ID
 - **WHEN** two office entries return the same source story ID
-- **THEN** history retains separate snapshots, current projections, and publication records for each `(office_id, source_story_id)` pair
+- **THEN** the system retains separate current-story records and publication records for each `(office_id, source_story_id)` pair
 
 #### Scenario: A story includes a downloaded image
 - **WHEN** the system retrieves an image for a Weather Story
-- **THEN** the story history retains the image bytes and queryable image metadata associated with that story
+- **THEN** the current-story record retains the current image bytes and queryable image metadata indefinitely, including after expiration
 
 ### Requirement: Maintain an append-only publication-attempt audit log
 The system SHALL create an immutable publication-attempt record for every create or edit reservation. Each attempt record SHALL contain an `attempt_id`, `run_id`, canonical story identity, revision hash, request type, reservation owner and lease data, target Telegram channel/message reference when known, and creation timestamp. The system SHALL record each attempt state transition as a separate immutable event linked to `attempt_id`, containing the prior state, resulting state, transition time, actor or reservation owner, completion timestamp and measured latency when applicable, error class when applicable, sanitized response metadata, and reconciliation reason when applicable. The final state of an attempt SHALL be derived from its latest transition event.
@@ -87,7 +87,7 @@ The system SHALL retain DynamoDB alert-state records keyed by deterministic aler
 - **THEN** only one event obtains the immediate-notification decision and the alert-state occurrence count reflects both events
 
 ### Requirement: Commit image references only after verified upload
-The system SHALL write a usable image reference to story history only after the corresponding S3 object has been uploaded successfully and verified by checksum, content type, and size. It SHALL promote the verified object from `staging/` to a deterministic retained-image key before committing that retained key as usable history; committed history SHALL never reference an object under `staging/`.
+The system SHALL write a usable current-image reference only after the corresponding S3 object has been uploaded successfully and verified by checksum, content type, and size. It SHALL promote the verified object from `staging/` to a deterministic current-image key before committing that key to the current-story record; a committed current-story record SHALL never reference an object under `staging/`.
 
 #### Scenario: Upload succeeds and history commit fails
 - **WHEN** the S3 upload succeeds but the history commit fails
@@ -98,7 +98,7 @@ The system SHALL write a usable image reference to story history only after the 
 - **THEN** the history does not expose the object as usable for publication and records the image failure
 
 ### Requirement: Reconcile incomplete image uploads
-The system SHALL identify and clean up S3 `staging/` image objects that are not referenced by a committed story-history record. Current retained-image objects SHALL be retained indefinitely; S3 lifecycle management transitions them to colder storage rather than expiring them.
+The system SHALL identify and clean up S3 `staging/` image objects that are not referenced by a committed current-story record. A current image SHALL be deleted only when it is replaced; expiration SHALL retain the current image indefinitely. S3 versioning retains noncurrent versions for 30 days for recovery.
 
 #### Scenario: Orphan staging object exists
 - **WHEN** an S3 staging object has no corresponding committed history reference after 7 days
@@ -118,17 +118,17 @@ The system SHALL retain every append-only publication-attempt state transition, 
 - **WHEN** an operator changes an ambiguous attempt to `confirmed_received` or `confirmed_not_received`
 - **THEN** the history appends a transition event that records the operator identity, action time, prior state, resulting state, and reconciliation reason
 
-### Requirement: Support historical analysis
-The system SHALL retain story history in a durable store that can be queried to analyze discovered stories, publication outcomes, and delivery timing.
+### Requirement: Support lightweight story analysis
+The system SHALL retain durable first-discovered story facts, current state, publication outcomes, and delivery timing that can be queried for fun and interesting facts. The system SHALL NOT support analysis of superseded story revisions or historical image versions.
 
 #### Scenario: An operator investigates publishing activity
 - **WHEN** an authorized operator queries the history store
-- **THEN** they can retrieve story records and their associated publication outcomes
+- **THEN** they can retrieve a story's first-discovered/current facts and its associated publication outcomes
 
 ### Requirement: Retain and recover durable history
-Committed DynamoDB story, attempt, transition, run, projection, and quarantine records SHALL have no TTL or automatic deletion. Current retained S3 image objects SHALL have no expiration, subject to the existing lifecycle transitions; S3 noncurrent versions and uncommitted staging objects SHALL retain their existing 30-day and 7-day lifecycle policies. Permanent deletion of committed history or retained images SHALL be a manual, authorized, audited operator procedure and SHALL NOT be performed by runtime functions.
+Committed DynamoDB `OFFICE#` and current-story records SHALL have no TTL or automatic deletion. Publication attempts, transition events, run results, quarantine records, and alert-fingerprint state SHALL set one table-wide TTL attribute to a numeric Unix-epoch timestamp 30 days after creation or latest update; consumers SHALL treat items past that timestamp as expired before asynchronous TTL deletion completes. Current S3 image objects SHALL be deleted only when replaced, never because their story expires; S3 noncurrent versions and uncommitted staging objects SHALL retain their 30-day and 7-day lifecycle policies. Permanent deletion of retained office/story records SHALL be a manual, authorized, audited operator procedure and SHALL NOT be performed by runtime functions.
 
-The system SHALL enable DynamoDB point-in-time recovery with a 35-day recovery window and create one monthly AWS Backup snapshot retained for one year. An operator SHALL create an on-demand DynamoDB backup before any planned destructive migration or table replacement. The system SHALL document a same-Region recovery runbook and execute it quarterly: restore DynamoDB to a new isolated table, reapply required configuration, validate history and checksums against sampled retained S3 image versions, then destroy the isolated restore resources after recording the exercise result.
+The system SHALL enable DynamoDB point-in-time recovery with a 35-day recovery window and create one monthly AWS Backup snapshot retained for one year. An operator SHALL create an on-demand DynamoDB backup before any planned destructive migration or table replacement. The system SHALL document a same-Region recovery runbook and execute it quarterly: restore DynamoDB to a new isolated table, reapply required configuration, validate sampled current-story and operational audit records, then destroy the isolated restore resources after recording the exercise result.
 
 #### Scenario: An accidental table write or deletion is discovered
 - **WHEN** an operator identifies unintended DynamoDB data loss or corruption within the prior 35 days

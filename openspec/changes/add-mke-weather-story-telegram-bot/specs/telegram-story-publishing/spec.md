@@ -37,7 +37,7 @@ The system SHALL publish each newly discovered Weather Story as exactly one phot
 - **THEN** the system edits the existing Telegram message in place, swaps in the revised retained photo when the image changed, and updates the story text in the caption
 
 #### Scenario: Revision is discovered before initial publication
-- **WHEN** a story has retained revisions but no successful Telegram publication exists and the current revision is publishable
+- **WHEN** a changed story has no successful Telegram publication and its current state is publishable
 - **THEN** the system posts the current revision as a new Telegram message and records its message reference for future in-place edits
 
 #### Scenario: Telegram message edit fails definitively
