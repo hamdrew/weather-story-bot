@@ -121,42 +121,42 @@ The system SHALL process the complete `stories` array returned by the Weather St
 - **WHEN** a response contains a pagination link, cursor, or continuation indicator that the service does not support
 - **THEN** the system records an unsupported-contract error and does not claim that the complete collection was retrieved
 
-### Requirement: Detect Weather Story revisions and expiration
-The system SHALL compute a deterministic revision hash from the normalized story content and image identity/bytes, SHALL retain each distinct revision without overwriting earlier observations, and SHALL use the source `endTime` as the story's expiration time. A story SHALL remain eligible for current-story processing until its expiration time, even if it is omitted from a later successful collection; a failed or invalid retrieval SHALL not change current or expiration state.
+### Requirement: Detect Weather Story changes and expiration
+The system SHALL compute a deterministic revision hash from the normalized current story content and image identity/bytes and store it on one mutable record keyed by canonical `(office_id, source_story_id)`. The record SHALL retain its first-seen time and current fields, but SHALL NOT retain superseded source content, metadata, or images. The system SHALL use the source `endTime` as the story's expiration time. A story SHALL remain eligible for current-story processing until its expiration time, even if it is omitted from a later successful collection; a failed or invalid retrieval SHALL not change current or expiration state.
 
 #### Scenario: Story is discovered with unchanged content
 - **WHEN** a successful poll returns a story identity and revision hash already recorded for that story
-- **THEN** the system records the observation without creating a new revision or publication event
+- **THEN** the system records the observation without changing the current story state or creating a publication event
 
 #### Scenario: Story content or image changes under the same identity
 - **WHEN** a successful poll returns the same source story identity with a different revision hash
-- **THEN** the system creates an immutable revision snapshot, advances the current-story projection to that revision, and makes the revision eligible to update the existing Telegram publication
+- **THEN** the system conditionally replaces the mutable record's current source fields and image state, preserves its first-seen and Telegram publication state, and makes the changed story eligible to update the existing Telegram publication
 
 #### Scenario: Story reaches its expiration time
 - **WHEN** the current time is at or after a story's source `endTime`
-- **THEN** the system marks the current-story projection as expired, retains all snapshots and publication history, and does not create a new publication or revision solely because of expiration
+- **THEN** the system marks the current-story record expired, removes the current retained image according to its lifecycle, retains lightweight story facts and publication history, and does not create a new publication or change solely because of expiration
 
 #### Scenario: Story is omitted before expiration
 - **WHEN** a story is absent from a successful collection but its source `endTime` has not passed
-- **THEN** the system retains its current projection and does not mark it deleted or expired
+- **THEN** the system retains its current-story record and does not mark it deleted or expired
 
 #### Scenario: Source identity is reused with changed content
-- **WHEN** a source story identity returns content that differs from every previously retained revision
-- **THEN** the system retains the prior revisions unchanged and creates a new revision under the same source identity
+- **WHEN** a source story identity returns content that differs from its stored current revision hash
+- **THEN** the system replaces only the mutable current state for that identity and retains no prior source revision
 
 ### Requirement: Retrieve and retain story images
-The system SHALL retrieve an image from the absolute HTTPS URL in a new story's `download` field and SHALL retain an accepted image in durable story history. The source and every redirect destination SHALL use HTTPS and match the configured NWS image-host allowlist, initialized to `weather.gov` and `*.weather.gov`; at most three redirects are permitted. The image URL SHALL be stored as protected source metadata, while the UUID extracted from that URL SHALL be stored as the stable story identity and image source identifier.
+The system SHALL retrieve an image from the absolute HTTPS URL in a new or changed story's `download` field and SHALL retain the current accepted image only while that story remains publishable. The source and every redirect destination SHALL use HTTPS and match the configured NWS image-host allowlist, initialized to `weather.gov` and `*.weather.gov`; at most three redirects are permitted. The image URL SHALL be stored as protected current-source metadata, while the UUID extracted from that URL SHALL be stored as the stable story identity and image source identifier.
 
 #### Scenario: New story includes a downloadable image
 - **WHEN** a newly discovered Weather Story has a valid `download` URL
-- **THEN** the system obtains the image from that URL, records the returned content type and integrity metadata, retains it durably, and makes it available for Telegram publication
+- **THEN** the system obtains the image from that URL, records the returned content type and integrity metadata as the current image, and makes it available for Telegram publication
 
 #### Scenario: Image download fails or returns an invalid response
 - **WHEN** an image URL cannot be retrieved successfully or returns an unsupported/non-image response
 - **THEN** the system records the image failure, does not make the story publishable, and raises the existing operational alert
 
 ### Requirement: Validate image bytes and resource limits before retention
-The system SHALL stream image downloads with a 20-second deadline and a 9 MiB compressed-byte limit, rejecting an absent, malformed, or exceeding response without buffering beyond that limit. It SHALL accept only non-animated JPEG (`image/jpeg`) or PNG (`image/png`) images whose declared content type and magic bytes agree. Before committing the image, it SHALL defensively decode it and require at most 25 megapixels, a width-plus-height no greater than 10,000 pixels, and a width-to-height ratio no greater than 20. It SHALL compute SHA-256 while streaming and retain the resulting checksum with the verified content type, byte size, and dimensions. A partial download, checksum/decoder failure, type mismatch, redirect-policy failure, or resource-limit failure SHALL be an image failure: no retained-image reference or publication attempt is created for that revision, and the existing alert workflow is invoked.
+The system SHALL stream image downloads with a 20-second deadline and a 9 MiB compressed-byte limit, rejecting an absent, malformed, or exceeding response without buffering beyond that limit. It SHALL accept only non-animated JPEG (`image/jpeg`) or PNG (`image/png`) images whose declared content type and magic bytes agree. Before committing the image, it SHALL defensively decode it and require at most 25 megapixels, a width-plus-height no greater than 10,000 pixels, and a width-to-height ratio no greater than 20. It SHALL compute SHA-256 while streaming and retain the resulting checksum with the verified content type, byte size, and dimensions on the current-story record. A partial download, checksum/decoder failure, type mismatch, redirect-policy failure, or resource-limit failure SHALL be an image failure: no retained-image reference or publication attempt is created for that current story state, and the existing alert workflow is invoked.
 
 #### Scenario: Declared and actual image types disagree
 - **WHEN** an image response declares an allowed type but its magic bytes identify another type, or it is not a JPEG or PNG
@@ -164,7 +164,7 @@ The system SHALL stream image downloads with a 20-second deadline and a 9 MiB co
 
 #### Scenario: Image exceeds a resource or Telegram photo limit
 - **WHEN** streaming bytes exceed 9 MiB, decoding exceeds 25 megapixels, width plus height exceeds 10,000 pixels, or the aspect ratio exceeds 20
-- **THEN** the system stops or rejects the download, records the bounded validation failure, and does not make the revision publishable
+- **THEN** the system stops or rejects the download, records the bounded validation failure, and does not make the current story state publishable
 
 #### Scenario: Image redirect leaves the allowed NWS hosts
 - **WHEN** an image source or any of its more than three redirects is non-HTTPS or does not match the configured NWS image-host allowlist

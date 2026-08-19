@@ -47,6 +47,8 @@ enabled because pytest-cov does not provide a separate branch-only fail gate.
 
 - Keep Python compatible with Python 3.13 and follow the Ruff configuration in
   `pyproject.toml`: 100-character lines; E, F, I, UP, and B rules.
+- Prefer existing library functionality over home-grown code that duplicates it;
+  for example, use boto3 paginators for AWS list operations.
 - Mypy runs in strict mode across `src/` and `tests/`; do not suppress type
   errors without a narrowly justified reason.
 - Add or update focused pytest coverage for behavior changes and failure paths.

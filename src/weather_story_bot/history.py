@@ -1,0 +1,558 @@
+"""Current Weather Story state and immutable operational audit records."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime, timedelta
+from enum import StrEnum
+from hashlib import sha256
+from json import dumps
+from typing import Any, Protocol
+
+# boto3 does not currently distribute PEP 561 type metadata.
+from boto3.dynamodb.conditions import Attr, Key  # type: ignore[import-untyped]
+
+from weather_story_bot.config import OfficeRegistryRecord
+from weather_story_bot.ingestion import QuarantinedStoryItem, WeatherStory
+
+MAX_FAILURE_REASONS = 8
+MAX_FAILURE_SUMMARY_LENGTH = 256
+CURRENT_INDEX_NAME = "office-current-index"
+OPERATIONAL_RECORD_TTL_DAYS = 30
+
+
+class RunStatus(StrEnum):
+    """The only persisted terminal statuses for a single-office run."""
+
+    SUCCESS = "success"
+    SUCCESS_WITH_DEFERRED = "success_with_deferred"
+    SUCCESS_WITH_QUARANTINED_ITEMS = "success_with_quarantined_items"
+    FAILED = "failed"
+
+
+class ImageStatus(StrEnum):
+    """Usability state for a current story image reference."""
+
+    PENDING = "image_pending"
+    COMMITTED = "committed"
+    INVALID = "invalid"
+
+
+class AttemptState(StrEnum):
+    """Persisted publication states; transition enforcement is added in task 2.5."""
+
+    RESERVED = "reserved"
+    SEND_STARTED = "send_started"
+    PUBLISHED = "published"
+    REJECTED = "rejected"
+    AMBIGUOUS = "ambiguous"
+    CONFIRMED_RECEIVED = "confirmed_received"
+    CONFIRMED_NOT_RECEIVED = "confirmed_not_received"
+
+
+@dataclass(frozen=True)
+class OutcomeCounts:
+    """Per-office and invocation aggregate outcome counts."""
+
+    discovered: int = 0
+    published: int = 0
+    edited: int = 0
+    skipped: int = 0
+    deferred: int = 0
+    quarantined: int = 0
+    rejected: int = 0
+    ambiguous: int = 0
+
+    def __post_init__(self) -> None:
+        if any(value < 0 for value in asdict(self).values()):
+            raise ValueError("outcome counts cannot be negative")
+
+
+@dataclass(frozen=True)
+class ImageMetadata:
+    """Verified metadata for a retained image object."""
+
+    key: str
+    content_type: str
+    byte_size: int
+    sha256_hex: str
+    width: int
+    height: int
+
+    def __post_init__(self) -> None:
+        if self.key.startswith("staging/") or not self.key:
+            raise ValueError("committed image keys must not use staging/")
+        if self.byte_size <= 0 or self.width <= 0 or self.height <= 0:
+            raise ValueError("image metadata dimensions and size must be positive")
+
+
+class DynamoTable(Protocol):
+    """Native-type DynamoDB table operations used by the history service."""
+
+    def put_item(self, **kwargs: Any) -> Mapping[str, Any]: ...
+
+    def get_item(self, **kwargs: Any) -> Mapping[str, Any]: ...
+
+    def update_item(self, **kwargs: Any) -> Mapping[str, Any]: ...
+
+    def query(self, **kwargs: Any) -> Mapping[str, Any]: ...
+
+
+def utc_now() -> datetime:
+    """Return a timezone-aware UTC timestamp."""
+    return datetime.now(UTC)
+
+
+def timestamp(value: datetime) -> str:
+    """Serialize timestamps consistently for DynamoDB and query ordering."""
+    if value.tzinfo is None:
+        raise ValueError("timestamps must be timezone-aware")
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def revision_hash(story: WeatherStory, image_sha256: str | None = None) -> str:
+    """Return the stable hash of normalized source fields and image identity."""
+    document = {
+        "alt_text": story.alt_text,
+        "description": story.description,
+        "download_url": str(story.download_url),
+        "end_time": timestamp(story.end_time),
+        "image_sha256": image_sha256,
+        "order": story.order,
+        "priority": story.priority,
+        "start_time": timestamp(story.start_time),
+        "title": story.title,
+        "update_time": timestamp(story.update_time),
+    }
+    return sha256(dumps(document, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+class HistoryStore:
+    """Store mutable current stories and immutable operational audit records."""
+
+    def __init__(self, table: DynamoTable, *, clock: Callable[[], datetime] = utc_now) -> None:
+        self._table = table
+        self._clock = clock
+
+    def put_office(
+        self,
+        office: OfficeRegistryRecord,
+        *,
+        pinned_message_ref: str | None = None,
+        invite_ref: str | None = None,
+    ) -> None:
+        """Persist the enriched office record without exposing private values in keys."""
+        item: dict[str, object] = {
+            "pk": f"OFFICE#{office.office_id}",
+            "sk": f"METADATA#{timestamp(self._clock())}",
+            "record_type": "office",
+            "office_id": office.office_id,
+            "weather_stories_url": str(office.weather_stories_url),
+            "display_name": office.display_name,
+            "address": office.address.model_dump(),
+            "coordinates": office.coordinates.model_dump(),
+            "timezone": office.timezone,
+            "telegram_channel_id": office.telegram_channel_id,
+            "active": office.active,
+            "telephone": office.telephone,
+            "email": office.email,
+            "office_home_url": str(office.office_home_url) if office.office_home_url else None,
+            "region_name": office.region_name,
+            "region_home_url": str(office.region_home_url) if office.region_home_url else None,
+            "pinned_message_ref": pinned_message_ref,
+            "invite_ref": invite_ref,
+            "recorded_at": timestamp(self._clock()),
+        }
+        self._table.put_item(Item=_without_none(item), ConditionExpression=Attr("sk").not_exists())
+
+    def observe_story(
+        self, story: WeatherStory, *, image_sha256: str | None = None
+    ) -> tuple[str, bool]:
+        """Create or conditionally advance one current record for a story."""
+        office_id, source_story_id = story.canonical_identity
+        digest = revision_hash(story, image_sha256)
+        now = timestamp(self._clock())
+        story_pk = _story_pk(office_id, source_story_id)
+        current_story = {
+            "pk": story_pk,
+            "sk": "CURRENT",
+            "record_type": "story_current",
+            "office_id": office_id,
+            "source_story_id": source_story_id,
+            "current_revision_hash": digest,
+            "start_time": timestamp(story.start_time),
+            "end_time": timestamp(story.end_time),
+            "update_time": timestamp(story.update_time),
+            "title": story.title,
+            "description": story.description,
+            "alt_text": story.alt_text,
+            "priority": story.priority,
+            "order": story.order,
+            "download_url": str(story.download_url),
+            "image_status": ImageStatus.PENDING,
+            "first_seen_at": now,
+            "last_seen_at": now,
+            "office_current_pk": f"OFFICE#{office_id}",
+            "office_current_sk": f"{timestamp(story.end_time)}#{source_story_id}",
+            "lifecycle_status": "current",
+        }
+        try:
+            self._table.put_item(Item=current_story, ConditionExpression=Attr("sk").not_exists())
+        except Exception as error:  # DynamoDB's typed exception is client-specific.
+            if not _is_conditional_failure(error):
+                raise
+            return digest, self._advance_current_story(story, digest, now)
+        return digest, True
+
+    def _advance_current_story(self, story: WeatherStory, digest: str, observed_at: str) -> bool:
+        """Replace newer source state without overwriting delivery state or first seen time."""
+        office_id, source_story_id = story.canonical_identity
+        source_update_time = timestamp(story.update_time)
+        try:
+            self._table.update_item(
+                Key={"pk": _story_pk(office_id, source_story_id), "sk": "CURRENT"},
+                UpdateExpression=(
+                    "SET record_type = :record_type, office_id = :office_id, "
+                    "source_story_id = :source_story_id, current_revision_hash = :revision_hash, "
+                    "start_time = :start_time, end_time = :end_time, update_time = :update_time, "
+                    "title = :title, description = :description, alt_text = :alt_text, "
+                    "priority = :priority, #order = :order, download_url = :download_url, "
+                    "office_current_pk = :office_current_pk, "
+                    "office_current_sk = :office_current_sk, "
+                    "lifecycle_status = :current, image_status = :image_pending, "
+                    "last_seen_at = :last_seen_at REMOVE image_failure"
+                ),
+                ExpressionAttributeNames={"#order": "order"},
+                ExpressionAttributeValues={
+                    ":record_type": "story_current",
+                    ":office_id": office_id,
+                    ":source_story_id": source_story_id,
+                    ":revision_hash": digest,
+                    ":start_time": timestamp(story.start_time),
+                    ":end_time": timestamp(story.end_time),
+                    ":update_time": source_update_time,
+                    ":title": story.title,
+                    ":description": story.description,
+                    ":alt_text": story.alt_text,
+                    ":priority": story.priority,
+                    ":order": story.order,
+                    ":download_url": str(story.download_url),
+                    ":office_current_pk": f"OFFICE#{office_id}",
+                    ":office_current_sk": f"{timestamp(story.end_time)}#{source_story_id}",
+                    ":current": "current",
+                    ":image_pending": ImageStatus.PENDING,
+                    ":last_seen_at": observed_at,
+                },
+                ConditionExpression=(
+                    Attr("update_time").not_exists()
+                    | (
+                        Attr("update_time").lte(source_update_time)
+                        & Attr("current_revision_hash").ne(digest)
+                    )
+                ),
+            )
+        except Exception as error:
+            if not _is_conditional_failure(error):
+                raise
+            self._table.update_item(
+                Key={"pk": _story_pk(office_id, source_story_id), "sk": "CURRENT"},
+                UpdateExpression="SET last_seen_at = :last_seen_at",
+                ExpressionAttributeValues={":last_seen_at": observed_at},
+            )
+            return False
+        return True
+
+    def commit_image(
+        self, office_id: str, source_story_id: str, digest: str, image: ImageMetadata
+    ) -> ImageMetadata | None:
+        """Make a verified current image usable; staging keys are rejected by the type."""
+        key = {"pk": _story_pk(office_id, source_story_id), "sk": "CURRENT"}
+        values = {":status": ImageStatus.COMMITTED, ":image": asdict(image)}
+        response = self._table.update_item(
+            Key=key,
+            UpdateExpression="SET image_status = :status, image = :image",
+            ExpressionAttributeValues=values,
+            ConditionExpression=Attr("current_revision_hash").eq(digest)
+            & Attr("image_status").eq(ImageStatus.PENDING),
+            ReturnValues="ALL_OLD",
+        )
+        previous = response.get("Attributes", {}).get("image")
+        if not isinstance(previous, Mapping):
+            return None
+        return ImageMetadata(
+            key=str(previous["key"]),
+            content_type=str(previous["content_type"]),
+            byte_size=int(previous["byte_size"]),
+            sha256_hex=str(previous["sha256_hex"]),
+            width=int(previous["width"]),
+            height=int(previous["height"]),
+        )
+
+    def mark_image_invalid(
+        self, office_id: str, source_story_id: str, digest: str, reason: str
+    ) -> None:
+        """Record a bounded failure without ever storing raw upstream data."""
+        try:
+            self._table.update_item(
+                Key={"pk": _story_pk(office_id, source_story_id), "sk": "CURRENT"},
+                UpdateExpression="SET image_status = :status, image_failure = :reason",
+                ExpressionAttributeValues={
+                    ":status": ImageStatus.INVALID,
+                    ":reason": reason[:MAX_FAILURE_SUMMARY_LENGTH],
+                },
+                ConditionExpression=Attr("current_revision_hash").eq(digest),
+            )
+        except Exception as error:
+            if not _is_conditional_failure(error):
+                raise
+
+    def expire_due_stories(self, office_id: str, *, now: datetime | None = None) -> int:
+        """Expire current stories whose source end time has passed."""
+        now_value = timestamp(now or self._clock())
+        response = self._table.query(
+            IndexName=CURRENT_INDEX_NAME,
+            KeyConditionExpression=Key("office_current_pk").eq(f"OFFICE#{office_id}")
+            & Key("office_current_sk").lte(f"{now_value}#\uffff"),
+            FilterExpression=Attr("lifecycle_status").eq("current"),
+        )
+        expired = 0
+        for item in response.get("Items", []):
+            try:
+                self._table.update_item(
+                    Key={"pk": item["pk"], "sk": "CURRENT"},
+                    UpdateExpression="SET lifecycle_status = :expired",
+                    ExpressionAttributeValues={":expired": "expired"},
+                    ConditionExpression=Attr("lifecycle_status").eq("current")
+                    & Attr("end_time").lte(now_value),
+                )
+            except Exception as error:
+                if not _is_conditional_failure(error):
+                    raise
+            else:
+                expired += 1
+        return expired
+
+    def put_quarantine(self, run_id: str, item: QuarantinedStoryItem) -> None:
+        """Persist only bounded validation facts for malformed source items."""
+        recorded_at = self._clock()
+        self._table.put_item(
+            Item={
+                "pk": f"QUARANTINE#{run_id}",
+                "sk": f"ITEM#{item.array_index:06d}",
+                "record_type": "quarantine",
+                "run_id": run_id,
+                "array_index": item.array_index,
+                "error_code": item.error_code[:64],
+                "affected_field": item.affected_field[:64],
+                "error_summary": item.error_summary[:MAX_FAILURE_SUMMARY_LENGTH],
+                "recorded_at": timestamp(recorded_at),
+                "expires_at": _operational_expiry(recorded_at),
+            },
+            ConditionExpression=Attr("sk").not_exists(),
+        )
+
+    def put_run(
+        self,
+        run_id: str,
+        office_id: str,
+        *,
+        collection_outcome: str,
+        status: RunStatus,
+        started_at: datetime,
+        completed_at: datetime,
+        required_work_completed: bool,
+        counts: OutcomeCounts,
+        failure_reasons: tuple[str, ...] = (),
+    ) -> None:
+        """Write exactly one objective immutable result for one office invocation."""
+        if len(failure_reasons) > MAX_FAILURE_REASONS:
+            raise ValueError("failure_reasons exceed the bounded limit")
+        elapsed_ms = int((completed_at - started_at).total_seconds() * 1000)
+        if elapsed_ms < 0:
+            raise ValueError("run completion cannot precede start")
+        failures = tuple(reason[:MAX_FAILURE_SUMMARY_LENGTH] for reason in failure_reasons)
+        self._table.put_item(
+            Item={
+                "pk": f"RUN#{run_id}",
+                "sk": "RESULT",
+                "record_type": "run_result",
+                "run_id": run_id,
+                "office_id": office_id,
+                "collection_outcome": collection_outcome,
+                "status": status,
+                "started_at": timestamp(started_at),
+                "completed_at": timestamp(completed_at),
+                "elapsed_ms": elapsed_ms,
+                "required_work_completed": required_work_completed,
+                "counts": asdict(counts),
+                "aggregate_counts": asdict(counts),
+                "failure_reasons": failures,
+                "expires_at": _operational_expiry(completed_at),
+            },
+            ConditionExpression=Attr("sk").not_exists(),
+        )
+
+    def update_alert_fingerprint(
+        self,
+        fingerprint: str,
+        *,
+        severity: str,
+        run_id: str | None,
+        cooldown_until: datetime,
+        dispatch_outcome: str,
+    ) -> bool:
+        """Conditionally claim the immediate alert decision and increment occurrences."""
+        now = self._clock()
+        now_text = timestamp(now)
+        try:
+            self._table.update_item(
+                Key={"pk": f"ALERT#{fingerprint}", "sk": "STATE"},
+                UpdateExpression=(
+                    "SET first_seen_at = if_not_exists(first_seen_at, :now), severity = :severity, "
+                    "last_seen_at = :now, latest_run_id = :run, "
+                    "cooldown_until = :cooldown, latest_dispatch_outcome = :outcome, "
+                    "expires_at = :expires_at "
+                    "ADD occurrence_count :one"
+                ),
+                ExpressionAttributeValues={
+                    ":severity": severity,
+                    ":now": now_text,
+                    ":run": run_id,
+                    ":cooldown": timestamp(cooldown_until),
+                    ":outcome": dispatch_outcome,
+                    ":expires_at": _operational_expiry(now),
+                    ":one": 1,
+                },
+                ConditionExpression=Attr("cooldown_until").not_exists()
+                | Attr("cooldown_until").lte(now_text),
+            )
+        except Exception as error:
+            if not _is_conditional_failure(error):
+                raise
+            self._table.update_item(
+                Key={"pk": f"ALERT#{fingerprint}", "sk": "STATE"},
+                UpdateExpression=(
+                    "SET last_seen_at = :now, latest_run_id = :run, expires_at = :expires_at "
+                    "ADD occurrence_count :one"
+                ),
+                ExpressionAttributeValues={
+                    ":now": now_text,
+                    ":run": run_id,
+                    ":expires_at": _operational_expiry(now),
+                    ":one": 1,
+                },
+            )
+            return False
+        return True
+
+    def put_attempt(
+        self,
+        attempt_id: str,
+        *,
+        run_id: str,
+        office_id: str,
+        source_story_id: str,
+        revision_hash: str,
+        operation: str,
+        reservation_owner: str,
+        lease_expires_at: datetime,
+        target_message_ref: str | None = None,
+    ) -> None:
+        """Persist an immutable publication reservation audit record."""
+        if operation not in {"create", "edit"}:
+            raise ValueError("attempt operation must be create or edit")
+        created_at = self._clock()
+        self._table.put_item(
+            Item=_without_none(
+                {
+                    "pk": f"ATTEMPT#{attempt_id}",
+                    "sk": "RECORD",
+                    "record_type": "publication_attempt",
+                    "attempt_id": attempt_id,
+                    "run_id": run_id,
+                    "office_id": office_id,
+                    "source_story_id": source_story_id,
+                    "revision_hash": revision_hash,
+                    "operation": operation,
+                    "reservation_owner": reservation_owner,
+                    "lease_expires_at": timestamp(lease_expires_at),
+                    "target_message_ref": target_message_ref,
+                    "created_at": timestamp(created_at),
+                    "expires_at": _operational_expiry(created_at),
+                }
+            ),
+            ConditionExpression=Attr("sk").not_exists(),
+        )
+
+    def append_transition(
+        self,
+        attempt_id: str,
+        ordinal: int,
+        *,
+        prior_state: AttemptState | None,
+        resulting_state: AttemptState,
+        actor: str,
+        response_metadata: Mapping[str, object] | None = None,
+        error_class: str | None = None,
+        reconciliation_reason: str | None = None,
+    ) -> None:
+        """Append a bounded, sanitized publication state transition event."""
+        permitted = {
+            "http_status",
+            "telegram_error_code",
+            "telegram_error_description",
+            "request_id",
+            "correlation_id",
+            "latency_ms",
+            "retry_after_seconds",
+            "retry_ordinal",
+            "retry_decision",
+        }
+        metadata = {
+            key: str(value)[:MAX_FAILURE_SUMMARY_LENGTH]
+            for key, value in (response_metadata or {}).items()
+            if key in permitted
+        }
+        transitioned_at = self._clock()
+        self._table.put_item(
+            Item=_without_none(
+                {
+                    "pk": f"ATTEMPT#{attempt_id}",
+                    "sk": f"TRANSITION#{ordinal:06d}",
+                    "record_type": "publication_transition",
+                    "attempt_id": attempt_id,
+                    "ordinal": ordinal,
+                    "prior_state": prior_state,
+                    "resulting_state": resulting_state,
+                    "actor": actor[:128],
+                    "transitioned_at": timestamp(transitioned_at),
+                    "expires_at": _operational_expiry(transitioned_at),
+                    "error_class": error_class[:128] if error_class else None,
+                    "response_metadata": metadata,
+                    "reconciliation_reason": (
+                        reconciliation_reason[:MAX_FAILURE_SUMMARY_LENGTH]
+                        if reconciliation_reason
+                        else None
+                    ),
+                }
+            ),
+            ConditionExpression=Attr("sk").not_exists(),
+        )
+
+
+def _story_pk(office_id: str, source_story_id: str) -> str:
+    return f"STORY#{office_id}#{source_story_id}"
+
+
+def _operational_expiry(recorded_at: datetime) -> int:
+    """Return the DynamoDB TTL timestamp for one operational record."""
+    return int((recorded_at + timedelta(days=OPERATIONAL_RECORD_TTL_DAYS)).timestamp())
+
+
+def _without_none(item: Mapping[str, object]) -> dict[str, object]:
+    return {key: value for key, value in item.items() if value is not None}
+
+
+def _is_conditional_failure(error: Exception) -> bool:
+    return error.__class__.__name__ == "ConditionalCheckFailedException"

@@ -7,8 +7,8 @@ The Milwaukee/Sullivan National Weather Service office publishes timely visual W
 - Seed a registry of all NWS Weather Story offices, implement only active MKX processing for the MVP, and publish new stories with retained images and text descriptions to that office's configured Telegram channel.
 - Poll each active office every 15 minutes through its own Lambda invocation.
 - Truncate messages that exceed Telegram's message limit and end the truncated text with the Unicode ellipsis character `…`.
-- Add durable, queryable storage for story metadata and delivery outcomes so duplicate publications are prevented and historical analytics are possible.
-- Retain downloaded story images in durable history for later analysis and audit.
+- Add durable current-story state and delivery outcomes so duplicate publications are prevented, in-place Telegram edits are safe, and lightweight "fun and interesting facts" analysis is possible.
+- Retain each story's current downloadable image and its current-story record indefinitely; do not retain superseded revision images or a source-revision archive.
 - Add operational monitoring and alerting that notifies a configured private Telegram user when delivery or scheduled-processing failures occur; if alert delivery fails, notify an operator through SNS/email.
 - Define and deploy the AWS infrastructure as infrastructure-as-code using AWS SAM.
 - Deploy isolated `dev`, `staging`, and `prod` CloudFormation stacks in `us-east-2` within one AWS account, tagged with `Application`, `Environment`, and `Owner`, with a $100 monthly application budget and reviewed production promotion.
@@ -28,7 +28,7 @@ The Milwaukee/Sullivan National Weather Service office publishes timely visual W
 
 - `weather-story-ingestion`: Retrieve and normalize Weather Stories and associated images from configured NWS offices, with MKX enabled first.
 - `telegram-story-publishing`: Publish each newly discovered Weather Story with at most one automatic Telegram send attempt per reservation and explicit reconciliation for ambiguous outcomes.
-- `story-history-analytics`: Persist queryable, durable Weather Story and publication history for operational analysis.
+- `story-history-analytics`: Persist queryable current Weather Story state, lightweight story facts, and operational publication history for deduplication and analysis.
 - `telegram-operations-alerting`: Monitor the scheduled publishing workflow and deliver actionable alerts to a private Telegram user.
 - `aws-weather-story-deployment`: Provision the service and its operational dependencies on AWS through AWS SAM/CloudFormation, and govern its public GitHub source, CI/CD, security automation, environment protections, and release lifecycle.
 
