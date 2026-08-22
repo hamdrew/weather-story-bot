@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
+from uuid import UUID
 
 import pytest
 
@@ -9,6 +10,7 @@ from weather_story_bot.history import (
     HistoryStore,
     ImageMetadata,
     OutcomeCounts,
+    PublicationOperation,
     RunStatus,
     revision_hash,
 )
@@ -52,6 +54,20 @@ class Table:
     def query(self, **kwargs: object) -> dict[str, object]:
         self.query_kwargs = kwargs
         return {"Items": [{"pk": "STORY#MKX#source", "sk": "CURRENT"}]}
+
+
+class TransactionTable(Table):
+    def __init__(self) -> None:
+        super().__init__()
+        self.transactions: list[list[dict[str, object]]] = []
+        self.fail_transaction = False
+
+    def transact_write_items(self, **kwargs: object) -> dict[str, object]:
+        if self.fail_transaction:
+            self.fail_transaction = False
+            raise ConditionalCheckFailedException()
+        self.transactions.append(cast(list[dict[str, object]], kwargs["TransactItems"]))
+        return {}
 
 
 def now() -> datetime:
@@ -282,3 +298,192 @@ def test_expiration_race_does_not_count_story_as_expired() -> None:
 
     assert expired == 0
     assert table.updates == []
+
+
+def test_create_and_edit_reservations_are_atomic_and_expire_in_sixty_seconds() -> None:
+    table = TransactionTable()
+    store = HistoryStore(table, clock=now)
+
+    create = store.reserve_publication(
+        run_id="run-1",
+        office_id="MKX",
+        source_story_id="source",
+        revision_hash="revision-1",
+        operation=PublicationOperation.CREATE,
+        reservation_owner="worker-1",
+    )
+    edit = store.reserve_publication(
+        run_id="run-2",
+        office_id="MKX",
+        source_story_id="source",
+        revision_hash="revision-2",
+        operation=PublicationOperation.EDIT,
+        reservation_owner="worker-2",
+        target_message_ref="message-7",
+    )
+
+    assert create is not None
+    UUID(create.attempt_id)
+    assert create.run_id == "run-1"
+    assert create.lease_expires_at == now() + timedelta(seconds=60)
+    assert edit is not None
+    assert edit.target_message_ref == "message-7"
+    first = table.transactions[0]
+    assert len(first) == 3
+    current_update = cast(dict[str, object], first[0]["Update"])
+    assert current_update["Key"] == {"pk": "STORY#MKX#source", "sk": "CURRENT"}
+    assert "current_revision_hash = :revision" in cast(str, current_update["ConditionExpression"])
+    attempt = cast(dict[str, object], first[1]["Put"])["Item"]
+    transition = cast(dict[str, object], first[2]["Put"])["Item"]
+    assert cast(dict[str, object], attempt)["run_id"] == "run-1"
+    assert cast(dict[str, object], transition)["resulting_state"] is AttemptState.RESERVED
+
+
+def test_reservation_races_and_only_expired_unstarted_leases_can_be_reclaimed() -> None:
+    table = TransactionTable()
+    store = HistoryStore(table, clock=now)
+    reserved = store.reserve_publication(
+        run_id="run-1",
+        office_id="MKX",
+        source_story_id="source",
+        revision_hash="revision",
+        operation=PublicationOperation.CREATE,
+        reservation_owner="worker-1",
+    )
+    assert reserved is not None
+    table.fail_transaction = True
+    assert (
+        store.reserve_publication(
+            run_id="run-2",
+            office_id="MKX",
+            source_story_id="source",
+            revision_hash="revision",
+            operation=PublicationOperation.CREATE,
+            reservation_owner="worker-2",
+        )
+        is None
+    )
+    # The DynamoDB condition is deliberately narrow: only a reserved, expired lease can win.
+    condition = cast(dict[str, object], table.transactions[0][0]["Update"])["ConditionExpression"]
+    assert "publication_reservation_state = :reserved" in cast(str, condition)
+    assert "reservation_lease_expires_at <= :now" in cast(str, condition)
+    assert store.start_publication_send(reserved) is True
+    transition_condition = cast(dict[str, object], table.transactions[-1][0]["Update"])[
+        "ConditionExpression"
+    ]
+    for required in (
+        "active_attempt_id = :attempt_id",
+        "reservation_owner = :owner",
+        "reservation_revision_hash = :revision",
+        "publication_reservation_state = :prior",
+        "reservation_lease_expires_at > :now",
+    ):
+        assert required in cast(str, transition_condition)
+
+
+def test_transitions_enforce_ownership_legal_order_and_preserve_failed_edit_reference() -> None:
+    table = TransactionTable()
+    store = HistoryStore(table, clock=now)
+    reservation = store.reserve_publication(
+        run_id="run",
+        office_id="MKX",
+        source_story_id="source",
+        revision_hash="revision",
+        operation=PublicationOperation.EDIT,
+        reservation_owner="worker",
+        target_message_ref="old-message",
+    )
+    assert reservation is not None
+    assert store.start_publication_send(reservation) is True
+    assert (
+        store.transition_publication(
+            reservation,
+            AttemptState.REJECTED,
+            response_metadata={"http_status": 400, "token": "forbidden", "body": "forbidden"},
+            error_class="telegram_rejected",
+        )
+        is True
+    )
+    terminal_update = cast(dict[str, object], table.transactions[-1][0]["Update"])
+    assert "telegram_message_ref" not in cast(str, terminal_update["UpdateExpression"])
+    transition = cast(dict[str, object], table.transactions[-1][1]["Put"])["Item"]
+    assert cast(dict[str, object], transition)["response_metadata"] == {"http_status": "400"}
+    with pytest.raises(ValueError, match="invalid publication transition"):
+        store.transition_publication(reservation, AttemptState.RESERVED)
+
+
+def test_success_and_ambiguity_transitions_update_current_story_facts() -> None:
+    table = TransactionTable()
+    store = HistoryStore(table, clock=now)
+    reservation = store.reserve_publication(
+        run_id="run",
+        office_id="MKX",
+        source_story_id="source",
+        revision_hash="revision",
+        operation=PublicationOperation.CREATE,
+        reservation_owner="worker",
+    )
+    assert reservation is not None
+    assert store.start_publication_send(reservation)
+    assert store.transition_publication(reservation, AttemptState.AMBIGUOUS)
+    assert store.transition_publication(
+        reservation, AttemptState.CONFIRMED_RECEIVED, actor="operator", message_ref="message-9"
+    )
+    success_update = cast(dict[str, object], table.transactions[-1][0]["Update"])
+    assert "applied_revision_hash = :revision" in cast(str, success_update["UpdateExpression"])
+    assert (
+        cast(dict[str, object], success_update["ExpressionAttributeValues"])[":message_ref"]
+        == "message-9"
+    )
+    assert "REMOVE active_attempt_id" in cast(str, success_update["UpdateExpression"])
+
+
+def test_direct_publication_and_confirmed_not_received_follow_the_remaining_legal_paths() -> None:
+    table = TransactionTable()
+    store = HistoryStore(table, clock=now)
+    published = store.reserve_publication(
+        run_id="run-1",
+        office_id="MKX",
+        source_story_id="source-1",
+        revision_hash="revision-1",
+        operation=PublicationOperation.CREATE,
+        reservation_owner="worker",
+    )
+    assert published is not None
+    assert store.start_publication_send(published)
+    assert store.transition_publication(published, AttemptState.PUBLISHED, message_ref="message-1")
+    retryable = store.reserve_publication(
+        run_id="run-2",
+        office_id="MKX",
+        source_story_id="source-2",
+        revision_hash="revision-2",
+        operation=PublicationOperation.CREATE,
+        reservation_owner="worker",
+    )
+    assert retryable is not None
+    assert store.start_publication_send(retryable)
+    assert store.transition_publication(retryable, AttemptState.AMBIGUOUS)
+    assert store.transition_publication(
+        retryable, AttemptState.CONFIRMED_NOT_RECEIVED, actor="operator"
+    )
+    final_update = cast(dict[str, object], table.transactions[-1][0]["Update"])
+    assert "latest_publication_status = :state" in cast(str, final_update["UpdateExpression"])
+    assert "telegram_message_ref" not in cast(str, final_update["UpdateExpression"])
+
+
+def test_stale_or_non_owner_workers_cannot_start_or_complete_a_reservation() -> None:
+    table = TransactionTable()
+    store = HistoryStore(table, clock=now)
+    reservation = store.reserve_publication(
+        run_id="run",
+        office_id="MKX",
+        source_story_id="source",
+        revision_hash="revision",
+        operation=PublicationOperation.CREATE,
+        reservation_owner="worker",
+    )
+    assert reservation is not None
+    table.fail_transaction = True
+    assert store.start_publication_send(reservation) is False
+    with pytest.raises(ValueError, match="message_ref"):
+        store.transition_publication(reservation, AttemptState.PUBLISHED)
