@@ -35,6 +35,17 @@ The system SHALL durably retain one mutable current-story record for each canoni
 - **WHEN** the system retrieves an image for a Weather Story
 - **THEN** the current-story record retains the current image bytes and queryable image metadata indefinitely, including after expiration
 
+### Requirement: Persist mutable current office operational state
+The system SHALL retain exactly one conditionally mutable `OFFICE#{office_id}` / `CURRENT` record per configured office. The record SHALL contain current NWS-enriched office and region metadata, active configuration, and the managed pinned-message and invite references when present. Conditional updates SHALL prevent a stale enrichment or management invocation from replacing newer current state. The system SHALL NOT retain an office metadata audit trail, immutable office snapshots, raw NWS payloads, invite links in logs, or secret values.
+
+#### Scenario: Office metadata is refreshed
+- **WHEN** a successful enrichment or office-info invocation observes changed NWS office/region metadata or active configuration
+- **THEN** it conditionally updates that office's `CURRENT` record in place without creating an office audit or snapshot record
+
+#### Scenario: Managed office information is updated
+- **WHEN** an office-info invocation creates or edits the managed pinned message or invite reference
+- **THEN** it conditionally updates the same office's `CURRENT` record while retaining the newest known NWS-enriched metadata and without creating a publication attempt
+
 ### Requirement: Maintain an append-only publication-attempt audit log
 The system SHALL create an immutable publication-attempt record for every create or edit reservation. Each attempt record SHALL contain an `attempt_id`, `run_id`, canonical story identity, revision hash, request type, reservation owner and lease data, target Telegram channel/message reference when known, and creation timestamp. The system SHALL record each attempt state transition as a separate immutable event linked to `attempt_id`, containing the prior state, resulting state, transition time, actor or reservation owner, completion timestamp and measured latency when applicable, error class when applicable, sanitized response metadata, and reconciliation reason when applicable. The final state of an attempt SHALL be derived from its latest transition event.
 
@@ -126,7 +137,7 @@ The system SHALL retain durable first-discovered story facts, current state, pub
 - **THEN** they can retrieve a story's first-discovered/current facts and its associated publication outcomes
 
 ### Requirement: Retain and recover durable history
-Committed DynamoDB `OFFICE#` and current-story records SHALL have no TTL or automatic deletion. Publication attempts, transition events, run results, quarantine records, and alert-fingerprint state SHALL set one table-wide TTL attribute to a numeric Unix-epoch timestamp 30 days after creation or latest update; consumers SHALL treat items past that timestamp as expired before asynchronous TTL deletion completes. Current S3 image objects SHALL be deleted only when replaced, never because their story expires; S3 noncurrent versions and uncommitted staging objects SHALL retain their 30-day and 7-day lifecycle policies. Permanent deletion of retained office/story records SHALL be a manual, authorized, audited operator procedure and SHALL NOT be performed by runtime functions.
+Committed `OFFICE#{office_id}/CURRENT` and current-story records SHALL have no TTL or automatic deletion. Publication attempts, transition events, run results, quarantine records, and alert-fingerprint state SHALL set one table-wide TTL attribute to a numeric Unix-epoch timestamp 30 days after creation or latest update; consumers SHALL treat items past that timestamp as expired before asynchronous TTL deletion completes. Current S3 image objects SHALL be deleted only when replaced, never because their story expires; S3 noncurrent versions and uncommitted staging objects SHALL retain their 30-day and 7-day lifecycle policies. Permanent deletion of retained office/story records SHALL be a manual, authorized, audited operator procedure and SHALL NOT be performed by runtime functions.
 
 The system SHALL enable DynamoDB point-in-time recovery with a 35-day recovery window and create one monthly AWS Backup snapshot retained for one year. An operator SHALL create an on-demand DynamoDB backup before any planned destructive migration or table replacement. The system SHALL document a same-Region recovery runbook and execute it quarterly: restore DynamoDB to a new isolated table, reapply required configuration, validate sampled current-story and operational audit records, then destroy the isolated restore resources after recording the exercise result.
 
