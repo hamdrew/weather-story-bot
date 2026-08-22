@@ -15,11 +15,9 @@ updates:
           - patch
       development-tooling:
         dependency-type: development
-        patterns:
-          - mypy
-          - pytest
-          - pytest-cov
-          - ruff
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: github-actions
     directory: /
