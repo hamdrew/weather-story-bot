@@ -82,3 +82,13 @@ def test_contribution_guidance_requires_pull_requests_and_redaction() -> None:
     assert "Fork the repository" in guidance
     assert "Open a pull request" in guidance
     assert "Never commit tokens, AWS credentials" in guidance
+
+
+def test_living_data_model_documents_exist_and_are_linked_from_readme() -> None:
+    readme = read_repository_file("README.md")
+
+    for document in ("docs/data-model.md", "docs/state-diagram.md"):
+        content = read_repository_file(document)
+
+        assert content.startswith("# ")
+        assert f"]({document})" in readme

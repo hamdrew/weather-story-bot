@@ -8,7 +8,8 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from hashlib import sha256
 from json import dumps
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
+from uuid import uuid4
 
 # boto3 does not currently distribute PEP 561 type metadata.
 from boto3.dynamodb.conditions import Attr, Key  # type: ignore[import-untyped]
@@ -20,6 +21,7 @@ MAX_FAILURE_REASONS = 8
 MAX_FAILURE_SUMMARY_LENGTH = 256
 CURRENT_INDEX_NAME = "office-current-index"
 OPERATIONAL_RECORD_TTL_DAYS = 30
+PUBLICATION_LEASE_SECONDS = 60
 
 
 class RunStatus(StrEnum):
@@ -40,7 +42,7 @@ class ImageStatus(StrEnum):
 
 
 class AttemptState(StrEnum):
-    """Persisted publication states; transition enforcement is added in task 2.5."""
+    """Persisted publication states for one Telegram publication attempt."""
 
     RESERVED = "reserved"
     SEND_STARTED = "send_started"
@@ -49,6 +51,28 @@ class AttemptState(StrEnum):
     AMBIGUOUS = "ambiguous"
     CONFIRMED_RECEIVED = "confirmed_received"
     CONFIRMED_NOT_RECEIVED = "confirmed_not_received"
+
+
+class PublicationOperation(StrEnum):
+    """The Telegram operation protected by a publication reservation."""
+
+    CREATE = "create"
+    EDIT = "edit"
+
+
+@dataclass(frozen=True)
+class PublicationReservation:
+    """A successfully acquired, single-use lease for one story revision."""
+
+    attempt_id: str
+    run_id: str
+    office_id: str
+    source_story_id: str
+    revision_hash: str
+    operation: PublicationOperation
+    reservation_owner: str
+    lease_expires_at: datetime
+    target_message_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -498,22 +522,7 @@ class HistoryStore:
         reconciliation_reason: str | None = None,
     ) -> None:
         """Append a bounded, sanitized publication state transition event."""
-        permitted = {
-            "http_status",
-            "telegram_error_code",
-            "telegram_error_description",
-            "request_id",
-            "correlation_id",
-            "latency_ms",
-            "retry_after_seconds",
-            "retry_ordinal",
-            "retry_decision",
-        }
-        metadata = {
-            key: str(value)[:MAX_FAILURE_SUMMARY_LENGTH]
-            for key, value in (response_metadata or {}).items()
-            if key in permitted
-        }
+        metadata = _sanitize_transition_metadata(response_metadata)
         transitioned_at = self._clock()
         self._table.put_item(
             Item=_without_none(
@@ -540,6 +549,300 @@ class HistoryStore:
             ConditionExpression=Attr("sk").not_exists(),
         )
 
+    def reserve_publication(
+        self,
+        *,
+        run_id: str,
+        office_id: str,
+        source_story_id: str,
+        revision_hash: str,
+        operation: PublicationOperation,
+        reservation_owner: str,
+        target_message_ref: str | None = None,
+    ) -> PublicationReservation | None:
+        """Atomically reserve a current revision, or return ``None`` when it is protected.
+
+        Only an expired reservation that never started its Telegram request is reclaimable.
+        In particular, an expired `send_started` lease remains visible for ambiguity recovery.
+        """
+        if operation is PublicationOperation.EDIT and not target_message_ref:
+            raise ValueError("edit reservations require a target_message_ref")
+        if operation is PublicationOperation.CREATE and target_message_ref is not None:
+            raise ValueError("create reservations cannot have a target_message_ref")
+        now = self._clock()
+        lease_expires_at = now + timedelta(seconds=PUBLICATION_LEASE_SECONDS)
+        reservation = PublicationReservation(
+            attempt_id=str(uuid4()),
+            run_id=run_id,
+            office_id=office_id,
+            source_story_id=source_story_id,
+            revision_hash=revision_hash,
+            operation=operation,
+            reservation_owner=reservation_owner,
+            lease_expires_at=lease_expires_at,
+            target_message_ref=target_message_ref,
+        )
+        now_text = timestamp(now)
+        story_key = {"pk": _story_pk(office_id, source_story_id), "sk": "CURRENT"}
+        try:
+            self._transact_write(
+                [
+                    {
+                        "Update": {
+                            "Key": story_key,
+                            "UpdateExpression": _reservation_current_update(target_message_ref),
+                            "ExpressionAttributeValues": _without_none(
+                                {
+                                    ":attempt_id": reservation.attempt_id,
+                                    ":run_id": run_id,
+                                    ":owner": reservation_owner,
+                                    ":lease": timestamp(lease_expires_at),
+                                    ":reserved": AttemptState.RESERVED,
+                                    ":operation": operation,
+                                    ":revision": revision_hash,
+                                    ":ordinal": 1,
+                                    ":target_message_ref": target_message_ref,
+                                    ":now": now_text,
+                                }
+                            ),
+                            "ConditionExpression": (
+                                "current_revision_hash = :revision AND "
+                                "(attribute_not_exists(active_attempt_id) OR "
+                                "(publication_reservation_state = :reserved AND "
+                                "reservation_lease_expires_at <= :now)) AND "
+                                "(attribute_not_exists(applied_revision_hash) OR "
+                                "applied_revision_hash <> :revision)"
+                            ),
+                        }
+                    },
+                    {
+                        "Put": {
+                            "Item": self._attempt_item(reservation, now),
+                            "ConditionExpression": "attribute_not_exists(sk)",
+                        }
+                    },
+                    {
+                        "Put": {
+                            "Item": self._transition_item(
+                                reservation,
+                                ordinal=1,
+                                prior_state=None,
+                                resulting_state=AttemptState.RESERVED,
+                                actor=reservation_owner,
+                                transitioned_at=now,
+                            ),
+                            "ConditionExpression": "attribute_not_exists(sk)",
+                        }
+                    },
+                ]
+            )
+        except Exception as error:
+            if _is_conditional_failure(error):
+                return None
+            raise
+        return reservation
+
+    def start_publication_send(self, reservation: PublicationReservation) -> bool:
+        """Atomically enter ``send_started`` before the one permitted Telegram call."""
+        return self._transition_reservation(reservation, AttemptState.SEND_STARTED)
+
+    def transition_publication(
+        self,
+        reservation: PublicationReservation,
+        resulting_state: AttemptState,
+        *,
+        actor: str | None = None,
+        message_ref: str | None = None,
+        response_metadata: Mapping[str, object] | None = None,
+        error_class: str | None = None,
+    ) -> bool:
+        """Append one legal state transition and update current publication facts.
+
+        ``published`` and ``confirmed_received`` require the resulting Telegram message
+        reference.  Failed edits deliberately leave an existing message reference intact.
+        """
+        if resulting_state in {AttemptState.PUBLISHED, AttemptState.CONFIRMED_RECEIVED}:
+            if reservation.operation is PublicationOperation.EDIT:
+                message_ref = message_ref or reservation.target_message_ref
+            elif reservation.target_message_ref is not None:
+                raise ValueError("create reservations cannot have a target_message_ref")
+            if not message_ref:
+                raise ValueError("successful publication requires a message_ref")
+        return self._transition_reservation(
+            reservation,
+            resulting_state,
+            actor=actor or reservation.reservation_owner,
+            message_ref=message_ref,
+            response_metadata=response_metadata,
+            error_class=error_class,
+        )
+
+    def _transition_reservation(
+        self,
+        reservation: PublicationReservation,
+        resulting_state: AttemptState,
+        *,
+        actor: str | None = None,
+        message_ref: str | None = None,
+        response_metadata: Mapping[str, object] | None = None,
+        error_class: str | None = None,
+    ) -> bool:
+        prior_state, ordinal = _prior_state_and_ordinal(resulting_state)
+        if prior_state is AttemptState.RESERVED:
+            condition = (
+                "active_attempt_id = :attempt_id AND reservation_owner = :owner AND "
+                "reservation_revision_hash = :revision AND publication_reservation_state = :prior "
+                "AND reservation_lease_expires_at > :now"
+            )
+        else:
+            condition = (
+                "active_attempt_id = :attempt_id AND reservation_owner = :owner AND "
+                "reservation_revision_hash = :revision AND publication_reservation_state = :prior"
+            )
+        now = self._clock()
+        current_update, values = _current_transition_update(
+            resulting_state, reservation, message_ref
+        )
+        values.update(
+            {
+                ":attempt_id": reservation.attempt_id,
+                ":owner": reservation.reservation_owner,
+                ":revision": reservation.revision_hash,
+                ":prior": prior_state,
+                ":now": timestamp(now),
+                ":state": resulting_state,
+                ":ordinal": ordinal,
+            }
+        )
+        try:
+            self._transact_write(
+                [
+                    {
+                        "Update": {
+                            "Key": {
+                                "pk": _story_pk(reservation.office_id, reservation.source_story_id),
+                                "sk": "CURRENT",
+                            },
+                            "UpdateExpression": current_update,
+                            "ExpressionAttributeValues": values,
+                            "ConditionExpression": condition,
+                        }
+                    },
+                    {
+                        "Put": {
+                            "Item": self._transition_item(
+                                reservation,
+                                ordinal=ordinal,
+                                prior_state=prior_state,
+                                resulting_state=resulting_state,
+                                actor=actor or reservation.reservation_owner,
+                                transitioned_at=now,
+                                response_metadata=response_metadata,
+                                error_class=error_class,
+                                completed_at=now
+                                if resulting_state is not AttemptState.SEND_STARTED
+                                else None,
+                            ),
+                            "ConditionExpression": "attribute_not_exists(sk)",
+                        }
+                    },
+                ]
+            )
+        except Exception as error:
+            if _is_conditional_failure(error):
+                return False
+            raise
+        return True
+
+    def _attempt_item(
+        self, reservation: PublicationReservation, created_at: datetime
+    ) -> dict[str, object]:
+        return _without_none(
+            {
+                "pk": f"ATTEMPT#{reservation.attempt_id}",
+                "sk": "RECORD",
+                "record_type": "publication_attempt",
+                "attempt_id": reservation.attempt_id,
+                "run_id": reservation.run_id,
+                "office_id": reservation.office_id,
+                "source_story_id": reservation.source_story_id,
+                "revision_hash": reservation.revision_hash,
+                "operation": reservation.operation,
+                "reservation_owner": reservation.reservation_owner,
+                "lease_expires_at": timestamp(reservation.lease_expires_at),
+                "target_message_ref": reservation.target_message_ref,
+                "created_at": timestamp(created_at),
+                "expires_at": _operational_expiry(created_at),
+            }
+        )
+
+    def _transition_item(
+        self,
+        reservation: PublicationReservation,
+        *,
+        ordinal: int,
+        prior_state: AttemptState | None,
+        resulting_state: AttemptState,
+        actor: str,
+        transitioned_at: datetime,
+        response_metadata: Mapping[str, object] | None = None,
+        error_class: str | None = None,
+        completed_at: datetime | None = None,
+    ) -> dict[str, object]:
+        return _without_none(
+            {
+                "pk": f"ATTEMPT#{reservation.attempt_id}",
+                "sk": f"TRANSITION#{ordinal:06d}",
+                "record_type": "publication_transition",
+                "attempt_id": reservation.attempt_id,
+                "ordinal": ordinal,
+                "prior_state": prior_state,
+                "resulting_state": resulting_state,
+                "actor": actor[:128],
+                "transitioned_at": timestamp(transitioned_at),
+                "completed_at": timestamp(completed_at) if completed_at else None,
+                "lease_expires_at": timestamp(reservation.lease_expires_at),
+                "expires_at": _operational_expiry(transitioned_at),
+                "error_class": error_class[:128] if error_class else None,
+                "response_metadata": _sanitize_transition_metadata(response_metadata),
+            }
+        )
+
+    def _transact_write(self, items: list[dict[str, object]]) -> None:
+        """Execute a transaction with either a test adapter or a boto3 table resource."""
+        transact = getattr(self._table, "transact_write_items", None)
+        if callable(transact):
+            transact(TransactItems=items)
+            return
+        client = self._table.meta.client  # type: ignore[attr-defined]
+        serializer = __import__(
+            "boto3.dynamodb.types", fromlist=["TypeSerializer"]
+        ).TypeSerializer()
+        serialized: list[dict[str, object]] = []
+        for item in items:
+            operation, payload = next(iter(item.items()))
+            payload = dict(cast(Mapping[str, object], payload))
+            if "Key" in payload:
+                payload["Key"] = {
+                    key: serializer.serialize(value)
+                    for key, value in cast(Mapping[str, object], payload["Key"]).items()
+                }
+            if "Item" in payload:
+                payload["Item"] = {
+                    key: serializer.serialize(value)
+                    for key, value in cast(Mapping[str, object], payload["Item"]).items()
+                }
+            if "ExpressionAttributeValues" in payload:
+                payload["ExpressionAttributeValues"] = {
+                    key: serializer.serialize(value)
+                    for key, value in cast(
+                        Mapping[str, object], payload["ExpressionAttributeValues"]
+                    ).items()
+                }
+            payload["TableName"] = self._table.name  # type: ignore[attr-defined]
+            serialized.append({operation: payload})
+        client.transact_write_items(TransactItems=serialized)
+
 
 def _story_pk(office_id: str, source_story_id: str) -> str:
     return f"STORY#{office_id}#{source_story_id}"
@@ -555,4 +858,100 @@ def _without_none(item: Mapping[str, object]) -> dict[str, object]:
 
 
 def _is_conditional_failure(error: Exception) -> bool:
-    return error.__class__.__name__ == "ConditionalCheckFailedException"
+    error_name = error.__class__.__name__
+    if error_name == "ConditionalCheckFailedException":
+        return True
+    if error_name != "TransactionCanceledException":
+        return False
+
+    response = getattr(error, "response", None)
+    if not isinstance(response, Mapping):
+        return False
+    reasons = response.get("CancellationReasons")
+    if not isinstance(reasons, list):
+        return False
+    codes = [reason.get("Code") for reason in reasons if isinstance(reason, Mapping)]
+    return (
+        bool(codes)
+        and "ConditionalCheckFailed" in codes
+        and all(code in {"None", "ConditionalCheckFailed"} for code in codes)
+    )
+
+
+def _sanitize_transition_metadata(metadata: Mapping[str, object] | None) -> dict[str, str]:
+    """Keep only bounded, response-level fields that are safe in durable audit data."""
+    permitted = {
+        "http_status",
+        "telegram_error_code",
+        "telegram_error_description",
+        "request_id",
+        "correlation_id",
+        "latency_ms",
+        "retry_after_seconds",
+        "retry_ordinal",
+        "retry_decision",
+    }
+    return {
+        key: str(value)[:MAX_FAILURE_SUMMARY_LENGTH]
+        for key, value in (metadata or {}).items()
+        if key in permitted
+    }
+
+
+def _reservation_current_update(target_message_ref: str | None) -> str:
+    update = (
+        "SET active_attempt_id = :attempt_id, active_run_id = :run_id, "
+        "reservation_owner = :owner, reservation_lease_expires_at = :lease, "
+        "publication_reservation_state = :reserved, publication_operation = :operation, "
+        "reservation_revision_hash = :revision, transition_ordinal = :ordinal"
+    )
+    return (
+        f"{update}, target_message_ref = :target_message_ref"
+        if target_message_ref
+        else f"{update} REMOVE target_message_ref"
+    )
+
+
+def _prior_state_and_ordinal(resulting_state: AttemptState) -> tuple[AttemptState, int]:
+    legal_transitions = {
+        AttemptState.SEND_STARTED: (AttemptState.RESERVED, 2),
+        AttemptState.PUBLISHED: (AttemptState.SEND_STARTED, 3),
+        AttemptState.REJECTED: (AttemptState.SEND_STARTED, 3),
+        AttemptState.AMBIGUOUS: (AttemptState.SEND_STARTED, 3),
+        AttemptState.CONFIRMED_RECEIVED: (AttemptState.AMBIGUOUS, 4),
+        AttemptState.CONFIRMED_NOT_RECEIVED: (AttemptState.AMBIGUOUS, 4),
+    }
+    try:
+        return legal_transitions[resulting_state]
+    except KeyError as error:
+        raise ValueError(f"invalid publication transition to {resulting_state}") from error
+
+
+def _current_transition_update(
+    resulting_state: AttemptState,
+    reservation: PublicationReservation,
+    message_ref: str | None,
+) -> tuple[str, dict[str, object]]:
+    if resulting_state is AttemptState.SEND_STARTED:
+        return "SET publication_reservation_state = :state, transition_ordinal = :ordinal", {}
+    if resulting_state is AttemptState.AMBIGUOUS:
+        return (
+            "SET publication_reservation_state = :state, transition_ordinal = :ordinal, "
+            "latest_publication_status = :state"
+        ), {}
+    if resulting_state in {AttemptState.PUBLISHED, AttemptState.CONFIRMED_RECEIVED}:
+        return (
+            "SET latest_publication_status = :state, applied_revision_hash = :revision, "
+            "telegram_message_ref = :message_ref, transition_ordinal = :ordinal "
+            "REMOVE active_attempt_id, active_run_id, reservation_owner, "
+            "reservation_lease_expires_at, publication_reservation_state, publication_operation, "
+            "reservation_revision_hash, target_message_ref"
+        ), {":message_ref": message_ref}
+    # A definitive rejection and confirmed-not-received result leave any prior Telegram
+    # message reference untouched, while releasing the story for a later reservation.
+    return (
+        "SET latest_publication_status = :state, transition_ordinal = :ordinal "
+        "REMOVE active_attempt_id, active_run_id, reservation_owner, reservation_lease_expires_at, "
+        "publication_reservation_state, publication_operation, reservation_revision_hash, "
+        "target_message_ref"
+    ), {}

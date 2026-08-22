@@ -68,6 +68,13 @@ enabled because pytest-cov does not provide a separate branch-only fail gate.
 - Validate configuration through the Pydantic models in
   `src/weather_story_bot/config.py`; do not bypass those invariants with ad hoc
   parsing.
+- Treat [docs/data-model.md](docs/data-model.md) and
+  [docs/state-diagram.md](docs/state-diagram.md) as living architecture references.
+  Any change to persisted records, key schema, retention, S3 image lifecycle, or
+  state transitions must update the relevant document in the same change. Keep both
+  documents aligned with the active OpenSpec artifacts and preserve the repository
+  redaction rules: document contracts and field names only, never secret values,
+  tokens, real private identifiers, invite links, raw payloads, or raw responses.
 
 ## OpenSpec workflow
 
