@@ -21,6 +21,12 @@ class ConditionalCheckFailedException(Exception):
     pass
 
 
+class TransactionCanceledException(Exception):
+    def __init__(self, reasons: list[dict[str, str]]) -> None:
+        super().__init__()
+        self.response = {"CancellationReasons": reasons}
+
+
 class Table:
     def __init__(self) -> None:
         self.items: list[dict[str, object]] = []
@@ -61,8 +67,13 @@ class TransactionTable(Table):
         super().__init__()
         self.transactions: list[list[dict[str, object]]] = []
         self.fail_transaction = False
+        self.transaction_error: Exception | None = None
 
     def transact_write_items(self, **kwargs: object) -> dict[str, object]:
+        if self.transaction_error is not None:
+            error = self.transaction_error
+            self.transaction_error = None
+            raise error
         if self.fail_transaction:
             self.fail_transaction = False
             raise ConditionalCheckFailedException()
@@ -337,6 +348,85 @@ def test_create_and_edit_reservations_are_atomic_and_expire_in_sixty_seconds() -
     transition = cast(dict[str, object], first[2]["Put"])["Item"]
     assert cast(dict[str, object], attempt)["run_id"] == "run-1"
     assert cast(dict[str, object], transition)["resulting_state"] is AttemptState.RESERVED
+
+
+def test_create_reservations_reject_target_message_references() -> None:
+    with pytest.raises(ValueError, match="create reservations cannot have a target_message_ref"):
+        HistoryStore(TransactionTable(), clock=now).reserve_publication(
+            run_id="run",
+            office_id="MKX",
+            source_story_id="source",
+            revision_hash="revision",
+            operation=PublicationOperation.CREATE,
+            reservation_owner="worker",
+            target_message_ref="message-7",
+        )
+
+
+def test_create_success_requires_the_telegram_acknowledgement_reference() -> None:
+    table = TransactionTable()
+    store = HistoryStore(table, clock=now)
+    reservation = store.reserve_publication(
+        run_id="run",
+        office_id="MKX",
+        source_story_id="source",
+        revision_hash="revision",
+        operation=PublicationOperation.CREATE,
+        reservation_owner="worker",
+    )
+    assert reservation is not None
+    assert store.start_publication_send(reservation)
+
+    with pytest.raises(ValueError, match="successful publication requires a message_ref"):
+        store.transition_publication(reservation, AttemptState.PUBLISHED)
+
+
+def test_nonconditional_transaction_cancellation_is_not_treated_as_a_race() -> None:
+    table = TransactionTable()
+    error = TransactionCanceledException([{"Code": "ProvisionedThroughputExceeded"}])
+    table.transaction_error = error
+
+    with pytest.raises(TransactionCanceledException):
+        HistoryStore(table, clock=now).reserve_publication(
+            run_id="run",
+            office_id="MKX",
+            source_story_id="source",
+            revision_hash="revision",
+            operation=PublicationOperation.CREATE,
+            reservation_owner="worker",
+        )
+
+    reservation = HistoryStore(table, clock=now).reserve_publication(
+        run_id="run",
+        office_id="MKX",
+        source_story_id="source",
+        revision_hash="revision",
+        operation=PublicationOperation.CREATE,
+        reservation_owner="worker",
+    )
+    assert reservation is not None
+    table.transaction_error = error
+    with pytest.raises(TransactionCanceledException):
+        HistoryStore(table, clock=now).start_publication_send(reservation)
+
+
+def test_transaction_cancellation_with_only_conditional_failures_is_a_race() -> None:
+    table = TransactionTable()
+    table.transaction_error = TransactionCanceledException(
+        [{"Code": "None"}, {"Code": "ConditionalCheckFailed"}]
+    )
+
+    assert (
+        HistoryStore(table, clock=now).reserve_publication(
+            run_id="run",
+            office_id="MKX",
+            source_story_id="source",
+            revision_hash="revision",
+            operation=PublicationOperation.CREATE,
+            reservation_owner="worker",
+        )
+        is None
+    )
 
 
 def test_reservation_races_and_only_expired_unstarted_leases_can_be_reclaimed() -> None:

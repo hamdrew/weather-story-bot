@@ -567,6 +567,8 @@ class HistoryStore:
         """
         if operation is PublicationOperation.EDIT and not target_message_ref:
             raise ValueError("edit reservations require a target_message_ref")
+        if operation is PublicationOperation.CREATE and target_message_ref is not None:
+            raise ValueError("create reservations cannot have a target_message_ref")
         now = self._clock()
         lease_expires_at = now + timedelta(seconds=PUBLICATION_LEASE_SECONDS)
         reservation = PublicationReservation(
@@ -660,7 +662,10 @@ class HistoryStore:
         reference.  Failed edits deliberately leave an existing message reference intact.
         """
         if resulting_state in {AttemptState.PUBLISHED, AttemptState.CONFIRMED_RECEIVED}:
-            message_ref = message_ref or reservation.target_message_ref
+            if reservation.operation is PublicationOperation.EDIT:
+                message_ref = message_ref or reservation.target_message_ref
+            elif reservation.target_message_ref is not None:
+                raise ValueError("create reservations cannot have a target_message_ref")
             if not message_ref:
                 raise ValueError("successful publication requires a message_ref")
         return self._transition_reservation(
@@ -853,10 +858,24 @@ def _without_none(item: Mapping[str, object]) -> dict[str, object]:
 
 
 def _is_conditional_failure(error: Exception) -> bool:
-    return error.__class__.__name__ in {
-        "ConditionalCheckFailedException",
-        "TransactionCanceledException",
-    }
+    error_name = error.__class__.__name__
+    if error_name == "ConditionalCheckFailedException":
+        return True
+    if error_name != "TransactionCanceledException":
+        return False
+
+    response = getattr(error, "response", None)
+    if not isinstance(response, Mapping):
+        return False
+    reasons = response.get("CancellationReasons")
+    if not isinstance(reasons, list):
+        return False
+    codes = [reason.get("Code") for reason in reasons if isinstance(reason, Mapping)]
+    return (
+        bool(codes)
+        and "ConditionalCheckFailed" in codes
+        and all(code in {"None", "ConditionalCheckFailed"} for code in codes)
+    )
 
 
 def _sanitize_transition_metadata(metadata: Mapping[str, object] | None) -> dict[str, str]:

@@ -47,7 +47,7 @@ stateDiagram-v2
   Staged --> Orphaned: upload interruption or failed verification
   Orphaned --> Cleaned: reconciler or 7-day lifecycle expiry
   Committed --> Replaced: newer image committed
-  Replaced --> Cleaned: prior current object deleted; noncurrent version retained 30 days
+  Replaced --> Cleaned: prior current object deleted, noncurrent version retained 30 days
   Committed --> RetainedAfterExpiration: story expires
   RetainedAfterExpiration --> RetainedAfterExpiration: indefinite retention
 ```
@@ -96,7 +96,7 @@ stateDiagram-v2
   Collecting --> Processing: valid collection
   Processing --> Success: all selected work successful or skipped
   Processing --> SuccessWithDeferred: only unstarted story_cap/run_budget deferrals
-  Processing --> SuccessWithQuarantined: malformed siblings; valid selected work completes
+  Processing --> SuccessWithQuarantined: malformed siblings, valid selected work completes
   Processing --> Failed: unresolved rejected, ambiguous, or image-invalid work
   Success --> Persisted
   SuccessWithDeferred --> Persisted
@@ -124,8 +124,8 @@ stateDiagram-v2
   CoolingDown --> Suppressed: matching event before cooldown expiry
   Suppressed --> CoolingDown: increment count and refresh last seen
   CoolingDown --> OngoingNotify: matching event after cooldown expiry
-  OngoingNotify --> CoolingDown: emit aggregated count; begin next cooldown
-  CoolingDown --> Expired: no later updates; operational TTL elapses
+  OngoingNotify --> CoolingDown: emit aggregated count, begin next cooldown
+  CoolingDown --> Expired: no later updates, operational TTL elapses
   Expired --> [*]
 ```
 
