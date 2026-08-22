@@ -21,6 +21,8 @@ isolated and never committed here.
 - [Code of conduct](CODE_OF_CONDUCT.md)
 - [Support](SUPPORT.md)
 - [Apache License 2.0](LICENSE)
+- [Persisted data model](docs/data-model.md)
+- [Persistent state diagrams](docs/state-diagram.md)
 
 Do not publish Telegram tokens, AWS credentials, private identifiers, invite
 links, raw payloads, or unbounded operational logs in public collaboration
