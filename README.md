@@ -23,6 +23,7 @@ isolated and never committed here.
 - [Apache License 2.0](LICENSE)
 - [Persisted data model](docs/data-model.md)
 - [Persistent state diagrams](docs/state-diagram.md)
+- [History review and recovery runbook](docs/history-operations.md)
 
 Do not publish Telegram tokens, AWS credentials, private identifiers, invite
 links, raw payloads, or unbounded operational logs in public collaboration

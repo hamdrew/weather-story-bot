@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
 from json import dumps
@@ -188,6 +189,87 @@ class HistoryStore:
             "recorded_at": timestamp(self._clock()),
         }
         self._table.put_item(Item=_without_none(item), ConditionExpression=Attr("sk").not_exists())
+
+    def get_current_office(self, office_id: str) -> dict[str, object] | None:
+        """Return the one retained current-office record for an authorized review."""
+        return self._get_current_record(f"OFFICE#{office_id}")
+
+    def get_current_story(self, office_id: str, source_story_id: str) -> dict[str, object] | None:
+        """Return retained current state, first-seen facts, and image metadata for one story."""
+        return self._get_current_record(_story_pk(office_id, source_story_id))
+
+    def list_current_stories(self, office_id: str) -> list[dict[str, object]]:
+        """List an office's retained current stories by source expiration without a table scan."""
+        return self._query_all(
+            IndexName=CURRENT_INDEX_NAME,
+            KeyConditionExpression=Key("office_current_pk").eq(f"OFFICE#{office_id}"),
+            ConsistentRead=False,
+        )
+
+    def get_run_result(self, run_id: str) -> dict[str, object] | None:
+        """Return a non-expired immutable result for one single-office invocation."""
+        return self._get_operational_record(f"RUN#{run_id}", "RESULT")
+
+    def list_quarantined_items(self, run_id: str) -> list[dict[str, object]]:
+        """Return non-expired bounded validation facts for a run, in source-array order."""
+        return self._operational_query(
+            KeyConditionExpression=Key("pk").eq(f"QUARANTINE#{run_id}")
+            & Key("sk").begins_with("ITEM#")
+        )
+
+    def get_publication_attempt(
+        self, attempt_id: str
+    ) -> tuple[dict[str, object], list[dict[str, object]]] | None:
+        """Return an attempt and its append-only transitions for authorized reconciliation review.
+
+        The returned transition metadata was sanitized at write time.  Expired operational
+        records are intentionally treated as unavailable even while DynamoDB TTL deletion is
+        pending.
+        """
+        attempt = self._get_operational_record(f"ATTEMPT#{attempt_id}", "RECORD")
+        if attempt is None:
+            return None
+        transitions = self._operational_query(
+            KeyConditionExpression=Key("pk").eq(f"ATTEMPT#{attempt_id}")
+            & Key("sk").begins_with("TRANSITION#"),
+            ConsistentRead=True,
+        )
+        return attempt, transitions
+
+    def _get_current_record(self, pk: str) -> dict[str, object] | None:
+        response = self._table.get_item(Key={"pk": pk, "sk": "CURRENT"}, ConsistentRead=True)
+        item = response.get("Item")
+        return dict(item) if isinstance(item, Mapping) else None
+
+    def _get_operational_record(self, pk: str, sk: str) -> dict[str, object] | None:
+        response = self._table.get_item(Key={"pk": pk, "sk": sk}, ConsistentRead=True)
+        item = response.get("Item")
+        if not isinstance(item, Mapping) or _is_operationally_expired(item, self._clock()):
+            return None
+        return dict(item)
+
+    def _operational_query(self, **kwargs: object) -> list[dict[str, object]]:
+        """Query operational history and hide records awaiting asynchronous TTL deletion."""
+        return [
+            item
+            for item in self._query_all(**kwargs)
+            if not _is_operationally_expired(item, self._clock())
+        ]
+
+    def _query_all(self, **kwargs: object) -> list[dict[str, object]]:
+        """Read every page from a bounded DynamoDB key-family query without using Scan."""
+        items: list[dict[str, object]] = []
+        query_kwargs = dict(kwargs)
+        while True:
+            response = self._table.query(**query_kwargs)
+            page = response.get("Items", [])
+            if not isinstance(page, list):
+                raise ValueError("DynamoDB query Items must be a list")
+            items.extend(dict(item) for item in page if isinstance(item, Mapping))
+            last_key = response.get("LastEvaluatedKey")
+            if not isinstance(last_key, Mapping):
+                return items
+            query_kwargs["ExclusiveStartKey"] = dict(last_key)
 
     def observe_story(
         self, story: WeatherStory, *, image_sha256: str | None = None
@@ -944,6 +1026,23 @@ def _story_pk(office_id: str, source_story_id: str) -> str:
 def _operational_expiry(recorded_at: datetime) -> int:
     """Return the DynamoDB TTL timestamp for one operational record."""
     return int((recorded_at + timedelta(days=OPERATIONAL_RECORD_TTL_DAYS)).timestamp())
+
+
+def _is_operationally_expired(item: Mapping[str, object], now: datetime) -> bool:
+    """Respect the TTL boundary before DynamoDB asynchronously removes a record."""
+    expires_at = _epoch_seconds(item.get("expires_at"))
+    return expires_at is not None and expires_at <= int(now.timestamp())
+
+
+def _epoch_seconds(value: object) -> int | None:
+    """Normalize DynamoDB's integral numeric TTL representation without accepting fractions."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, Decimal) and value.is_finite() and value == value.to_integral_value():
+        return int(value)
+    return None
 
 
 def _without_none(item: Mapping[str, object]) -> dict[str, object]:
