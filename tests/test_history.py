@@ -15,6 +15,7 @@ from weather_story_bot.history import (
     OutcomeCounts,
     PublicationOperation,
     RunStatus,
+    _epoch_seconds,
     revision_hash,
 )
 from weather_story_bot.ingestion import QuarantinedStoryItem, WeatherStory
@@ -280,6 +281,58 @@ def test_review_helpers_hide_expired_dynamodb_decimal_ttl_records() -> None:
     }
 
     assert store.get_run_result("expired") is None
+
+
+def test_review_helpers_query_quarantine_records_and_hide_expired_items() -> None:
+    table = ReviewTable()
+    store = HistoryStore(table, clock=now)
+    table.query_pages = [
+        {
+            "Items": [
+                {"array_index": 0, "expires_at": int((now() + timedelta(days=1)).timestamp())},
+                {"array_index": 1, "expires_at": int(now().timestamp())},
+            ]
+        }
+    ]
+
+    assert store.list_quarantined_items("run-1") == [
+        {"array_index": 0, "expires_at": int((now() + timedelta(days=1)).timestamp())}
+    ]
+    condition = cast(Any, table.query_calls[0]["KeyConditionExpression"])
+    equals, begins_with = condition.get_expression()["values"]
+    assert equals.get_expression()["values"][1] == "QUARANTINE#run-1"
+    assert begins_with.get_expression()["values"][1] == "ITEM#"
+
+
+def test_reviewing_an_absent_attempt_does_not_query_its_transitions() -> None:
+    table = ReviewTable()
+
+    assert HistoryStore(table, clock=now).get_publication_attempt("missing") is None
+    assert table.query_calls == []
+
+
+def test_review_helpers_reject_malformed_dynamodb_query_items() -> None:
+    table = ReviewTable()
+    table.query_pages = [{"Items": {"not": "a list"}}]
+
+    with pytest.raises(ValueError, match="Items must be a list"):
+        HistoryStore(table, clock=now).list_current_stories("MKX")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (True, None),
+        (Decimal("123.5"), None),
+        (Decimal("NaN"), None),
+        ("123", None),
+        (123, 123),
+    ],
+)
+def test_epoch_seconds_accepts_only_integral_numeric_ttl_values(
+    value: object, expected: int | None
+) -> None:
+    assert _epoch_seconds(value) == expected
 
 
 def test_review_helpers_follow_dynamodb_query_pages_without_returning_expired_records() -> None:
