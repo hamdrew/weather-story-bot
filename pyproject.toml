@@ -9,6 +9,7 @@ dependencies = [
   "httpx>=0.28,<1",
   "pillow>=12.3.0,<13",
   "pydantic>=2.10,<3",
+  "regex>=2025.0.0,<2027",
   "timezonefinder>=6.5,<9",
 ]
 
@@ -24,6 +25,7 @@ dev = [
   "pytest>=9.1.1,<10",
   "pytest-cov>=7.1.0,<8",
   "ruff>=0.9,<1",
+  "types-regex>=2025.0.0,<2027",
 ]
 
 [tool.hatch.build.targets.wheel]
