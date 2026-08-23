@@ -1,8 +1,10 @@
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any, cast
 from uuid import UUID
 
 import pytest
+from boto3.dynamodb.types import TypeDeserializer
 
 from weather_story_bot.config import OfficeRegistryRecord
 from weather_story_bot.history import (
@@ -13,6 +15,7 @@ from weather_story_bot.history import (
     OutcomeCounts,
     PublicationOperation,
     RunStatus,
+    _epoch_seconds,
     revision_hash,
 )
 from weather_story_bot.ingestion import QuarantinedStoryItem, WeatherStory
@@ -127,6 +130,25 @@ class LatestStateTable(Table):
         return {"Items": self._items}
 
 
+class ReviewTable(Table):
+    def __init__(self) -> None:
+        super().__init__()
+        self.current_items: dict[tuple[str, str], dict[str, object]] = {}
+        self.query_pages: list[dict[str, object]] = []
+        self.get_calls: list[dict[str, object]] = []
+        self.query_calls: list[dict[str, object]] = []
+
+    def get_item(self, **kwargs: object) -> dict[str, object]:
+        self.get_calls.append(kwargs)
+        key = cast(dict[str, str], kwargs["Key"])
+        item = self.current_items.get((key["pk"], key["sk"]))
+        return {"Item": item} if item is not None else {}
+
+    def query(self, **kwargs: object) -> dict[str, object]:
+        self.query_calls.append(kwargs)
+        return self.query_pages.pop(0) if self.query_pages else {"Items": []}
+
+
 def now() -> datetime:
     return datetime(2026, 8, 16, 12, tzinfo=UTC)
 
@@ -198,6 +220,137 @@ def test_put_office_persists_current_operational_references() -> None:
     assert persisted["telegram_channel_id"] == "-1001"
     assert persisted["pinned_message_ref"] == "pinned-message"
     assert persisted["invite_ref"] == "invite-reference"
+
+
+def test_review_helpers_return_current_state_and_non_expired_operational_history() -> None:
+    table = ReviewTable()
+    store = HistoryStore(table, clock=now)
+    table.current_items[("OFFICE#MKX", "CURRENT")] = {"office_id": "MKX", "active": True}
+    table.current_items[("STORY#MKX#story", "CURRENT")] = {
+        "source_story_id": "story",
+        "first_seen_at": "2026-08-16T12:00:00Z",
+        "image": {"key": "current/MKX/story/image"},
+    }
+    table.current_items[("RUN#run-live", "RESULT")] = {
+        "run_id": "run-live",
+        "expires_at": int((now() + timedelta(days=1)).timestamp()),
+        "status": "success_with_deferred",
+        "counts": {"deferred": 1},
+    }
+    table.current_items[("RUN#run-expired", "RESULT")] = {
+        "run_id": "run-expired",
+        "expires_at": int(now().timestamp()),
+    }
+    table.current_items[("ATTEMPT#attempt-1", "RECORD")] = {
+        "attempt_id": "attempt-1",
+        "lease_expires_at": "2026-08-16T12:01:00Z",
+        "expires_at": int((now() + timedelta(days=1)).timestamp()),
+    }
+    table.query_pages = [
+        {
+            "Items": [
+                {"ordinal": 1, "expires_at": int((now() + timedelta(days=1)).timestamp())},
+                {"ordinal": 2, "expires_at": int(now().timestamp())},
+            ]
+        }
+    ]
+
+    assert store.get_current_office("MKX") == {"office_id": "MKX", "active": True}
+    assert store.get_current_story("MKX", "story") == {
+        "source_story_id": "story",
+        "first_seen_at": "2026-08-16T12:00:00Z",
+        "image": {"key": "current/MKX/story/image"},
+    }
+    assert store.get_run_result("run-live") == table.current_items[("RUN#run-live", "RESULT")]
+    assert store.get_run_result("run-expired") is None
+    assert store.get_publication_attempt("attempt-1") == (
+        table.current_items[("ATTEMPT#attempt-1", "RECORD")],
+        [{"ordinal": 1, "expires_at": int((now() + timedelta(days=1)).timestamp())}],
+    )
+    assert all("Scan" not in str(call) for call in table.query_calls)
+
+
+def test_review_helpers_hide_expired_dynamodb_decimal_ttl_records() -> None:
+    table = ReviewTable()
+    store = HistoryStore(table, clock=now)
+    dynamodb_value = TypeDeserializer().deserialize({"N": str(int(now().timestamp()))})
+    assert isinstance(dynamodb_value, Decimal)
+    table.current_items[("RUN#expired", "RESULT")] = {
+        "run_id": "expired",
+        "expires_at": dynamodb_value,
+    }
+
+    assert store.get_run_result("expired") is None
+
+
+def test_review_helpers_query_quarantine_records_and_hide_expired_items() -> None:
+    table = ReviewTable()
+    store = HistoryStore(table, clock=now)
+    table.query_pages = [
+        {
+            "Items": [
+                {"array_index": 0, "expires_at": int((now() + timedelta(days=1)).timestamp())},
+                {"array_index": 1, "expires_at": int(now().timestamp())},
+            ]
+        }
+    ]
+
+    assert store.list_quarantined_items("run-1") == [
+        {"array_index": 0, "expires_at": int((now() + timedelta(days=1)).timestamp())}
+    ]
+    condition = cast(Any, table.query_calls[0]["KeyConditionExpression"])
+    equals, begins_with = condition.get_expression()["values"]
+    assert equals.get_expression()["values"][1] == "QUARANTINE#run-1"
+    assert begins_with.get_expression()["values"][1] == "ITEM#"
+
+
+def test_reviewing_an_absent_attempt_does_not_query_its_transitions() -> None:
+    table = ReviewTable()
+
+    assert HistoryStore(table, clock=now).get_publication_attempt("missing") is None
+    assert table.query_calls == []
+
+
+def test_review_helpers_reject_malformed_dynamodb_query_items() -> None:
+    table = ReviewTable()
+    table.query_pages = [{"Items": {"not": "a list"}}]
+
+    with pytest.raises(ValueError, match="Items must be a list"):
+        HistoryStore(table, clock=now).list_current_stories("MKX")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (True, None),
+        (Decimal("123.5"), None),
+        (Decimal("NaN"), None),
+        ("123", None),
+        (123, 123),
+    ],
+)
+def test_epoch_seconds_accepts_only_integral_numeric_ttl_values(
+    value: object, expected: int | None
+) -> None:
+    assert _epoch_seconds(value) == expected
+
+
+def test_review_helpers_follow_dynamodb_query_pages_without_returning_expired_records() -> None:
+    table = ReviewTable()
+    store = HistoryStore(table, clock=now)
+    table.query_pages = [
+        {
+            "Items": [{"source_story_id": "first"}],
+            "LastEvaluatedKey": {"pk": "STORY#MKX#first", "sk": "CURRENT"},
+        },
+        {"Items": [{"source_story_id": "second"}]},
+    ]
+
+    assert store.list_current_stories("MKX") == [
+        {"source_story_id": "first"},
+        {"source_story_id": "second"},
+    ]
+    assert table.query_calls[1]["ExclusiveStartKey"] == {"pk": "STORY#MKX#first", "sk": "CURRENT"}
 
 
 def test_unchanged_story_only_updates_last_seen() -> None:

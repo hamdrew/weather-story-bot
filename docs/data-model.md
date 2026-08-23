@@ -79,7 +79,7 @@ authorized, and audited; runtime functions do not perform it.
 | 2.3–2.4 | Two-phase current-image retention and staging reconciliation | Implemented |
 | 2.5 | Conditional reservations and append-only state transitions | Implemented |
 | 2.6 | Protected operator reconciliation with conditional audit transitions | Implemented |
-| 2.7 | Query helpers and operational runbook coverage | Planned |
+| 2.7 | Query helpers and operational runbook coverage | Implemented |
 | 3.1–3.5 | Telegram use of durable state, expiration handling, retries, and scheduled runs | Planned |
 | 4.1–4.2 | Alert rendering, versioned fingerprints, cooldown, and aggregation | Planned |
 | 5.2 and 5.5 | Production DynamoDB/S3 resources, IAM, backups, and recovery documentation | Planned |
