@@ -30,6 +30,15 @@ CI SHALL generate a machine-readable SBOM from the resolved artifact and run dep
 - **WHEN** SBOM or vulnerability/license scanning reports a configured blocking finding
 - **THEN** the release cannot proceed to CloudFormation change-set execution until the finding is remediated or formally approved under the documented exception process
 
+### Requirement: Gate deployment on property-based invariant tests
+
+The repository SHALL include Hypothesis as development tooling and run network-independent property-based tests in the standard pull-request validation gate. The Section 7.2 GitHub Actions CD workflow SHALL run the same suite as a fail-closed pre-deployment gate before packaging, change-set execution, or AWS application-resource mutation. The tests SHALL generate boundary and state combinations for deterministic publication-state/reconciliation, NWS validation, retry-budget, durable-data sanitizer/bound, revision-hash/timestamp, and image/redirect-limit behavior. As later capabilities are implemented, the suite SHALL extend to their deterministic logic. Property-based tests SHALL complement fixed contract fixtures, example-based unit tests, and mocked or ephemeral-stack integration tests; they SHALL not call live NWS or Telegram endpoints or mutate AWS resources.
+
+#### Scenario: A generated invariant test fails
+
+- **WHEN** a property-based test finds a counterexample during pull-request or pre-deployment validation
+- **THEN** the validation gate fails before packaging, change-set execution, or AWS application-resource mutation
+
 ### Requirement: Provision the on-demand office-info manager
 The deployment SHALL provision a separate protected office-info Lambda with no Scheduler trigger. It SHALL be invocable only by authorized operators through the documented on-demand path, use the exact environment-specific Telegram secret at `AWSCURRENT`, query NWS office and region data, create or reuse the configured channel invite link, create or edit and pin the one managed office-information message, and conditionally update its message/invite references and refreshed NWS metadata in the environment's `OFFICE#{office_id}/CURRENT` record. It SHALL have no permission to publish Weather Stories, create publication attempts, create office audit/snapshot records, or access unrelated environments. Dev SHALL use mock Telegram operations; staging and prod SHALL use their dedicated real channels. The Lambda SHALL not log or expose invite links or bot tokens.
 

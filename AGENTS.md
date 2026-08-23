@@ -35,6 +35,10 @@ make sync-production  # Lock-only, no-dev production synchronization
 Use `make check` before handing off a code change. Run `make format` whenever
 you change Python files, then re-run `make check`.
 
+Hypothesis is the development dependency for focused, deterministic,
+network-independent property tests. They run with the normal `make test` and
+`make check` validation gates alongside example-based unit and integration tests.
+
 Pytest writes generated coverage artifacts under `coverage/`: open
 `coverage/html/index.html` for the browsable static report, use
 `coverage/lcov.info` with VS Code coverage extensions, and publish

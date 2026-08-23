@@ -61,6 +61,8 @@ def test_pr_validation_covers_the_baseline_python_checks() -> None:
     ):
         assert command in workflow
 
+    assert "Run unit and property tests" in workflow
+
 
 def test_public_reporting_surfaces_exclude_sensitive_operational_data() -> None:
     security_policy = read_repository_file("SECURITY.md")

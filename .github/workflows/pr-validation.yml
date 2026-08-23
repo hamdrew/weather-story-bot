@@ -50,5 +50,5 @@ jobs:
           make lint
           make typecheck
 
-      - name: Run unit tests
+      - name: Run unit and property tests
         run: make test
