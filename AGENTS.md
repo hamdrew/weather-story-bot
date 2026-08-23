@@ -55,7 +55,13 @@ enabled because pytest-cov does not provide a separate branch-only fail gate.
   for example, use boto3 paginators for AWS list operations.
 - Mypy runs in strict mode across `src/` and `tests/`; do not suppress type
   errors without a narrowly justified reason.
-- Add or update focused pytest coverage for behavior changes and failure paths.
+- Every code change MUST add or update focused unit tests covering its intended
+  behavior and important failure or boundary paths. A change is not complete
+  until those tests run successfully through `make check`.
+- When designing tests for a changed set of code, explicitly evaluate whether
+  deterministic, network-independent property-based testing can cover its
+  invariants, input boundaries, or state transitions; add Hypothesis coverage
+  when it provides meaningful additional assurance over example-based tests.
 - Keep runtime configuration non-secret. Telegram tokens belong only in Secrets
   Manager values that conform to `config/secrets/telegram-secret.v1.schema.json`.
 - Do not log, commit, or place in test fixtures Telegram tokens, private chat or
