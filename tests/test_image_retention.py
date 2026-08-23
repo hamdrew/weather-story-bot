@@ -13,6 +13,7 @@ from weather_story_bot.image_retention import (
     ImageRetainer,
     ImageRetentionError,
     StagingReconciler,
+    _validate_decoded_image,
 )
 
 
@@ -88,6 +89,20 @@ class S3:
 def png() -> bytes:
     output = BytesIO()
     Image.new("RGB", (2, 3), "red").save(output, format="PNG")
+    return output.getvalue()
+
+
+def animated_png() -> bytes:
+    output = BytesIO()
+    first = Image.new("RGB", (2, 3), "red")
+    second = Image.new("RGB", (2, 3), "blue")
+    first.save(output, format="PNG", save_all=True, append_images=[second])
+    return output.getvalue()
+
+
+def png_with_dimensions(width: int, height: int) -> bytes:
+    output = BytesIO()
+    Image.new("1", (width, height)).save(output, format="PNG")
     return output.getvalue()
 
 
@@ -169,6 +184,31 @@ def test_commit_failure_after_promotion_deletes_new_current_object() -> None:
     assert history.invalid
 
 
+def test_retention_rejects_an_uploaded_object_with_mismatched_metadata() -> None:
+    class CorruptHeadS3(S3):
+        def head_object(self, **kwargs: object) -> dict[str, object]:
+            head = super().head_object(**kwargs).copy()
+            head["ContentLength"] = 0
+            return head
+
+    history = History()
+    worker, _, _ = retainer(
+        httpx.Response(200, content=png(), headers={"content-type": "image/png"}),
+        s3=CorruptHeadS3(),
+        history=history,
+    )
+
+    with pytest.raises(ImageRetentionError, match="image retention failed"):
+        worker.retain(
+            office_id="MKX",
+            source_story_id="source",
+            revision_hash="corrupt-upload",
+            url="https://www.weather.gov/image",
+        )
+
+    assert history.invalid
+
+
 def test_current_image_deletion_rejects_noncurrent_keys() -> None:
     worker, s3, _ = retainer(
         httpx.Response(200, content=png(), headers={"content-type": "image/png"})
@@ -230,6 +270,73 @@ def test_allows_only_safe_redirects_and_reconciles_old_staging_objects() -> None
     )
     assert deleted == 1
     assert "staging/old" in s3.deleted
+
+
+def test_rejects_redirect_loops_and_downloads_that_exceed_the_time_limit() -> None:
+    redirect_worker, _, redirect_history = retainer(
+        httpx.Response(302, headers={"location": "/again"})
+    )
+
+    with pytest.raises(ImageRetentionError, match="image retention failed"):
+        redirect_worker.retain(
+            office_id="MKX",
+            source_story_id="source",
+            revision_hash="redirect-loop",
+            url="https://www.weather.gov/image",
+        )
+    assert redirect_history.invalid
+
+    timeout_values = iter((0.0, 21.0))
+    timeout_worker = ImageRetainer(
+        httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200, content=png(), headers={"content-type": "image/png"}
+                )
+            )
+        ),
+        S3(),
+        History(),
+        bucket="images",
+        allowed_hosts={"weather.gov", "*.weather.gov"},
+        clock=lambda: next(timeout_values),
+    )
+
+    with pytest.raises(ImageRetentionError, match="image retention failed"):
+        timeout_worker.retain(
+            office_id="MKX",
+            source_story_id="source",
+            revision_hash="timed-out",
+            url="https://www.weather.gov/image",
+        )
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        animated_png(),
+        png_with_dimensions(5001, 5000),
+        png_with_dimensions(41, 2),
+    ],
+)
+def test_rejects_animated_oversized_and_extreme_aspect_ratio_images(content: bytes) -> None:
+    worker, _, history = retainer(
+        httpx.Response(200, content=content, headers={"content-type": "image/png"})
+    )
+
+    with pytest.raises(ImageRetentionError, match="image retention failed"):
+        worker.retain(
+            office_id="MKX",
+            source_story_id="source",
+            revision_hash="unsafe-image",
+            url="https://www.weather.gov/image",
+        )
+    assert history.invalid
+
+
+def test_decoder_requires_the_expected_image_format() -> None:
+    with pytest.raises(ImageRetentionError, match="decoder type mismatch"):
+        _validate_decoded_image(png(), "image/jpeg")
 
 
 def test_reconciler_processes_every_s3_listing_page() -> None:

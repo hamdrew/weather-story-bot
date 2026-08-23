@@ -11,8 +11,7 @@ from json import dumps
 from typing import Any, Protocol, cast
 from uuid import uuid4
 
-# boto3 does not currently distribute PEP 561 type metadata.
-from boto3.dynamodb.conditions import Attr, Key  # type: ignore[import-untyped]
+from boto3.dynamodb.conditions import Attr, Key
 
 from weather_story_bot.config import OfficeRegistryRecord
 from weather_story_bot.ingestion import QuarantinedStoryItem, WeatherStory
@@ -655,6 +654,7 @@ class HistoryStore:
         message_ref: str | None = None,
         response_metadata: Mapping[str, object] | None = None,
         error_class: str | None = None,
+        reconciliation_reason: str | None = None,
     ) -> bool:
         """Append one legal state transition and update current publication facts.
 
@@ -675,6 +675,73 @@ class HistoryStore:
             message_ref=message_ref,
             response_metadata=response_metadata,
             error_class=error_class,
+            reconciliation_reason=reconciliation_reason,
+        )
+
+    def reconcile_ambiguous_attempt(
+        self,
+        attempt_id: str,
+        resulting_state: AttemptState,
+        *,
+        actor: str,
+        reason: str,
+        message_ref: str | None = None,
+    ) -> bool:
+        """Conditionally reconcile one ambiguous attempt with an operator audit record.
+
+        Repeating a completed reconciliation is safe: no additional transition is
+        written and ``False`` is returned. Only ``ambiguous`` attempts are eligible.
+        """
+        if resulting_state not in {
+            AttemptState.CONFIRMED_RECEIVED,
+            AttemptState.CONFIRMED_NOT_RECEIVED,
+        }:
+            raise ValueError("reconciliation requires a confirmation state")
+        if not actor.strip():
+            raise ValueError("reconciliation requires an operator identity")
+        if not reason.strip():
+            raise ValueError("reconciliation requires a reason")
+        if resulting_state is AttemptState.CONFIRMED_NOT_RECEIVED and message_ref is not None:
+            raise ValueError("confirmed_not_received cannot have a message_ref")
+
+        attempt = self._table.get_item(
+            Key={"pk": f"ATTEMPT#{attempt_id}", "sk": "RECORD"}, ConsistentRead=True
+        ).get("Item")
+        if not isinstance(attempt, Mapping):
+            return False
+        latest_state = self._latest_attempt_state(attempt_id)
+        if latest_state is not AttemptState.AMBIGUOUS:
+            return False
+        try:
+            reservation = PublicationReservation(
+                attempt_id=attempt_id,
+                run_id=str(attempt["run_id"]),
+                office_id=str(attempt["office_id"]),
+                source_story_id=str(attempt["source_story_id"]),
+                revision_hash=str(attempt["revision_hash"]),
+                operation=PublicationOperation(str(attempt["operation"])),
+                reservation_owner=str(attempt["reservation_owner"]),
+                lease_expires_at=datetime.fromisoformat(
+                    str(attempt["lease_expires_at"]).replace("Z", "+00:00")
+                ),
+                target_message_ref=(
+                    str(attempt["target_message_ref"])
+                    if attempt.get("target_message_ref") is not None
+                    else None
+                ),
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("publication attempt record is invalid") from error
+        if resulting_state is AttemptState.CONFIRMED_RECEIVED:
+            message_ref = message_ref or reservation.target_message_ref
+            if not message_ref:
+                raise ValueError("confirmed_received requires a message_ref")
+        return self._transition_reservation(
+            reservation,
+            resulting_state,
+            actor=actor,
+            message_ref=message_ref,
+            reconciliation_reason=reason,
         )
 
     def _transition_reservation(
@@ -686,6 +753,7 @@ class HistoryStore:
         message_ref: str | None = None,
         response_metadata: Mapping[str, object] | None = None,
         error_class: str | None = None,
+        reconciliation_reason: str | None = None,
     ) -> bool:
         prior_state, ordinal = _prior_state_and_ordinal(resulting_state)
         if prior_state is AttemptState.RESERVED:
@@ -739,6 +807,7 @@ class HistoryStore:
                                 transitioned_at=now,
                                 response_metadata=response_metadata,
                                 error_class=error_class,
+                                reconciliation_reason=reconciliation_reason,
                                 completed_at=now
                                 if resulting_state is not AttemptState.SEND_STARTED
                                 else None,
@@ -787,6 +856,7 @@ class HistoryStore:
         transitioned_at: datetime,
         response_metadata: Mapping[str, object] | None = None,
         error_class: str | None = None,
+        reconciliation_reason: str | None = None,
         completed_at: datetime | None = None,
     ) -> dict[str, object]:
         return _without_none(
@@ -805,8 +875,31 @@ class HistoryStore:
                 "expires_at": _operational_expiry(transitioned_at),
                 "error_class": error_class[:128] if error_class else None,
                 "response_metadata": _sanitize_transition_metadata(response_metadata),
+                "reconciliation_reason": (
+                    reconciliation_reason[:MAX_FAILURE_SUMMARY_LENGTH]
+                    if reconciliation_reason
+                    else None
+                ),
             }
         )
+
+    def _latest_attempt_state(self, attempt_id: str) -> AttemptState | None:
+        """Return the latest append-only transition state for one bounded attempt history."""
+        response = self._table.query(
+            KeyConditionExpression=Key("pk").eq(f"ATTEMPT#{attempt_id}")
+            & Key("sk").begins_with("TRANSITION#"),
+            ScanIndexForward=False,
+            Limit=1,
+            ConsistentRead=True,
+        )
+        items = response.get("Items", [])
+        if not isinstance(items, list) or not items:
+            return None
+        state = items[0].get("resulting_state") if isinstance(items[0], Mapping) else None
+        try:
+            return AttemptState(str(state))
+        except ValueError:
+            return None
 
     def _transact_write(self, items: list[dict[str, object]]) -> None:
         """Execute a transaction with either a test adapter or a boto3 table resource."""
