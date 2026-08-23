@@ -20,7 +20,7 @@ office and expiration time without a table scan.
 
 | Family | Key shape | Purpose and relationships | Mutability and retention | Safe field groups | Status |
 | --- | --- | --- | --- | --- | --- |
-| `OFFICE` | `OFFICE#{office_id}` / `METADATA#{recorded_at}` | NWS-enriched registry record; may hold managed pinned-office-message and invite references. | Immutable record; no TTL; retained indefinitely. | Office ID, public NWS office/region fields, coordinates/timezone, active flag, managed-reference placeholders. | Implemented (task 2.2); management workflow planned (3.6). |
+| `OFFICE` | `OFFICE#{office_id}` / `CURRENT` | One current operational-state record; holds NWS-enriched office/region metadata, active configuration, and managed pinned-office-message/invite references. | Conditionally mutable; no TTL; retained indefinitely. No office audit or snapshot records are retained. | Office ID, public NWS office/region fields, coordinates/timezone, active flag, managed-reference placeholders. | Implemented (task 2.2); management workflow planned (3.6). |
 | `STORY` | `STORY#{office_id}#{source_story_id}` / `CURRENT` | One current state per canonical `(office_id, source_story_id)`; links to the current image and current publication facts. | Conditionally mutable; preserves `first_seen_at` and publication facts while replacing current source/image state. No TTL; retained indefinitely, including after expiration. | Canonical identity, source timing/content fields, revision hash, lifecycle, image metadata, safe message-reference placeholder, publication status. | Implemented (2.2); end-to-end publishing planned (3.1–3.5). |
 | `ATTEMPT` | `ATTEMPT#{attempt_id}` / `RECORD` | Immutable create/edit reservation audit record linked to one run, story revision, and transitions. | Immutable; `expires_at` is 30 days after creation. | Attempt/run/story IDs, revision hash, operation, reservation owner/lease, target reference placeholder. | Implemented (2.5). |
 | Transition | `ATTEMPT#{attempt_id}` / `TRANSITION#{ordinal}` | Append-only event for an attempt state change; the latest ordinal derives final attempt state. | Immutable; `expires_at` is 30 days after transition. | Prior/resulting state, actor, times, lease, error class, reconciliation reason, allowlisted response metadata. | Implemented transition persistence (2.5); operator action planned (2.6). |
@@ -61,7 +61,7 @@ lifecycle safety net.
 
 ## Retention and recovery
 
-`OFFICE` and `STORY` records do not receive DynamoDB TTL. Operational families
+`OFFICE#{office_id}/CURRENT` and `STORY` records do not receive DynamoDB TTL. Operational families
 (`ATTEMPT`, transitions, `RUN`, `QUARANTINE`, and `ALERT`) use the table-wide
 `expires_at` Unix-epoch-seconds TTL attribute. DynamoDB TTL deletion is asynchronous,
 so readers treat a record past its expiry as expired even if it is still present.

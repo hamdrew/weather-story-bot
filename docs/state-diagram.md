@@ -28,6 +28,22 @@ Expiration is a state change, not deletion or unpublication. An omitted story re
 current until its source `endTime`; failed retrieval also does not alter current state.
 Superseded source content and images are not archived.
 
+## Office operational-state lifecycle
+
+**Implemented:** conditionally mutable current-office persistence. **Planned:** the
+on-demand office-info manager (3.6).
+
+```mermaid
+stateDiagram-v2
+  [*] --> Current: seed validated OFFICE CURRENT
+  Current --> Current: conditionally refresh NWS metadata or active configuration
+  Current --> Current: conditionally update managed pinned-message/invite references
+```
+
+`OFFICE#{office_id}/CURRENT` is the sole retained office-metadata record. It has no
+TTL and no immutable audit or snapshot family. Conditional updates prevent stale
+enrichment or management operations from replacing newer current operational state.
+
 ## Image lifecycle
 
 **Implemented:** bounded validation, staging upload, verification, promotion, commit,
