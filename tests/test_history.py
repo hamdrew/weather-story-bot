@@ -4,6 +4,7 @@ from uuid import UUID
 
 import pytest
 
+from weather_story_bot.config import OfficeRegistryRecord
 from weather_story_bot.history import (
     CURRENT_INDEX_NAME,
     AttemptState,
@@ -81,6 +82,51 @@ class TransactionTable(Table):
         return {}
 
 
+class LowLevelDynamoClient:
+    def __init__(self) -> None:
+        self.transactions: list[list[dict[str, object]]] = []
+
+    def transact_write_items(self, **kwargs: object) -> dict[str, object]:
+        self.transactions.append(cast(list[dict[str, object]], kwargs["TransactItems"]))
+        return {}
+
+
+class Boto3TableWithoutTransactionMethod(Table):
+    def __init__(self) -> None:
+        super().__init__()
+        self.name = "history-table"
+        self.client = LowLevelDynamoClient()
+        self.meta = type("TableMeta", (), {"client": self.client})()
+
+
+class ReconciliationTable(TransactionTable):
+    def __init__(self, attempt: dict[str, object], resulting_state: AttemptState) -> None:
+        super().__init__()
+        self.attempt = attempt
+        self.resulting_state = resulting_state
+
+    def get_item(self, **kwargs: object) -> dict[str, object]:
+        assert kwargs["Key"] == {"pk": f"ATTEMPT#{self.attempt['attempt_id']}", "sk": "RECORD"}
+        assert kwargs["ConsistentRead"] is True
+        return {"Item": self.attempt}
+
+    def query(self, **kwargs: object) -> dict[str, object]:
+        assert kwargs["ScanIndexForward"] is False
+        assert kwargs["Limit"] == 1
+        assert kwargs["ConsistentRead"] is True
+        return {"Items": [{"resulting_state": self.resulting_state}]}
+
+
+class LatestStateTable(Table):
+    def __init__(self, items: object) -> None:
+        super().__init__()
+        self._items = items
+
+    def query(self, **kwargs: object) -> dict[str, object]:
+        assert kwargs["ConsistentRead"] is True
+        return {"Items": self._items}
+
+
 def now() -> datetime:
     return datetime(2026, 8, 16, 12, tzinfo=UTC)
 
@@ -103,6 +149,26 @@ def story(**overrides: object) -> WeatherStory:
     )
 
 
+def office() -> OfficeRegistryRecord:
+    return OfficeRegistryRecord.model_validate(
+        {
+            "office_id": "MKX",
+            "weather_stories_url": "https://api.weather.gov/offices/MKX/weatherstories",
+            "display_name": "Milwaukee/Sullivan, WI",
+            "address": {
+                "street_address": "N3533 Hardscrabble Road",
+                "locality": "Dousman",
+                "region": "WI",
+                "postal_code": "53118",
+            },
+            "coordinates": {"latitude": 43.04, "longitude": -88.46},
+            "timezone": "America/Chicago",
+            "telegram_channel_id": "-1001",
+            "active": True,
+        }
+    )
+
+
 def test_observe_story_creates_one_mutable_current_record() -> None:
     table = Table()
     store = HistoryStore(table, clock=now)
@@ -118,6 +184,20 @@ def test_observe_story_creates_one_mutable_current_record() -> None:
     assert table.items[0]["first_seen_at"] == "2026-08-16T12:00:00Z"
     assert table.items[0]["image_status"] == "image_pending"
     assert table.updates == []
+
+
+def test_put_office_persists_current_operational_references() -> None:
+    table = Table()
+
+    HistoryStore(table, clock=now).put_office(
+        office(), pinned_message_ref="pinned-message", invite_ref="invite-reference"
+    )
+
+    persisted = table.items[0]
+    assert persisted["pk"] == "OFFICE#MKX"
+    assert persisted["telegram_channel_id"] == "-1001"
+    assert persisted["pinned_message_ref"] == "pinned-message"
+    assert persisted["invite_ref"] == "invite-reference"
 
 
 def test_unchanged_story_only_updates_last_seen() -> None:
@@ -363,6 +443,56 @@ def test_create_reservations_reject_target_message_references() -> None:
         )
 
 
+def test_transact_write_delegates_native_transaction_items_to_test_adapter() -> None:
+    table = TransactionTable()
+    items: list[dict[str, object]] = [{"Put": {"Item": {"pk": "ATTEMPT#id", "sk": "RECORD"}}}]
+
+    HistoryStore(table, clock=now)._transact_write(items)
+
+    assert table.transactions == [items]
+
+
+def test_transact_write_serializes_for_a_boto3_table_resource() -> None:
+    table = Boto3TableWithoutTransactionMethod()
+    items: list[dict[str, object]] = [
+        {
+            "Update": {
+                "Key": {"pk": "STORY#MKX#source", "sk": "CURRENT"},
+                "UpdateExpression": "SET publication_reservation_state = :state",
+                "ExpressionAttributeValues": {":state": AttemptState.RESERVED, ":ordinal": 1},
+            }
+        },
+        {
+            "Put": {
+                "Item": {
+                    "pk": "ATTEMPT#id",
+                    "sk": "RECORD",
+                    "record_type": "publication_attempt",
+                },
+                "ConditionExpression": "attribute_not_exists(sk)",
+            }
+        },
+    ]
+
+    HistoryStore(table, clock=now)._transact_write(items)
+
+    transaction = table.client.transactions[0]
+    update = cast(dict[str, object], transaction[0]["Update"])
+    assert update["TableName"] == "history-table"
+    assert update["Key"] == {"pk": {"S": "STORY#MKX#source"}, "sk": {"S": "CURRENT"}}
+    assert update["ExpressionAttributeValues"] == {
+        ":state": {"S": "reserved"},
+        ":ordinal": {"N": "1"},
+    }
+    put = cast(dict[str, object], transaction[1]["Put"])
+    assert put["TableName"] == "history-table"
+    assert put["Item"] == {
+        "pk": {"S": "ATTEMPT#id"},
+        "sk": {"S": "RECORD"},
+        "record_type": {"S": "publication_attempt"},
+    }
+
+
 def test_create_success_requires_the_telegram_acknowledgement_reference() -> None:
     table = TransactionTable()
     store = HistoryStore(table, clock=now)
@@ -559,6 +689,163 @@ def test_direct_publication_and_confirmed_not_received_follow_the_remaining_lega
     final_update = cast(dict[str, object], table.transactions[-1][0]["Update"])
     assert "latest_publication_status = :state" in cast(str, final_update["UpdateExpression"])
     assert "telegram_message_ref" not in cast(str, final_update["UpdateExpression"])
+
+
+def test_operator_reconciliation_is_conditional_audited_and_releases_retryable_attempts() -> None:
+    attempt_id = "123e4567-e89b-12d3-a456-426614174000"
+    table = ReconciliationTable(
+        {
+            "attempt_id": attempt_id,
+            "run_id": "run",
+            "office_id": "MKX",
+            "source_story_id": "source",
+            "revision_hash": "revision",
+            "operation": "create",
+            "reservation_owner": "publisher",
+            "lease_expires_at": "2026-08-16T12:01:00Z",
+        },
+        AttemptState.AMBIGUOUS,
+    )
+    store = HistoryStore(table, clock=now)
+
+    assert store.reconcile_ambiguous_attempt(
+        attempt_id,
+        AttemptState.CONFIRMED_NOT_RECEIVED,
+        actor="operator@example.invalid",
+        reason="Verified no message in the destination channel.",
+    )
+
+    update = cast(dict[str, object], table.transactions[-1][0]["Update"])
+    transition = cast(dict[str, object], table.transactions[-1][1]["Put"])["Item"]
+    assert "publication_reservation_state = :prior" in cast(str, update["ConditionExpression"])
+    assert (
+        cast(dict[str, object], update["ExpressionAttributeValues"])[":prior"]
+        is AttemptState.AMBIGUOUS
+    )
+    assert "REMOVE active_attempt_id" in cast(str, update["UpdateExpression"])
+    assert cast(dict[str, object], transition)["actor"] == "operator@example.invalid"
+    assert cast(dict[str, object], transition)["reconciliation_reason"] == (
+        "Verified no message in the destination channel."
+    )
+
+    table.resulting_state = AttemptState.CONFIRMED_NOT_RECEIVED
+    assert not store.reconcile_ambiguous_attempt(
+        attempt_id,
+        AttemptState.CONFIRMED_NOT_RECEIVED,
+        actor="operator@example.invalid",
+        reason="Repeated invocation.",
+    )
+
+
+def test_operator_reconciliation_requires_an_ambiguous_attempt_and_a_complete_audit_record() -> (
+    None
+):
+    table = ReconciliationTable(
+        {
+            "attempt_id": "attempt",
+            "run_id": "run",
+            "office_id": "MKX",
+            "source_story_id": "source",
+            "revision_hash": "revision",
+            "operation": "create",
+            "reservation_owner": "publisher",
+            "lease_expires_at": "2026-08-16T12:01:00Z",
+        },
+        AttemptState.PUBLISHED,
+    )
+    store = HistoryStore(table, clock=now)
+
+    assert not store.reconcile_ambiguous_attempt(
+        "attempt",
+        AttemptState.CONFIRMED_NOT_RECEIVED,
+        actor="operator",
+        reason="No message found.",
+    )
+    with pytest.raises(ValueError, match="operator identity"):
+        store.reconcile_ambiguous_attempt(
+            "attempt",
+            AttemptState.CONFIRMED_NOT_RECEIVED,
+            actor=" ",
+            reason="No message found.",
+        )
+    with pytest.raises(ValueError, match="message_ref"):
+        HistoryStore(
+            ReconciliationTable(
+                {
+                    "attempt_id": "attempt",
+                    "run_id": "run",
+                    "office_id": "MKX",
+                    "source_story_id": "source",
+                    "revision_hash": "revision",
+                    "operation": "create",
+                    "reservation_owner": "publisher",
+                    "lease_expires_at": "2026-08-16T12:01:00Z",
+                },
+                AttemptState.AMBIGUOUS,
+            ),
+            clock=now,
+        ).reconcile_ambiguous_attempt(
+            "attempt",
+            AttemptState.CONFIRMED_RECEIVED,
+            actor="operator",
+            reason="Message found.",
+        )
+
+
+def test_operator_reconciliation_reuses_an_ambiguous_edit_target_message_reference() -> None:
+    table = ReconciliationTable(
+        {
+            "attempt_id": "attempt",
+            "run_id": "run",
+            "office_id": "MKX",
+            "source_story_id": "source",
+            "revision_hash": "revision",
+            "operation": "edit",
+            "reservation_owner": "publisher",
+            "lease_expires_at": "2026-08-16T12:01:00Z",
+            "target_message_ref": "existing-message",
+        },
+        AttemptState.AMBIGUOUS,
+    )
+
+    assert HistoryStore(table, clock=now).reconcile_ambiguous_attempt(
+        "attempt",
+        AttemptState.CONFIRMED_RECEIVED,
+        actor="operator",
+        reason="Verified the existing message was edited.",
+    )
+
+    update = cast(dict[str, object], table.transactions[-1][0]["Update"])
+    assert cast(dict[str, object], update["ExpressionAttributeValues"])[":message_ref"] == (
+        "existing-message"
+    )
+
+
+def test_reconciliation_rejects_malformed_attempt_records_and_ignores_absent_attempts() -> None:
+    malformed = ReconciliationTable({"attempt_id": "attempt"}, AttemptState.AMBIGUOUS)
+    store = HistoryStore(malformed, clock=now)
+
+    with pytest.raises(ValueError, match="attempt record is invalid"):
+        store.reconcile_ambiguous_attempt(
+            "attempt",
+            AttemptState.CONFIRMED_NOT_RECEIVED,
+            actor="operator",
+            reason="The record is incomplete.",
+        )
+
+    assert not HistoryStore(Table(), clock=now).reconcile_ambiguous_attempt(
+        "missing-attempt",
+        AttemptState.CONFIRMED_NOT_RECEIVED,
+        actor="operator",
+        reason="No record was found.",
+    )
+
+
+@pytest.mark.parametrize("items", [[], "not-a-list", [{"resulting_state": "unexpected"}], [None]])
+def test_latest_attempt_state_safely_rejects_missing_or_invalid_transition_records(
+    items: object,
+) -> None:
+    assert HistoryStore(LatestStateTable(items), clock=now)._latest_attempt_state("attempt") is None
 
 
 def test_stale_or_non_owner_workers_cannot_start_or_complete_a_reservation() -> None:

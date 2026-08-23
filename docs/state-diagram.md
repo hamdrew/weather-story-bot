@@ -72,9 +72,9 @@ Only `Committed` images may be published. No committed record points into `stagi
 
 ## Publication reservation lifecycle
 
-**Implemented:** reservation, lease, attempt/transition persistence, and the legal
-state-order guard. **Planned:** Telegram caller, stale-send detection, protected
-reconciliation Lambda, and retry orchestration.
+**Implemented:** reservation, lease, attempt/transition persistence, the legal
+state-order guard, and protected operator reconciliation. **Planned:** Telegram
+caller, stale-send detection, and retry orchestration.
 
 ```mermaid
 stateDiagram-v2

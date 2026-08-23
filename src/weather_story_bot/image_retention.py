@@ -13,7 +13,7 @@ from typing import Any, Protocol
 from urllib.parse import urlparse
 
 import httpx
-from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import-untyped]
+from botocore.exceptions import BotoCoreError, ClientError
 from PIL import Image, UnidentifiedImageError
 
 from weather_story_bot.history import ImageMetadata
