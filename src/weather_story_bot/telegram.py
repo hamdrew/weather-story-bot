@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from hashlib import sha256
 from io import BytesIO
 from typing import Any, Protocol, cast
@@ -11,7 +12,12 @@ from typing import Any, Protocol, cast
 from PIL import Image, UnidentifiedImageError
 from regex import findall
 
-from weather_story_bot.history import ImageMetadata, PublicationOperation, PublicationReservation
+from weather_story_bot.history import (
+    AttemptState,
+    ImageMetadata,
+    PublicationOperation,
+    PublicationReservation,
+)
 from weather_story_bot.image_retention import (
     MAX_ASPECT_RATIO,
     MAX_DIMENSION_SUM,
@@ -25,6 +31,66 @@ TELEGRAM_CAPTION_LIMIT = 1024
 
 class TelegramPublicationError(ValueError):
     """Raised before a Telegram call when retained media is unsafe to publish."""
+
+
+class TelegramOutcome(StrEnum):
+    """The safe delivery outcomes understood by the publisher."""
+
+    PUBLISHED = "published"
+    REJECTED = "rejected"
+    AMBIGUOUS = "ambiguous"
+
+
+class TelegramDefinitiveError(TelegramPublicationError):
+    """Telegram rejected a request before accepting it."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        response_metadata: Mapping[str, object],
+        retry_after_seconds: float | None = None,
+        retryable: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.response_metadata = dict(response_metadata)
+        self.retry_after_seconds = retry_after_seconds
+        self.retryable = retryable
+
+
+class TelegramAmbiguousError(TelegramPublicationError):
+    """The request outcome cannot establish whether Telegram accepted it."""
+
+
+@dataclass(frozen=True)
+class PublicationResult:
+    """The durable result of one reservation's single Telegram call."""
+
+    outcome: TelegramOutcome
+    message_ref: str | None = None
+    response_metadata: dict[str, str] | None = None
+    retry_after_seconds: float | None = None
+    retryable: bool = False
+    retry_deferred: bool = False
+
+
+def classify_telegram_response(response: Mapping[str, object]) -> tuple[bool, dict[str, str]]:
+    """Classify a Telegram response without retaining raw bodies or descriptions."""
+    ok = response.get("ok")
+    if ok is True:
+        return True, _response_metadata(response)
+    if ok is not False:
+        raise TelegramAmbiguousError("Telegram response did not contain a boolean ok field")
+    error_code = response.get("error_code")
+    if not isinstance(error_code, int) or isinstance(error_code, bool):
+        raise TelegramAmbiguousError("Telegram rejection did not contain an integer error code")
+    metadata = _response_metadata(response)
+    if error_code == 429:
+        retry_after = _retry_after_seconds(response)
+        if retry_after is not None:
+            metadata["retry_after_seconds"] = str(retry_after)
+        return False, metadata
+    return False, metadata
 
 
 class RetainedImageStore(Protocol):
@@ -90,14 +156,15 @@ def publish_photo(
             caption=caption.text,
             caption_entities=list(caption.entities),
         )
-        message_id = response.get("message_id")
+        _raise_for_telegram_rejection(response)
+        message_id = _message_id(response)
         if not isinstance(message_id, (str, int)):
             raise TelegramPublicationError("Telegram send response lacks message_id")
         return str(message_id)
     if reservation.operation is PublicationOperation.EDIT:
         if not reservation.target_message_ref:
             raise TelegramPublicationError("edit reservation lacks a message reference")
-        telegram.edit_message_media(
+        response = telegram.edit_message_media(
             chat_id=channel_id,
             message_id=reservation.target_message_ref,
             media={
@@ -107,8 +174,158 @@ def publish_photo(
                 "caption_entities": list(caption.entities),
             },
         )
+        _raise_for_telegram_rejection(response)
         return reservation.target_message_ref
     raise TelegramPublicationError("unsupported publication operation")
+
+
+def execute_reserved_publication(
+    history: Any,
+    telegram: TelegramClient,
+    images: RetainedImageStore,
+    *,
+    bucket: str,
+    channel_id: str,
+    reservation: PublicationReservation,
+    image: ImageMetadata,
+    title: str,
+    description: str,
+    alt_text: str,
+) -> PublicationResult:
+    """Execute exactly one Telegram call for an already acquired reservation."""
+    if not history.start_publication_send(reservation):
+        return PublicationResult(TelegramOutcome.AMBIGUOUS)
+    try:
+        message_ref = publish_photo(
+            telegram,
+            images,
+            bucket=bucket,
+            channel_id=channel_id,
+            reservation=reservation,
+            image=image,
+            title=title,
+            description=description,
+            alt_text=alt_text,
+        )
+    except TelegramDefinitiveError as error:
+        history.transition_publication(
+            reservation,
+            AttemptState.REJECTED,
+            response_metadata=error.response_metadata,
+            error_class="telegram_rejected",
+        )
+        return PublicationResult(
+            TelegramOutcome.REJECTED,
+            response_metadata={str(k): str(v) for k, v in error.response_metadata.items()},
+            retry_after_seconds=error.retry_after_seconds,
+            retryable=error.retryable,
+        )
+    except TelegramPublicationError:
+        history.transition_publication(
+            reservation, AttemptState.REJECTED, error_class="publication_validation_failed"
+        )
+        return PublicationResult(TelegramOutcome.REJECTED)
+    except Exception:
+        history.transition_publication(
+            reservation, AttemptState.AMBIGUOUS, error_class="telegram_outcome_unknown"
+        )
+        return PublicationResult(TelegramOutcome.AMBIGUOUS)
+
+    history.transition_publication(
+        reservation,
+        AttemptState.PUBLISHED,
+        message_ref=message_ref,
+        response_metadata={"telegram_status": "ok"},
+    )
+    return PublicationResult(TelegramOutcome.PUBLISHED, message_ref=message_ref)
+
+
+def publish_with_retries(
+    initial: PublicationReservation,
+    execute: Callable[[PublicationReservation], PublicationResult],
+    reserve_retry: Callable[[PublicationReservation, int], PublicationReservation | None],
+    *,
+    now: Callable[[], float],
+    sleep: Callable[[float], None],
+    deadline: float,
+    shutdown_reserve: float = 60.0,
+    max_retries: int = 2,
+) -> PublicationResult:
+    """Retry only definitive failures, using a new reservation for every retry."""
+    reservation = initial
+    result = execute(reservation)
+    retry_ordinal = 0
+    while (
+        result.outcome is TelegramOutcome.REJECTED
+        and result.retryable
+        and retry_ordinal < max_retries
+    ):
+        retry_after = result.retry_after_seconds
+        delay = retry_after if retry_after is not None else 2**retry_ordinal
+        if now() + delay + shutdown_reserve > deadline:
+            return PublicationResult(
+                outcome=result.outcome,
+                message_ref=result.message_ref,
+                response_metadata=result.response_metadata,
+                retry_after_seconds=result.retry_after_seconds,
+                retryable=result.retryable,
+                retry_deferred=True,
+            )
+        sleep(delay)
+        retry_ordinal += 1
+        next_reservation = reserve_retry(reservation, retry_ordinal)
+        if next_reservation is None:
+            return result
+        reservation = next_reservation
+        result = execute(reservation)
+    return result
+
+
+def _raise_for_telegram_rejection(response: Mapping[str, object]) -> None:
+    accepted, metadata = classify_telegram_response(response) if "ok" in response else (True, {})
+    if accepted:
+        return
+    error_code = response.get("error_code")
+    retry_after = _retry_after_seconds(response) if error_code == 429 else None
+    retryable = (error_code == 429 and retry_after is not None) or (
+        isinstance(error_code, int) and 500 <= error_code < 600
+    )
+    raise TelegramDefinitiveError(
+        "Telegram rejected the publication",
+        response_metadata=metadata,
+        retry_after_seconds=retry_after,
+        retryable=retryable,
+    )
+
+
+def _message_id(response: Mapping[str, object]) -> object:
+    """Read both the test adapter shape and Telegram's nested result shape."""
+    if "message_id" in response:
+        return response.get("message_id")
+    result = response.get("result")
+    return result.get("message_id") if isinstance(result, Mapping) else None
+
+
+def _retry_after_seconds(response: Mapping[str, object]) -> float | None:
+    parameters = response.get("parameters")
+    if not isinstance(parameters, Mapping):
+        return None
+    value = parameters.get("retry_after")
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        return None
+    return float(value)
+
+
+def _response_metadata(response: Mapping[str, object]) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    error_code = response.get("error_code")
+    if isinstance(error_code, int) and not isinstance(error_code, bool):
+        metadata["http_status"] = str(error_code)
+        metadata["telegram_error_code"] = str(error_code)
+    description = response.get("description")
+    if isinstance(description, str):
+        metadata["telegram_error_description"] = description[:256]
+    return metadata
 
 
 def _load_and_validate_retained_image(

@@ -8,12 +8,22 @@ from hypothesis import strategies as st
 from PIL import Image
 from regex import findall
 
-from weather_story_bot.history import ImageMetadata, PublicationOperation, PublicationReservation
+from weather_story_bot.history import (
+    AttemptState,
+    ImageMetadata,
+    PublicationOperation,
+    PublicationReservation,
+)
 from weather_story_bot.telegram import (
     TELEGRAM_CAPTION_LIMIT,
+    PublicationResult,
+    TelegramOutcome,
     TelegramPublicationError,
     _truncate_graphemes,
+    classify_telegram_response,
+    execute_reserved_publication,
     publish_photo,
+    publish_with_retries,
     render_caption,
 )
 
@@ -67,6 +77,24 @@ class Telegram:
         return {}
 
 
+class History:
+    def __init__(self) -> None:
+        self.started = 0
+        self.transitions: list[AttemptState] = []
+
+    def start_publication_send(self, reservation: PublicationReservation) -> bool:
+        del reservation
+        self.started += 1
+        return True
+
+    def transition_publication(
+        self, reservation: PublicationReservation, state: AttemptState, **kwargs: object
+    ) -> bool:
+        del reservation, kwargs
+        self.transitions.append(state)
+        return True
+
+
 def _metadata(data: bytes) -> ImageMetadata:
     from hashlib import sha256
 
@@ -98,6 +126,97 @@ def test_publish_sends_exactly_one_photo_with_plain_caption() -> None:
     assert telegram.calls[0]["caption"] == "*Alert*\ntext\n\nImage description: map"
     assert "parse_mode" not in telegram.calls[0]
     assert telegram.calls[0]["caption_entities"] == [{"type": "bold", "offset": 0, "length": 7}]
+
+
+def test_telegram_response_classification_keeps_retry_metadata_bounded() -> None:
+    retryable, metadata = classify_telegram_response(
+        {
+            "ok": False,
+            "error_code": 429,
+            "description": "slow down",
+            "parameters": {"retry_after": 3},
+        }
+    )
+
+    assert retryable is False
+    assert metadata == {
+        "http_status": "429",
+        "telegram_error_code": "429",
+        "telegram_error_description": "slow down",
+        "retry_after_seconds": "3.0",
+    }
+
+
+def test_execute_reserved_publication_transitions_success_and_calls_telegram_once() -> None:
+    data = _image_bytes()
+    history = History()
+    telegram = Telegram()
+
+    result = execute_reserved_publication(
+        history,
+        telegram,
+        Images(data),
+        bucket="images",
+        channel_id="channel",
+        reservation=_reservation(),
+        image=_metadata(data),
+        title="Title",
+        description="text",
+        alt_text="",
+    )
+
+    assert result == PublicationResult(TelegramOutcome.PUBLISHED, message_ref="17")
+    assert history.started == 1
+    assert history.transitions == [AttemptState.PUBLISHED]
+    assert len(telegram.calls) == 1
+
+
+def test_retries_use_new_reservations_and_defer_when_delay_does_not_fit() -> None:
+    reservations = [_reservation(), _reservation()]
+    executed: list[PublicationReservation] = []
+    sleeps: list[float] = []
+    outcomes = iter(
+        [
+            PublicationResult(
+                TelegramOutcome.REJECTED,
+                retry_after_seconds=10,
+                retryable=True,
+            ),
+            PublicationResult(TelegramOutcome.PUBLISHED, message_ref="17"),
+        ]
+    )
+
+    def execute(reservation: PublicationReservation) -> PublicationResult:
+        executed.append(reservation)
+        return next(outcomes)
+
+    result = publish_with_retries(
+        reservations[0],
+        execute,
+        lambda previous, ordinal: reservations[ordinal],
+        now=lambda: 0,
+        sleep=sleeps.append,
+        deadline=100,
+    )
+
+    assert result.outcome is TelegramOutcome.PUBLISHED
+    assert executed == reservations
+    assert sleeps == [10]
+
+    deferred = publish_with_retries(
+        reservations[0],
+        lambda reservation: PublicationResult(
+            TelegramOutcome.REJECTED,
+            retry_after_seconds=50,
+            retryable=True,
+        ),
+        lambda previous, ordinal: reservations[1],
+        now=lambda: 0,
+        sleep=sleeps.append,
+        deadline=100,
+    )
+    assert deferred.retry_deferred is True
+    assert sleeps == [10]
 
 
 def test_publish_edits_the_existing_photo_message() -> None:
