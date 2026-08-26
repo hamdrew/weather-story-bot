@@ -4,6 +4,32 @@ from weather_story_bot import handler
 from weather_story_bot.history import AttemptState
 
 
+def test_publisher_handler_passes_exactly_one_office_to_the_configured_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[str] = []
+
+    class Runtime:
+        def process_office(self, office_id: str) -> None:
+            captured.append(office_id)
+
+    monkeypatch.setattr(handler, "_publisher_runtime_factory", lambda: Runtime())
+
+    handler.publisher_handler({"office_id": "MKX"}, object())
+    assert captured == ["MKX"]
+
+
+@pytest.mark.parametrize(
+    "event",
+    [{}, {"office_id": ""}, {"office_id": "MKX", "unexpected": True}],
+)
+def test_publisher_handler_rejects_anything_other_than_one_office_id(
+    event: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="office"):
+        handler.publisher_handler(event, object())
+
+
 def test_reconciliation_handler_uses_a_configured_history_table_and_returns_safe_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

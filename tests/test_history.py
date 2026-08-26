@@ -171,6 +171,27 @@ def story(**overrides: object) -> WeatherStory:
     )
 
 
+def test_put_deferral_uses_authorized_run_key_family() -> None:
+    table = Table()
+    store = HistoryStore(table, clock=now)
+
+    store.put_deferral("run-1", story(), "story_cap")
+
+    assert table.items == [
+        {
+            "pk": "RUN#run-1",
+            "sk": "DEFERRAL#MKX#123e4567-e89b-12d3-a456-426614174000",
+            "record_type": "controlled_deferral",
+            "run_id": "run-1",
+            "office_id": "MKX",
+            "source_story_id": "123e4567-e89b-12d3-a456-426614174000",
+            "reason": "story_cap",
+            "recorded_at": "2026-08-16T12:00:00Z",
+            "expires_at": int((now() + timedelta(days=30)).timestamp()),
+        }
+    ]
+
+
 def office() -> OfficeRegistryRecord:
     return OfficeRegistryRecord.model_validate(
         {

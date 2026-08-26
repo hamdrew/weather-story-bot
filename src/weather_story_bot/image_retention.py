@@ -97,12 +97,22 @@ class ImageRetainer:
         self._clock = clock
 
     def retain(
-        self, *, office_id: str, source_story_id: str, revision_hash: str, url: str
+        self,
+        *,
+        office_id: str,
+        source_story_id: str,
+        revision_hash: str,
+        url: str,
+        image: ValidatedImage | None = None,
     ) -> ImageMetadata:
-        """Retain an accepted image, committing its reference only after S3 verification."""
+        """Retain an accepted image, committing its reference only after S3 verification.
+
+        Callers that need the image checksum to derive ``revision_hash`` may supply an
+        already validated download, avoiding a second request for the same bytes.
+        """
         current_key: str | None = None
         try:
-            image = self.download(url)
+            image = image or self.download(url)
             staging_key = f"staging/{office_id}/{source_story_id}/{revision_hash}"
             current_key = f"current/{office_id}/{source_story_id}/{revision_hash}"
             self._s3.put_object(
@@ -160,6 +170,15 @@ class ImageRetainer:
 
     def download(self, url: str) -> ValidatedImage:
         """Fetch a small allowed HTTPS image through at most three safe redirects."""
+        try:
+            return self._download(url)
+        except ImageRetentionError:
+            raise
+        except (httpx.HTTPError, OSError, UnidentifiedImageError) as error:
+            raise ImageRetentionError("image download failed") from error
+
+    def _download(self, url: str) -> ValidatedImage:
+        """Perform the image download and validation after normalizing caller errors."""
         started = self._clock()
         current_url = url
         for redirect_count in range(MAX_REDIRECTS + 1):
