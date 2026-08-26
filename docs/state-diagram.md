@@ -8,7 +8,7 @@ contract reference, not a source of secrets or production identifiers.
 ## Story and revision lifecycle
 
 **Implemented:** canonical current-story persistence, conditional revision replacement,
-and expiration marking. **Planned:** scheduler-driven selection and Telegram work.
+expiration marking, scheduler-driven selection, and Telegram work.
 
 ```mermaid
 stateDiagram-v2
@@ -102,8 +102,8 @@ their bounded delay/run budget permits; unknown acceptance is never auto-retried
 
 ## Run result lifecycle
 
-**Implemented:** immutable `RUN` record structure and allowed status enum. **Planned:**
-scheduled handler classification and metrics/alerts.
+**Implemented:** immutable `RUN` record structure, allowed status enum, and scheduled
+handler classification. **Planned:** metrics and alerts.
 
 ```mermaid
 stateDiagram-v2

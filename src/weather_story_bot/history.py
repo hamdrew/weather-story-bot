@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
 from json import dumps
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 from uuid import uuid4
 
 from boto3.dynamodb.conditions import Attr, Key
@@ -91,6 +91,24 @@ class OutcomeCounts:
     def __post_init__(self) -> None:
         if any(value < 0 for value in asdict(self).values()):
             raise ValueError("outcome counts cannot be negative")
+
+    def increment(self, field: OutcomeField, value: int = 1) -> OutcomeCounts:
+        """Return counts with one named outcome advanced by a non-negative amount."""
+        if value < 0:
+            raise ValueError("outcome increment cannot be negative")
+        return replace(self, **{field: getattr(self, field) + value})
+
+
+OutcomeField = Literal[
+    "discovered",
+    "published",
+    "edited",
+    "skipped",
+    "deferred",
+    "quarantined",
+    "rejected",
+    "ambiguous",
+]
 
 
 @dataclass(frozen=True)
@@ -451,6 +469,26 @@ class HistoryStore:
                 "error_code": item.error_code[:64],
                 "affected_field": item.affected_field[:64],
                 "error_summary": item.error_summary[:MAX_FAILURE_SUMMARY_LENGTH],
+                "recorded_at": timestamp(recorded_at),
+                "expires_at": _operational_expiry(recorded_at),
+            },
+            ConditionExpression=Attr("sk").not_exists(),
+        )
+
+    def put_deferral(self, run_id: str, story: WeatherStory, reason: str) -> None:
+        """Persist a bounded record for controlled, unstarted work only."""
+        if reason not in {"story_cap", "run_budget"}:
+            raise ValueError("deferral reason must be story_cap or run_budget")
+        recorded_at = self._clock()
+        self._table.put_item(
+            Item={
+                "pk": f"RUN#{run_id}",
+                "sk": f"DEFERRAL#{story.office_id}#{story.source_story_id}",
+                "record_type": "controlled_deferral",
+                "run_id": run_id,
+                "office_id": story.office_id,
+                "source_story_id": story.source_story_id,
+                "reason": reason,
                 "recorded_at": timestamp(recorded_at),
                 "expires_at": _operational_expiry(recorded_at),
             },

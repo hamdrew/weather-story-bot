@@ -146,6 +146,13 @@ def test_retains_verified_image_through_staging_then_current_key() -> None:
     assert s3.deleted == ["staging/MKX/source/revision"]
 
 
+def test_download_normalizes_http_failures_to_image_retention_errors() -> None:
+    worker, _, _ = retainer(httpx.Response(502))
+
+    with pytest.raises(ImageRetentionError, match="image download failed"):
+        worker.download("https://www.weather.gov/image")
+
+
 def test_replacement_deletes_the_previous_current_image_after_commit() -> None:
     previous = ImageMetadata("current/MKX/source/old", "image/png", 1, "a", 1, 1)
     history = History()

@@ -5,17 +5,33 @@ entry point importable establishes the package shape used by SAM packaging.
 """
 
 import os
-from collections.abc import Mapping
-from typing import Any, cast
+from collections.abc import Callable, Mapping
+from typing import Any, Protocol, cast
 
 import boto3
 
 from weather_story_bot.history import AttemptState, DynamoTable, HistoryStore
 
 
+class PublisherRuntime(Protocol):
+    """The fully composed, single-office scheduled publishing workflow."""
+
+    def process_office(self, office_id: str) -> None: ...
+
+
+PublisherRuntimeFactory = Callable[[], PublisherRuntime]
+_publisher_runtime_factory: PublisherRuntimeFactory | None = None
+
+
 def publisher_handler(event: Mapping[str, Any], context: object) -> None:
-    """Reserved publisher Lambda entry point."""
-    del event, context
+    """Process exactly the active office selected by one Scheduler invocation."""
+    del context
+    if set(event) != {"office_id"}:
+        raise ValueError("publisher event must contain exactly one office_id")
+    office_id = _required_event_text(event, "office_id")
+    if _publisher_runtime_factory is None:
+        raise RuntimeError("publisher runtime is not configured")
+    _publisher_runtime_factory().process_office(office_id)
 
 
 def reconciliation_handler(event: Mapping[str, Any], context: object) -> dict[str, object]:
