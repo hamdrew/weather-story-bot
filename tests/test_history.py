@@ -34,12 +34,14 @@ class TransactionCanceledException(Exception):
 class Table:
     def __init__(self) -> None:
         self.items: list[dict[str, object]] = []
+        self.put_calls: list[dict[str, object]] = []
         self.updates: list[dict[str, object]] = []
         self.fail_next_conditional = False
         self.fail_update_numbers: set[int] = set()
         self.next_update_response: dict[str, object] = {}
 
     def put_item(self, **kwargs: object) -> dict[str, object]:
+        self.put_calls.append(kwargs)
         if self.fail_next_conditional:
             self.fail_next_conditional = False
             raise ConditionalCheckFailedException()
@@ -241,6 +243,36 @@ def test_put_office_persists_current_operational_references() -> None:
     assert persisted["telegram_channel_id"] == "-1001"
     assert persisted["pinned_message_ref"] == "pinned-message"
     assert persisted["invite_ref"] == "invite-reference"
+
+
+def test_commit_current_office_creates_verified_current_record() -> None:
+    table = Table()
+
+    version = HistoryStore(table, clock=now).commit_current_office(
+        office(), pinned_message_ref="pinned-message", invite_ref="invite-reference"
+    )
+
+    assert version == 1
+    assert table.items[0]["sk"] == "CURRENT"
+    assert table.items[0]["record_type"] == "office_current"
+    assert table.items[0]["version"] == 1
+    assert table.items[0]["pinned_message_ref"] == "pinned-message"
+
+
+def test_commit_current_office_uses_expected_version_for_optimistic_update() -> None:
+    table = Table()
+
+    version = HistoryStore(table, clock=now).commit_current_office(
+        office(),
+        pinned_message_ref="pinned-message",
+        invite_ref="invite-reference",
+        expected_version=4,
+    )
+
+    assert version == 5
+    assert table.items[0]["version"] == 5
+    condition = cast(Any, table.put_calls[0]["ConditionExpression"])
+    assert condition.get_expression()["values"][0].name == "version"
 
 
 def test_review_helpers_return_current_state_and_non_expired_operational_history() -> None:

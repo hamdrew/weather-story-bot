@@ -7,7 +7,7 @@ Describe the change and its user or operational impact.
 - [ ] `make format`
 - [ ] `make check`
 - [ ] Focused tests added or updated where behavior changed
-- [ ] OpenSpec task/specification reviewed and updated as applicable
+- [ ] AI-DLC requirements, stories, and construction artifacts reviewed and updated as applicable
 
 ## Safety and operations
 

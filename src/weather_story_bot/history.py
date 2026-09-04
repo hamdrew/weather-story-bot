@@ -212,6 +212,38 @@ class HistoryStore:
         """Return the one retained current-office record for an authorized review."""
         return self._get_current_record(f"OFFICE#{office_id}")
 
+    def commit_current_office(
+        self,
+        office: OfficeRegistryRecord,
+        *,
+        pinned_message_ref: str,
+        invite_ref: str,
+        expected_version: int | None = None,
+    ) -> int:
+        """Conditionally commit one verified managed office reference."""
+        version = 1 if expected_version is None else expected_version + 1
+        item = _without_none(
+            {
+                "pk": f"OFFICE#{office.office_id}",
+                "sk": "CURRENT",
+                "record_type": "office_current",
+                "office_id": office.office_id,
+                "display_name": office.display_name,
+                "timezone": office.timezone,
+                "pinned_message_ref": pinned_message_ref,
+                "invite_ref": invite_ref,
+                "version": version,
+                "recorded_at": timestamp(self._clock()),
+            }
+        )
+        condition = (
+            Attr("pk").not_exists()
+            if expected_version is None
+            else Attr("version").eq(expected_version)
+        )
+        self._table.put_item(Item=item, ConditionExpression=condition)
+        return version
+
     def get_current_story(self, office_id: str, source_story_id: str) -> dict[str, object] | None:
         """Return retained current state, first-seen facts, and image metadata for one story."""
         return self._get_current_record(_story_pk(office_id, source_story_id))

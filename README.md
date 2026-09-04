@@ -8,7 +8,7 @@ Stories and publishes approved updates to Telegram.
 
 ## Project status
 
-Weather Story Bot is under active, spec-driven development. The initial MVP
+Weather Story Bot is under active, AI-DLC-governed development. The initial MVP
 polls the NWS Milwaukee/Sullivan office (MKX) every 15 minutes and publishes
 validated Weather Stories to an environment-specific Telegram destination.
 Development delivery is mock-only; staging and production destinations are
@@ -21,9 +21,8 @@ isolated and never committed here.
 - [Code of conduct](CODE_OF_CONDUCT.md)
 - [Support](SUPPORT.md)
 - [Apache License 2.0](LICENSE)
-- [Persisted data model](docs/data-model.md)
-- [Persistent state diagrams](docs/state-diagram.md)
-- [History review and recovery runbook](docs/history-operations.md)
+- [AI-DLC state](aidlc-docs/aidlc-state.md)
+- [Approved requirements](aidlc-docs/inception/requirements/requirements.md)
 
 Do not publish Telegram tokens, AWS credentials, private identifiers, invite
 links, raw payloads, or unbounded operational logs in public collaboration
