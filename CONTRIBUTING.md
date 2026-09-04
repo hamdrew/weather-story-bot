@@ -6,7 +6,7 @@ sensitive data.
 
 1. Fork the repository and create a focused branch.
 2. Install the pinned toolchain with `mise install`, then run `uv sync`.
-3. Follow the active OpenSpec task and add focused tests for behavior changes.
+3. Follow the approved AI-DLC work obligation and add focused tests for behavior changes.
 4. Run `make format` and `make check`.
 5. Open a pull request using the supplied template.
 

@@ -1,4 +1,4 @@
-.PHONY: check format lint test coverage typecheck sync sync-production
+.PHONY: check format format-markdown lint test coverage typecheck sync sync-production
 
 sync:
 	uv sync
@@ -9,6 +9,10 @@ sync-production:
 
 format:
 	uv run --locked ruff format src tests
+	$(MAKE) format-markdown
+
+format-markdown:
+	find . -type f -name '*.md' -not -path './.git/*' -not -path './coverage/*' -print0 | xargs -0 npx --yes prettier --write
 
 lint:
 	uv run --locked ruff check src tests
