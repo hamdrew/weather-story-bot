@@ -952,3 +952,104 @@ construction-artifact reconciliation, or request changes."
 application code, infrastructure, or remote resources changed.
 
 ---
+
+## Units Generation Approval and U-01 Functional Design Replanning
+
+**Timestamp**: 2026-09-04T02:08:30Z
+
+**User Input**: "Approve current AI-DLC approval gate and continue"
+
+**AI Response**: "Recorded explicit approval of the reconciled Units Generation artifacts. The
+workflow has entered Construction at U-01 Functional Design. Replaced the superseded U-01 plan so
+the regenerated artifacts will use CloudWatch alarm transitions for notification noise reduction
+and will not reintroduce DynamoDB alert fingerprint, cooldown, aggregation, or delivery state."
+
+**Approval Prompt**: "Review
+`aidlc-docs/construction/plans/u-01-functional-design-plan.md`. Explicitly approve the regenerated
+U-01 Functional Design plan to generate the reconciled Functional Design artifacts, or request
+changes."
+
+**Context**: INCEPTION Units Generation approval recorded; CONSTRUCTION U-01 Functional Design
+reconciliation-plan approval gate. No application code, infrastructure, or remote resources changed.
+
+---
+
+## U-01 Functional Design Plan Approval and Artifact Reconciliation
+
+**Timestamp**: 2026-09-04T02:11:06Z
+
+**User Input**: "approved"
+
+**AI Response**: "Recorded explicit approval of the U-01 Functional Design reconciliation plan
+and regenerated its business-logic model, business rules, and domain entities. The design now uses
+CloudWatch alarm transitions as the only notification trigger, performs a one-time fallback only
+after definitive private-alert failure, and has no custom DynamoDB alert state."
+
+**Approval Prompt**: "Review `aidlc-docs/construction/u-01/functional-design/`. Explicitly approve
+the reconciled U-01 Functional Design artifacts to continue to U-01 NFR Requirements
+reconciliation, or request changes."
+
+**Context**: CONSTRUCTION - U-01 Functional Design reconciliation artifact approval gate. No
+application code, infrastructure, or remote resources changed.
+
+---
+
+## U-01 Functional Design Approval and NFR Requirements Reconciliation
+
+**Timestamp**: 2026-09-04T02:22:26Z
+
+**User Input**: "Approve and continue"
+
+**AI Response**: "Recorded explicit approval of the reconciled U-01 Functional Design artifacts
+and regenerated the U-01 NFR Requirements and technology decisions. The new NFR boundary relies on
+CloudWatch alarm evaluation/history rather than custom alert persistence, preserves bounded
+CloudWatch/SNS notification handling, and confirms Hypothesis with pytest for property testing."
+
+**Approval Prompt**: "Review `aidlc-docs/construction/u-01/nfr-requirements/`. Explicitly approve
+the reconciled U-01 NFR Requirements artifacts to continue to U-01 NFR Design reconciliation, or
+request changes."
+
+**Context**: CONSTRUCTION - U-01 Functional Design approved; U-01 NFR Requirements reconciliation
+artifact approval gate. No application code, infrastructure, or remote resources changed.
+
+---
+
+## U-01 NFR Requirements Approval and NFR Design Reconciliation
+
+**Timestamp**: 2026-09-04T02:28:59Z
+
+**User Input**: "approved"
+
+**AI Response**: "Recorded explicit approval of U-01 NFR Requirements and regenerated NFR Design.
+The reconciled design replaces the prior hybrid/application fingerprint policy with a validated
+CloudWatch/SNS transition boundary, one definitive-failure fallback, bounded deadlines, and
+allowlisted observations."
+
+**Approval Prompt**: "Review `aidlc-docs/construction/u-01/nfr-design/`. Explicitly approve the
+reconciled U-01 NFR Design artifacts to continue to U-01 Infrastructure Design reconciliation, or
+request changes."
+
+**Context**: CONSTRUCTION - U-01 NFR Requirements approved; U-01 NFR Design reconciliation artifact
+approval gate. No application code, infrastructure, or remote resources changed.
+
+---
+
+## U-01 NFR Design Approval and Infrastructure Design Reconciliation
+
+**Timestamp**: 2026-09-04T02:31:31Z
+
+**User Input**: "continue"
+
+**AI Response**: "Recorded approval of U-01 NFR Design and regenerated Infrastructure Design. It
+maps dedicated office-information and alert-notification Lambdas, CloudWatch alarms, separate SNS
+trigger/fallback topics, current-office-only DynamoDB access, Secrets Manager references, and scoped
+roles without an alert-state store, queue, public endpoint, or remote mutation."
+
+**Approval Prompt**: "Review `aidlc-docs/construction/u-01/infrastructure-design/`. Explicitly
+approve the reconciled U-01 Infrastructure Design artifacts to continue to the U-01 Code Generation
+plan, or request changes."
+
+**Context**: CONSTRUCTION - U-01 NFR Design approved; Infrastructure Design artifact approval gate.
+No application code, infrastructure, or remote resources changed.
+
+---

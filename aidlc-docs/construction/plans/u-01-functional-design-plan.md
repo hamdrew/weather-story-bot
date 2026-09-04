@@ -1,150 +1,56 @@
-# U-01 Functional Design Plan
+# U-01 Functional Design Reconciliation Plan
 
 ## Scope
 
-Design the technology-agnostic domain behavior for protected office-information management, private
-operational alerting, alert deduplication, structured safe observability, and alert-loop prevention.
-This covers US-2.3, US-3.2, and US-4.2 through US-4.4; infrastructure resources, IAM policies,
-runtime composition, and code are deferred to their applicable stages.
+Regenerate the technology-agnostic U-01 design for protected office-information management,
+CloudWatch-alarm-driven private alert dispatch, definitive-failure-only fallback, safe
+observability, and notification-loop prevention. This supersedes the prior design's removed
+DynamoDB alert fingerprint, cooldown, aggregation, and delivery-state model. It covers US-2.3,
+US-3.2, and US-4.2 through US-4.4; infrastructure, IAM policy, Lambda composition, and code remain
+for their applicable stages.
 
-## Design Checklist
+## Approved Decisions Applied Without New Questions
 
-- [x] Model the protected office-information and operational-alert workflows.
-- [x] Define U-01 domain entities, value objects, states, and relationships.
-- [x] Define validation, authorization, deduplication, fallback, redaction, and failure rules.
-- [x] Define safe input/output data flows and integration contracts.
-- [x] Identify applicable testable properties for PBT-01 and preserve them for Code Generation.
-- [x] Validate requirements, story, unit, Security Baseline, and PBT traceability.
+The governing requirements resolve every decision that affects this functional-design boundary:
 
-## Functional Design Questions
+- CloudWatch alarm state transitions are the only operator-notification trigger. U-01 must not
+  model a direct application alert-event path, SQS, or custom persisted alert state.
+- CloudWatch M-of-N evaluation, explicit missing-data treatment, optional composite alarms, and
+  alarm history provide notification-noise reduction.
+- The alert-notification Lambda receives the bounded alarm transition, renders one redacted private
+  Telegram alert, and invokes one separate SNS/email fallback only after definitive delivery
+  failure. Ambiguous delivery is observed without resend or fallback; no failure may loop back to
+  the trigger topic.
+- Office refresh remains an authorized on-demand operation: it validates caller/environment/office,
+  retrieves and validates current NWS data, creates or edits and verifies one pin, conditionally
+  updates the current office record, and leaves the schedule disabled on failure.
 
-### Question 1: Business Logic Modeling
+No additional decision is ambiguous enough to need a `[Answer]:` question. Frontend Components are
+N/A because U-01 has only protected Lambda and adapter contracts.
 
-How should alerting model an operational event before delivery?
+## Regeneration Checklist
 
-**Recommendation: A.** A classified safe event separates detection from notification and lets the
-fingerprint/cooldown policy suppress duplicate notifications while metrics continue.
+- [x] Model the protected office-information workflow and its failure-closed transitions.
+- [x] Model the bounded CloudWatch alarm-transition dispatcher and non-recursive fallback workflow.
+- [x] Define U-01 domain entities, value objects, states, and relationships without custom alert
+      fingerprint, cooldown, aggregation, or delivery-state entities.
+- [x] Define authorization, validation, redaction, safe-observation, ambiguity, fallback, and
+      failure rules.
+- [x] Define safe input/output data flows and narrow integration contracts for NWS, Telegram,
+      CloudWatch/SNS, durable current-office state, and observability.
+- [x] Identify applicable PBT-01 properties and explicit N/A rationales; preserve them for Code
+      Generation.
+- [x] Validate traceability to US-2.3, US-3.2, US-4.2 through US-4.4, FR-03, FR-06 through FR-09,
+      NFR-03, NFR-04, NFR-07, NFR-08, SECURITY-01 through SECURITY-15, and PBT-01.
 
-A) **Recommended** — Normalize every eligible signal into a bounded classified operational event,
-then apply fingerprint, cooldown, aggregation, and delivery decisions
+## Extension Compliance Plan
 
-B) Let each handler independently format and send alert text without a shared event model
-
-C) Persist every raw upstream failure and format it only when an alert is sent
-
-X) Other (please describe after the `[Answer]:` tag below)
-
-### Question 2: Domain Model
-
-What identity should define an alert fingerprint?
-
-**Recommendation: A.** Environment, workflow, stable failure class, and optional office scope
-provide meaningful four-hour deduplication without embedding private identifiers or unbounded text.
-
-A) **Recommended** — Use environment, workflow, stable failure class/code, and optional office ID;
-exclude tokens, chat/message IDs, URLs, raw messages, and arbitrary exception text
-
-B) Fingerprint the rendered Telegram alert text
-
-C) Use one global fingerprint for every alert in an environment
-
-X) Other (please describe after the `[Answer]:` tag below)
-
-### Question 3: Business Rules
-
-When should private-alert fallback be attempted?
-
-**Recommendation: A.** The approved requirements call for exactly one separate SNS/email fallback
-only after a definitive alert-delivery failure; this avoids loops and does not treat an ambiguous
-outcome as proof of non-delivery.
-
-A) **Recommended** — Attempt the fallback once only after a definitive private-Telegram alert
-failure; never route fallback or dispatcher failures back to the alert trigger
-
-B) Attempt fallback for every alert alongside Telegram delivery
-
-C) Retry ambiguous Telegram alert results indefinitely before fallback
-
-X) Other (please describe after the `[Answer]:` tag below)
-
-### Question 4: Data Flow
-
-How should office-information refresh obtain and persist current office data?
-
-**Recommendation: A.** The requirement calls for current NWS office/region data and one
-conditionally updated current office record, preventing stale managed-message references or an
-unapproved audit/snapshot history.
-
-A) **Recommended** — Retrieve and validate current NWS office/region data for an authorized
-request, then conditionally update only `OFFICE#{office_id}/CURRENT` after message/pin verification
-
-B) Reuse cached office data without an NWS retrieval
-
-C) Create a new immutable office snapshot for every refresh before Telegram work
-
-X) Other (please describe after the `[Answer]:` tag below)
-
-### Question 5: Integration Points
-
-What external authority should be required to invoke office-information refresh?
-
-**Recommendation: A.** A protected, on-demand command with validated caller, environment, and
-office scope is consistent with the existing reconciliation boundary and keeps it separate from
-scheduled story publication.
-
-A) **Recommended** — Require a validated protected operator command; reject scheduler events,
-cross-environment targets, and commands that request story publication
-
-B) Permit every publisher scheduler invocation to refresh office information
-
-C) Expose a public unauthenticated HTTP endpoint for refreshes
-
-X) Other (please describe after the `[Answer]:` tag below)
-
-### Question 6: Error Handling
-
-What should happen when a required office-information step fails?
-
-**Recommendation: A.** Failing closed preserves the managed-message contract: do not write a new
-current reference, trigger a bounded alert, and leave the schedule disabled rather than claiming a
-verified managed state.
-
-A) **Recommended** — Do not commit office references; emit a safe alert; leave the office schedule
-disabled; return a classified failure after durable safe state is recorded
-
-B) Commit any successfully created invite/message reference even when pin verification fails
-
-C) Enable the schedule so the next publisher run can repair the office information
-
-X) Other (please describe after the `[Answer]:` tag below)
-
-### Question 7: Business Scenarios
-
-How should repeated successful office-information refreshes behave?
-
-**Recommendation: A.** The managed message should be idempotent: conditional current-state update
-and create-or-edit behavior prevent duplicate messages and preserve exactly one verified pin.
-
-A) **Recommended** — Reuse or edit one managed message and conditionally update the current record;
-repeated equivalent refreshes do not create another message or audit/snapshot record
-
-B) Create and pin a new information message for every refresh
-
-C) Skip conditional state checks whenever an existing message reference is present
-
-X) Other (please describe after the `[Answer]:` tag below)
-
-## Evaluated Non-Applicable Category
-
-- Frontend Components: N/A. U-01 exposes protected Lambda/adapter contracts and no browser or
-  client UI.
-
-## Extension Constraints
-
-- SECURITY-01 through SECURITY-15 are enforced where applicable. U-01 must validate all external
-  inputs, protect private identifiers/secrets, preserve least privilege and secure defaults, emit
-  allowlisted logs, and fail closed. SECURITY-02, SECURITY-04, and SECURITY-07 are N/A.
-- PBT-01 is mandatory for U-01: the generated Functional Design must identify testable properties
-  for its deterministic transformations and stateful alert lifecycle, or record a specific N/A
-  rationale per component. PBT-02 through PBT-10 are not yet enforced at this stage.
+- SECURITY-01, SECURITY-03, SECURITY-05, SECURITY-06, SECURITY-08 through SECURITY-15 apply to
+  U-01's boundary design and must be explicitly evaluated. SECURITY-02, SECURITY-04, and
+  SECURITY-07 are N/A because this architecture has no network intermediary, HTML endpoint, or
+  customer-managed network configuration.
+- PBT-01 applies: identify meaningful invariant, idempotence, bounded-transformation, and stateful
+  model properties for the office-refresh and safe-rendering/sanitization paths. Record a rationale
+  for any PBT category that is not meaningful; PBT-02 through PBT-10 are deferred by the stage
+  matrix.
 - Resiliency Baseline is disabled.
