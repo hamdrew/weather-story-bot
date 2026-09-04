@@ -39,7 +39,8 @@
 1. Commands, profiles, alarm transitions, and output results shall be validated typed bounded models.
 2. Diagnostics and operator results shall permit only allowlisted safe fields; secrets, private
    Telegram identifiers, invite links, raw bodies, headers, token-bearing URLs, raw stack traces,
-   and unbounded exceptions are prohibited.
+   and unbounded exceptions are prohibited. The runtime sanitizer uses the locked `detect-secrets`
+   plugin engine as a final stop-gap and rejects any candidate with a finding.
 3. Protected operations shall deny by default for caller, environment, office, command, resource, or
    state mismatch. Dev Telegram management shall remain mock-only.
 4. Production shall reject DEBUG. Dev/staging DEBUG is limited to approved safe diagnostic additions

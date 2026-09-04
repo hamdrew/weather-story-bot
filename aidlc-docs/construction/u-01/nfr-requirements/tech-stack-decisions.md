@@ -2,15 +2,16 @@
 
 ## Selected Technologies
 
-| Area                        | Decision                                                                                 | Rationale                                                                                                                         |
-| --------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Language/runtime            | Python 3.13 in the existing Lambda service                                               | Preserves the approved runtime and avoids an unapproved service split.                                                            |
-| Domain validation           | Pydantic 2 typed models                                                                  | Validates bounded commands, profiles, alarm transitions, results, and configuration at trust boundaries.                          |
-| Application boundaries      | Existing typed protocols/ports and composition root                                      | Keeps handlers thin and prevents domain logic from constructing AWS clients or resolving secrets.                                 |
-| AWS integrations            | boto3-backed adapters for DynamoDB, SNS, CloudWatch, Secrets Manager, and Lambda context | Matches the architecture; CloudWatch/SNS supply alarm transitions while concrete resources/IAM remain Infrastructure Design work. |
-| Observability               | Structured allowlisted logs, CloudWatch metrics, alarms, and alarm history               | Provides safe correlation, bounded evidence, and platform-managed noise reduction without custom alert state.                     |
-| Property testing            | Hypothesis 6 with pytest                                                                 | Supports custom strategies, automatic shrinking, seed-based reproduction, and stateful tests in the existing runner.              |
-| Example/integration testing | pytest and pytest-cov with deterministic mocked adapters                                 | Preserves network-independent critical-path coverage and the repository coverage gate.                                            |
+| Area                        | Decision                                                                                 | Rationale                                                                                                                                      |
+| --------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Language/runtime            | Python 3.13 in the existing Lambda service                                               | Preserves the approved runtime and avoids an unapproved service split.                                                                         |
+| Domain validation           | Pydantic 2 typed models                                                                  | Validates bounded commands, profiles, alarm transitions, results, and configuration at trust boundaries.                                       |
+| Application boundaries      | Existing typed protocols/ports and composition root                                      | Keeps handlers thin and prevents domain logic from constructing AWS clients or resolving secrets.                                              |
+| AWS integrations            | boto3-backed adapters for DynamoDB, SNS, CloudWatch, Secrets Manager, and Lambda context | Matches the architecture; CloudWatch/SNS supply alarm transitions while concrete resources/IAM remain Infrastructure Design work.              |
+| Observability               | Structured allowlisted logs, CloudWatch metrics, alarms, and alarm history               | Provides safe correlation, bounded evidence, and platform-managed noise reduction without custom alert state.                                  |
+| Runtime secret stop-gap     | `detect-secrets` 1.5 structured plugin set                                               | Rejects credential-shaped observation/alert text before logging or delivery while excluding high-entropy/keyword plugins that over-flag prose. |
+| Property testing            | Hypothesis 6 with pytest                                                                 | Supports custom strategies, automatic shrinking, seed-based reproduction, and stateful tests in the existing runner.                           |
+| Example/integration testing | pytest and pytest-cov with deterministic mocked adapters                                 | Preserves network-independent critical-path coverage and the repository coverage gate.                                                         |
 
 ## PBT-09 Framework Decision
 

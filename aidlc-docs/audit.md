@@ -12,6 +12,177 @@
 
 ---
 
+## U-01 Fallback Failure Visibility
+
+**Timestamp**: 2026-09-04T02:44:00Z
+
+**User Input**: "Implement that suggestion"
+
+**AI Response**: "Replaced the swallowed fallback exception with a safe terminal dispatch result.
+The result explicitly distinguishes fallback not attempted, delivered, and failed while preserving
+the one-attempt/no-loop invariant and not adding provenance data."
+
+**Context**: CONSTRUCTION - U-01 Code Generation Step 3 corrective implementation. No remote
+resources changed.
+
+---
+
+## U-01 Runtime Secret Stop-Gap Decision
+
+**Timestamp**: 2026-09-04T02:45:00Z
+
+**User Input**: "Okay let's use detect-secrets, but don't worry about trying to add provenance, I
+don't want to add additional engineering."
+
+**AI Response**: "Updated U-01 to use the locked `detect-secrets` plugin engine as a final stop-gap.
+Candidates with any detector finding are rejected before logging or delivery; no provenance tracking
+is added. The allowlisted schema and secret-management boundary remain authoritative."
+
+**Context**: CONSTRUCTION - U-01 Code Generation Step 1 refinement; dependency and NFR technology
+decision updated. No remote resources changed.
+
+---
+
+## U-01 Detect-Secrets Scope Refinement
+
+**Timestamp**: 2026-09-04T02:50:00Z
+
+**User Input**: "Okay let's use detect-secrets, but don't worry about trying to add provenance, I
+don't want to add additional engineering."
+
+**AI Response**: "Applied detect-secrets as a final runtime stop-gap with no provenance tracking.
+The implementation uses only structured credential plugins; high-entropy and keyword plugins are
+excluded because they reject ordinary operational prose. Any finding rejects the candidate before
+logging or delivery, and the finding itself is never emitted. Focused tests pass."
+
+**Context**: CONSTRUCTION - U-01 Code Generation Step 1 refinement; `detect-secrets` added as a
+locked direct dependency and structured-plugin policy documented. No remote resources changed.
+
+---
+
+## U-01 Shared Secret-Checked Model Refactor
+
+**Timestamp**: 2026-09-04T02:55:00Z
+
+**User Input**: "Implement that design"
+
+**AI Response**: "Refactored the detect-secrets summary validator into a shared Pydantic
+`SecretCheckedModel`. `AlarmTransition` and `SafeObservation` now inherit the common validator,
+removing cross-model coupling. Added a regression assertion covering both models."
+
+**Context**: CONSTRUCTION - U-01 Code Generation Step 1 refinement. No remote resources changed.
+
+---
+
+## U-01 Code Generation Continuation
+
+**Timestamp**: 2026-09-04T03:05:00Z
+
+**User Input**: "Continue with U-01 code generation"
+
+**AI Response**: "Continued Code Generation Step 2 by adding `HistoryStore.commit_current_office`,
+which conditionally writes the verified single current-office record with an optimistic version. The
+full office-refresh coordinator and protected adapters remain part of Step 2; focused history and
+operations tests pass."
+
+**Context**: CONSTRUCTION - U-01 Code Generation Step 2 in progress. No remote resources changed.
+
+---
+
+## U-01 Test Coverage Correction
+
+**Timestamp**: 2026-09-04T03:12:00Z
+
+**User Input**: "You did not add tests, is that going to happen later?"
+
+**AI Response**: "Added focused tests for current-office creation and optimistic-version
+conditional persistence. The history and operations suites now pass 48 tests; Step 2 remains in
+progress until the office-refresh coordinator and protected adapters are implemented."
+
+**Context**: CONSTRUCTION - U-01 Code Generation Step 2 test correction. No remote resources changed.
+
+---
+
+## U-01 Code Generation Step 2 Completion
+
+**Timestamp**: 2026-09-04T03:20:00Z
+
+**User Input**: "Continue with code generation"
+
+**AI Response**: "Completed U-01 Code Generation Step 2. Added a protected office-refresh
+coordinator with narrow profile, Telegram-management, and conditional-current-store ports. It only
+commits after independent pin verification and returns no managed references. Focused tests, Ruff,
+and strict mypy pass."
+
+**Context**: CONSTRUCTION - U-01 Code Generation Step 2 complete; Step 3 is next. No remote
+resources changed.
+
+---
+
+## U-01 Code Generation Step 3 Completion
+
+**Timestamp**: 2026-09-04T03:25:00Z
+
+**User Input**: "Continue with code generation"
+
+**AI Response**: "Completed U-01 Code Generation Step 3. Added bounded private-alert rendering
+and dispatcher behavior that invokes an independent fallback exactly once only after a definitive
+failure; acknowledged and ambiguous outcomes do not fall back. The dispatcher has no trigger-topic
+operation, so it cannot recurse. Focused tests pass."
+
+**Context**: CONSTRUCTION - U-01 Code Generation Step 3 complete; Step 4 is next. No remote
+resources changed.
+
+---
+
+## U-01 Steps 2 and 3 Coverage Expansion
+
+**Timestamp**: 2026-09-04T03:35:00Z
+
+**User Input**: "Please cover important test coverage gaps for steps 2 and 3"
+
+**AI Response**: "Added deterministic coverage for pre-load environment rejection, verified
+expected-version propagation, bounded alert rendering, and fallback failure termination. Existing
+tests continue to cover pin-verification failure and fallback only after definitive failure. Focused
+operations/history tests, Ruff, and strict mypy pass."
+
+**Context**: CONSTRUCTION - U-01 Code Generation Steps 2/3 coverage expansion. No remote resources
+changed.
+
+---
+
+## U-01 Infrastructure Design Approval and Code Generation Planning
+
+**Timestamp**: 2026-09-04T02:36:42Z
+
+**User Input**: "Commit, then approve and continue"
+
+**AI Response**: "Committed the reconciled U-01 construction artifacts as `7f9df04` and recorded
+approval of Infrastructure Design. Created the executable U-01 Code Generation plan."
+
+**Approval Prompt**: "Review `aidlc-docs/construction/plans/u-01-code-generation-plan.md`.
+Explicitly approve the entire U-01 code-generation sequence before code is modified."
+
+**Context**: CONSTRUCTION - Code Generation Part 1 plan approval gate.
+
+---
+
+## U-01 Code Generation Plan Approval
+
+**Timestamp**: 2026-09-04T02:38:23Z
+
+**User Input**: "approved"
+
+**AI Response**: "Recorded approval of the complete U-01 Code Generation plan and began Step 1.
+Added typed bounded protected-command, CloudWatch alarm-transition, safe-observation, and
+delivery-outcome contracts with focused validation tests."
+
+**Context**: CONSTRUCTION - U-01 Code Generation Part 2 active. Focused tests pass, but their
+standalone invocation does not meet the repository-wide coverage gate; the full `make check` remains
+required after all planned steps are complete.
+
+---
+
 ## Reverse Engineering
 
 **Timestamp**: 2026-08-26T04:33:11Z
