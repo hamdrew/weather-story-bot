@@ -1224,3 +1224,81 @@ plan, or request changes."
 No application code, infrastructure, or remote resources changed.
 
 ---
+
+## Session Resumption and U-01 Plan Reconciliation
+
+**Timestamp**: 2026-09-05T01:19:55Z
+
+**User Input**: "Continue the AI-DLC workflow and summarize where we are at"
+
+**AI Response**: "Reconciled stale current-stage fields with the existing implementation plan and
+Git history. Steps 1-3 have baseline code; Steps 4-8 remain open. Expanded remaining paths,
+traceability, test obligations, and validation requirements. Baseline make check passed: 191 tests,
+93.14% line coverage, clean Ruff and strict mypy. Historical Infrastructure Design and Code
+Generation plan approvals are absent from the audit and were not fabricated."
+
+**Approval Prompt**: "Approve the reconciled U-01 Code Generation plan and its existing
+Infrastructure Design prerequisite so implementation can resume at Step 4?"
+
+**Context**: CONSTRUCTION - resume recovery and plan approval gate. Security and PBT remain enabled;
+Resiliency Baseline is disabled and skipped. Documentation-only work on
+`codex/reconcile-aidlc-resume`; no remote changes or application implementation performed.
+
+---
+
+## U-01 Reconciled Plan Approval
+
+**Timestamp**: 2026-09-05T01:39:47Z
+
+**User Input**: "Approved"
+
+**AI Response**: "Recorded explicit approval of the reconciled Code Generation plan and its
+Infrastructure Design prerequisite. Continuing local implementation at Step 4."
+
+**Context**: CONSTRUCTION - U-01 generation authorized; no remote mutation authorized. Security
+and PBT remain enabled in full; disabled Resiliency Baseline is skipped.
+
+---
+
+## U-01 Generated Code Review Gate
+
+**Timestamp**: 2026-09-05T01:39:47Z
+
+**AI Response**: "Completed the approved U-01 Steps 4-8: protected handlers and composition
+contracts, bounded event/observation models, per-step deadline guards, safe office rendering,
+terminal private-alert/fallback handling, example/property tests, and scoped SAM resources.
+All 265 tests pass with 93.62% coverage; Ruff, strict mypy, local SAM lint/schema validation,
+and whitespace checks pass. Updated AGENTS.md for pinned isolated SAM validation and safe YAML
+test tooling. Concrete cloud adapters/packaging remain U-03 responsibilities."
+
+**Approval Prompt**: "Review the generated U-01 code and
+aidlc-docs/construction/u-01/code/implementation-summary.md. Request changes, or approve Code
+Generation to continue to U-03 design under the approved dependency sequence."
+
+**Context**: CONSTRUCTION - U-01 generated-code approval gate. SECURITY-01/03/05/06/08-15 and
+applicable PBT rules have evidence at the unit contract boundary; SECURITY-02/04/07 and the separate
+PBT-05 algorithm oracle are N/A with rationale in the summary. Resiliency Baseline remains disabled.
+No remote mutation performed; approval covers code review, not deployment.
+
+---
+
+## U-01 Active-Office Correction
+
+**Timestamp**: 2026-09-05T01:54:44Z
+
+**User Input**: "operations.py:184 - I don't want to hardcode any MKX references. Instead, validate that the office is active. Do not enforce MKX anywhere in code."
+
+**AI Response**: "Applied the owner's explicit scope correction: removed the office-specific
+refresh rejection, the seed's required-office check, and the environment's singleton-office check.
+Refresh checks the loaded profile's active state and identity; handler configuration membership
+remains required. Active IDs must be unique with exact destination keys. Replaced the fixed IAM
+partition key with required ActiveOfficeKeys input. Reconciled FR-01, deployment wording, story
+acceptance, AGENTS.md, and U-01 plan/summary. Added active/inactive non-default office examples and
+generated office-ID properties. Shipped configuration choices remain unchanged."
+
+**Context**: Explicit user direction authorizes this scoped correction; no additional requirements
+choice is needed. U-01 remains at generated-code review. Security scope checks and full PBT remain
+enabled; Resiliency Baseline remains disabled. Validation: 272 tests, 93.72% coverage, local SAM
+validation, Ruff and strict mypy. No remote action taken.
+
+---

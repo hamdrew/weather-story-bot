@@ -48,7 +48,8 @@
 Weather Story Bot retrieves visual Weather Stories from the National Weather Service, retains the
 current trusted story and image state, and publishes eligible new or changed stories as Telegram
 photo messages. It is not an emergency-alerting service. The implementation is multi-office-ready,
-but only the Milwaukee/Sullivan office (`MKX`) is active for the MVP.
+with eligibility determined by validated active-office configuration and registry state. The current
+configuration selects Milwaukee/Sullivan (`MKX`); that is a data choice, not a code restriction.
 
 The repository already contains validated configuration models, NWS ingestion, DynamoDB state
 contracts, two-phase image retention, Telegram publication logic, scheduled processing, Lambda
@@ -58,7 +59,7 @@ automation, and deployed verification remain incomplete.
 
 ## Goals
 
-- Publish each eligible current MKX Weather Story promptly without avoidable duplicates.
+- Publish each eligible current Weather Story for an active office promptly without avoidable duplicates.
 - Preserve current story/image facts and bounded operational history for reconciliation and review.
 - Treat ambiguous Telegram outcomes conservatively rather than claiming exactly-once delivery.
 - Deploy an isolated, observable, recoverable AWS workload using SAM and CloudFormation.
@@ -69,7 +70,6 @@ automation, and deployed verification remain incomplete.
 
 ## Non-Goals
 
-- Enabling an office other than MKX for the MVP.
 - Backfilling historical NWS stories or retaining a source-revision archive.
 - Providing an end-user analytics interface.
 - Guaranteeing exactly-once external Telegram delivery.
@@ -106,7 +106,9 @@ visible and traceable but do not block the MVP.
    Pydantic models.
 2. The office registry shall contain the versioned NWS office seed set and support NWS metadata,
    coordinates, derived IANA timezones, active state, and environment-specific destinations.
-3. Only MKX shall be active for the MVP. Inactive offices shall not require destinations.
+3. Only configured active offices shall be eligible. Application code, seed validation, and IAM
+   templates shall not require or hardcode any particular office ID. Inactive offices shall not
+   require destinations. Active IDs shall be unique and match the configured destination keys.
 4. Dev Telegram publication and alert operations shall remain mock-only. Staging and production
    configuration shall remain isolated and non-overlapping.
 5. Telegram secrets shall conform to the versioned secret schema and reside only in Secrets
@@ -223,7 +225,7 @@ visible and traceable but do not block the MVP.
 2. Every Python Lambda shall use Python 3.13 on arm64. The publisher shall have a 900-second timeout
    and 1024 MB initial memory allocation.
 3. Exactly one disabled `ScheduleV2` schedule shall be created for each active office, initially
-   only MKX, using UTC `rate(15 minutes)`, flexible windows off, no retries, 60-second maximum event
+   selected by configuration, using UTC `rate(15 minutes)`, flexible windows off, no retries, 60-second maximum event
    age, an explicit execution role, and an input containing exactly the office ID.
 4. Staging resources shall use unique names and mandatory `Application`, `Environment`, and `Owner`
    tags in `us-east-2` within the selected account. Dev remains local/mock-only. Production names,

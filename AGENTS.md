@@ -41,7 +41,17 @@ make coverage     # Run tests and regenerate all static coverage formats
 make check        # Run lint, typecheck, and tests
 make sync         # Synchronize the local development environment
 make sync-production  # Lock-only, no-dev production synchronization
+make validate-sam     # Local SAM schema/lint validation; no cloud mutation
 ```
+
+SAM CLI 1.165.0 runs in an isolated uv tool environment through `make validate-sam`; it does not
+alter application dependencies or `uv.lock`. Run this check whenever `template.yaml` changes.
+The U-01 template defines protected operation resource contracts. U-03 must supply packaged
+configuration and concrete runtime factories before deployment; `sam validate` is not proof of a
+working cloud deployment. No direct `sam deploy`, `sam sync`, or other staging mutation is authorized
+by local template validation.
+Template policy tests use PyYAML's safe loader with explicit CloudFormation intrinsic handling;
+PyYAML and its type stubs are declared development dependencies and resolved in `uv.lock`.
 
 Use `make check` before handing off a code change. Run `make format` whenever
 you change Python or Markdown files, then re-run `make check`. Markdown files
@@ -85,9 +95,9 @@ enabled because pytest-cov does not provide a separate branch-only fail gate.
 - `data/nws_office_ids.v1.json` is the versioned NWS office seed input.
 - `config/environments/` contains versioned, non-secret dev, staging, and prod
   runtime configuration. Dev Telegram operations must remain mock-only.
-- Preserve environment isolation: staging and prod destinations must be
-  distinct, and only MKX is active for the current MVP unless the active
-  approved AI-DLC requirements explicitly change that constraint.
+- Preserve environment isolation: staging and prod destinations must be distinct.
+  Office eligibility comes from validated active-office configuration and registry state;
+  do not hardcode office IDs or require any particular office in application code or IAM templates.
 - Validate configuration through the Pydantic models in
   `src/weather_story_bot/config.py`; do not bypass those invariants with ad hoc
   parsing.

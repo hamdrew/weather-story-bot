@@ -36,11 +36,9 @@ class NWSOfficeSeedSet(BaseModel):
     office_ids: tuple[Annotated[str, Field(pattern=r"^[A-Z]{3}$")], ...]
 
     @model_validator(mode="after")
-    def has_unique_ids_and_mkx(self) -> NWSOfficeSeedSet:
+    def has_unique_ids(self) -> NWSOfficeSeedSet:
         if len(self.office_ids) != len(set(self.office_ids)):
             raise ValueError("office_ids must be unique")
-        if "MKX" not in self.office_ids:
-            raise ValueError("office_ids must include MKX")
         return self
 
 
@@ -49,10 +47,10 @@ class PostalAddress(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    street_address: str = Field(min_length=1)
-    locality: str = Field(min_length=1)
-    region: str = Field(min_length=1)
-    postal_code: str = Field(min_length=1)
+    street_address: str = Field(min_length=1, max_length=256)
+    locality: str = Field(min_length=1, max_length=128)
+    region: str = Field(min_length=1, max_length=64)
+    postal_code: str = Field(min_length=1, max_length=32)
 
 
 class OfficeCoordinates(BaseModel):
@@ -71,16 +69,16 @@ class OfficeRegistryRecord(BaseModel):
 
     office_id: Annotated[str, Field(pattern=r"^[A-Z]{3}$")]
     weather_stories_url: HttpUrl
-    display_name: str = Field(min_length=1)
+    display_name: str = Field(min_length=1, max_length=256)
     address: PostalAddress
     coordinates: OfficeCoordinates
     timezone: str = Field(min_length=1)
     telegram_channel_id: str | None = None
     active: bool = False
-    telephone: str | None = None
-    email: str | None = None
+    telephone: str | None = Field(default=None, max_length=64)
+    email: str | None = Field(default=None, max_length=254)
     office_home_url: HttpUrl | None = None
-    region_name: str | None = None
+    region_name: str | None = Field(default=None, max_length=256)
     region_home_url: HttpUrl | None = None
 
     @field_validator("weather_stories_url", "office_home_url", "region_home_url")
@@ -172,8 +170,8 @@ class EnvironmentConfig(BaseModel):
         if set(self.nws_image_host_allowlist) != DEFAULT_NWS_IMAGE_HOST_ALLOWLIST:
             raise ValueError("nws_image_host_allowlist must contain weather.gov and *.weather.gov")
         active_ids = self.active_office_ids
-        if active_ids != ("MKX",):
-            raise ValueError("only MKX may be active for the MVP")
+        if len(active_ids) != len(set(active_ids)):
+            raise ValueError("active_office_ids must be unique")
         if set(self.office_channels) != set(active_ids):
             raise ValueError("office_channels must contain exactly the active office IDs")
         channels = list(self.office_channels.values())
@@ -192,6 +190,50 @@ class EnvironmentConfig(BaseModel):
             raise ValueError("staging and prod must use live non-mock Telegram destinations")
         if self.alert_recipient in channels:
             raise ValueError("alert_recipient must differ from public office channels")
+        return self
+
+
+class OperationsConfig(BaseModel):
+    """Non-secret trust boundaries for the two protected operation entry points."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    environment: Environment
+    account_id: str = Field(pattern=r"^[0-9]{12}$")
+    region: Literal["us-east-2"] = "us-east-2"
+    office_function_arn: str
+    alert_function_arn: str
+    trigger_topic_arn: str
+    fallback_topic_arn: str
+    alarm_names: tuple[Annotated[str, Field(pattern=r"^[a-z][a-z0-9-]{0,127}$")], ...]
+    log_level: Literal["INFO", "WARNING", "ERROR", "DEBUG"] = "INFO"
+
+    @model_validator(mode="after")
+    def scopes_resources(self) -> OperationsConfig:
+        prefix = f"weather-story-{self.environment}-"
+        for value, service, kind in (
+            (self.office_function_arn, "lambda", "function:"),
+            (self.alert_function_arn, "lambda", "function:"),
+            (self.trigger_topic_arn, "sns", ""),
+            (self.fallback_topic_arn, "sns", ""),
+        ):
+            expected = f"arn:aws:{service}:{self.region}:{self.account_id}:{kind}{prefix}"
+            if not value.startswith(expected) or not re.fullmatch(
+                r"[a-z0-9-]+", value[len(expected) :]
+            ):
+                raise ValueError("operation resource is outside the configured scope")
+        if self.office_function_arn == self.alert_function_arn:
+            raise ValueError("operation functions must be distinct")
+        if self.trigger_topic_arn == self.fallback_topic_arn:
+            raise ValueError("trigger and fallback topics must be distinct")
+        if not 1 <= len(self.alarm_names) <= 20 or len(set(self.alarm_names)) != len(
+            self.alarm_names
+        ):
+            raise ValueError("one to twenty unique alarms are required")
+        if any(not name.startswith(prefix) for name in self.alarm_names):
+            raise ValueError("alarm is outside the configured environment")
+        if self.environment == "prod" and self.log_level == "DEBUG":
+            raise ValueError("production DEBUG is prohibited")
         return self
 
 

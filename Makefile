@@ -1,4 +1,7 @@
-.PHONY: check format format-markdown lint test coverage typecheck sync sync-production
+.PHONY: check format format-markdown lint test coverage typecheck sync sync-production validate-sam
+
+validate-sam:
+	SAM_CLI_TELEMETRY=0 AWS_EC2_METADATA_DISABLED=true uv tool run --from aws-sam-cli==1.165.0 sam validate --lint --region us-east-2 --template-file template.yaml
 
 sync:
 	uv sync

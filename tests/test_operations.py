@@ -1,7 +1,8 @@
 import pytest
+from operation_fakes import OfficePorts
 from pydantic import ValidationError
 
-from weather_story_bot.config import OfficeRegistryRecord
+from weather_story_bot.config import OfficeRegistryRecord, weather_stories_url
 from weather_story_bot.operations import (
     AlarmTransition,
     AlertDeliveryOutcome,
@@ -12,8 +13,120 @@ from weather_story_bot.operations import (
     OfficeInformationService,
     SafeObservation,
     dispatch_alarm,
+    render_office_information,
     render_private_alert,
 )
+
+
+def test_office_information_rendering_excludes_protected_references_and_coordinates() -> None:
+    office = OfficePorts().office
+    caption = render_office_information(office)
+    assert caption.text.startswith(office.display_name)
+    assert office.address.street_address in caption.text
+    assert office.timezone in caption.text
+    assert "mock:" not in caption.text
+    assert str(office.coordinates.latitude) not in caption.text
+    assert caption.entities[0]["type"] == "bold"
+
+
+@pytest.mark.parametrize("active", [True, False])
+def test_office_refresh_uses_profile_active_state_for_any_office(active: bool) -> None:
+    ports = OfficePorts()
+    ports.office = OfficeRegistryRecord.model_validate(
+        ports.office.model_dump()
+        | {
+            "office_id": "GRB",
+            "weather_stories_url": weather_stories_url("GRB"),
+            "active": active,
+        }
+    )
+    service = OfficeInformationService(ports, ports, ports, environment="dev")
+    command = OfficeInformationCommand(
+        environment="dev", office_id="GRB", operator_id="operator", correlation_id="corr"
+    )
+    if active:
+        assert service.refresh(command).office_id == "GRB"
+        assert ports.current is not None
+    else:
+        with pytest.raises(OfficeInformationRefreshError, match="not authorized"):
+            service.refresh(command)
+        assert ports.calls == ["load"]
+        assert ports.current is None
+
+
+@pytest.mark.parametrize("summary", ["https://example.invalid", "<b>content</b>", "line\nbreak"])
+def test_safe_observations_reject_prohibited_content(summary: str) -> None:
+    with pytest.raises(ValueError, match="prohibited"):
+        SafeObservation(event_type="alert", classification="failed", summary=summary)
+
+
+@pytest.mark.parametrize("version", [0, -1, True])
+def test_refresh_rejects_invalid_version_before_external_work(version: int) -> None:
+    ports = OfficePorts()
+    with pytest.raises(OfficeInformationRefreshError, match="version"):
+        OfficeInformationService(ports, ports, ports, environment="dev").refresh(
+            OfficeInformationCommand(
+                environment="dev", office_id="MKX", operator_id="operator", correlation_id="corr"
+            ),
+            expected_version=version,
+        )
+    assert ports.calls == []
+
+
+@pytest.mark.parametrize(
+    "failure", ["load", "invite", "message", "pin", "verify", "unverified", "commit"]
+)
+def test_refresh_failure_never_advances_current_reference(failure: str) -> None:
+    ports = OfficePorts()
+    ports.failure = failure
+    service = OfficeInformationService(ports, ports, ports, environment="dev")
+    with pytest.raises(RuntimeError):
+        service.refresh(
+            OfficeInformationCommand(
+                environment="dev", office_id="MKX", operator_id="operator", correlation_id="corr"
+            )
+        )
+    assert ports.current is None
+    assert ports.version is None
+
+
+def test_refresh_reuses_current_reference_and_rejects_stale_version() -> None:
+    ports = OfficePorts()
+    service = OfficeInformationService(ports, ports, ports, environment="dev")
+    command = OfficeInformationCommand(
+        environment="dev", office_id="MKX", operator_id="operator", correlation_id="corr"
+    )
+    service.refresh(command)
+    original = ports.current
+    service.refresh(command, expected_version=1)
+    assert ports.current == original
+    assert ports.version == 2
+    with pytest.raises(RuntimeError, match="conflict"):
+        service.refresh(command, expected_version=1)
+    assert ports.version == 2
+
+
+@pytest.mark.parametrize("expire_before", range(6))
+def test_refresh_checks_budget_before_every_external_step(expire_before: int) -> None:
+    ports = OfficePorts()
+    service = OfficeInformationService(ports, ports, ports, environment="dev")
+    checks = 0
+
+    def check() -> None:
+        nonlocal checks
+        if checks == expire_before:
+            raise TimeoutError("budget exhausted")
+        checks += 1
+
+    with pytest.raises(TimeoutError):
+        service.refresh(
+            OfficeInformationCommand(
+                environment="dev", office_id="MKX", operator_id="operator", correlation_id="corr"
+            ),
+            check_budget=check,
+        )
+    assert len(ports.calls) == expire_before
+    assert ports.current is None
 
 
 def test_alarm_transition_accepts_only_a_bounded_cloudwatch_alarm() -> None:

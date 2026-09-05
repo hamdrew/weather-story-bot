@@ -11,7 +11,9 @@ import httpx
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from operation_fakes import Notifier, OfficePorts
 from PIL import Image
+from test_runtime import alarm_event, operations_config
 
 from weather_story_bot.history import (
     MAX_FAILURE_SUMMARY_LENGTH,
@@ -34,6 +36,17 @@ from weather_story_bot.nws_client import (
     NWSCollectionRequestError,
     RetryDecision,
 )
+from weather_story_bot.operations import (
+    AlertDeliveryOutcome,
+    OfficeInformationCommand,
+    OfficeInformationService,
+    dispatch_alarm,
+    render_office_information,
+    render_private_alert,
+    sanitize_observation,
+)
+from weather_story_bot.runtime import load_operations_config, parse_alarm_notification
+from weather_story_bot.telegram import render_caption
 
 PBT_SETTINGS = settings(derandomize=True, max_examples=50, database=None, deadline=None)
 VALID_TRANSITIONS = {
@@ -60,6 +73,169 @@ SAFE_DATETIMES = st.datetimes(
     max_value=datetime(2030, 12, 31, 23, 59, 59),
     timezones=st.timezones(),
 )
+
+OPERATION_OUTCOMES = st.sampled_from(tuple(AlertDeliveryOutcome))
+OFFICE_FAILURES = st.sampled_from(
+    ("none", "load", "invite", "message", "pin", "unverified", "commit")
+)
+
+
+@PBT_SETTINGS
+@given(office_id=st.from_regex(r"[A-Z]{3}", fullmatch=True), active=st.booleans())
+def test_refresh_eligibility_depends_on_active_state_not_office_identity(
+    office_id: str, active: bool
+) -> None:
+    from weather_story_bot.config import OfficeRegistryRecord, weather_stories_url
+    from weather_story_bot.operations import OfficeInformationRefreshError
+
+    ports = OfficePorts()
+    ports.office = OfficeRegistryRecord.model_validate(
+        ports.office.model_dump()
+        | {
+            "office_id": office_id,
+            "weather_stories_url": weather_stories_url(office_id),
+            "active": active,
+        }
+    )
+    command = OfficeInformationCommand(
+        environment="dev", office_id=office_id, operator_id="operator", correlation_id="corr"
+    )
+    service = OfficeInformationService(ports, ports, ports, environment="dev")
+    if active:
+        assert service.refresh(command).office_id == office_id
+    else:
+        with pytest.raises(OfficeInformationRefreshError):
+            service.refresh(command)
+        assert ports.calls == ["load"]
+
+
+SAFE_UNICODE = st.text(alphabet=st.characters(exclude_categories=["Cs"]), max_size=1500)
+
+
+@PBT_SETTINGS
+@given(
+    environment=st.sampled_from(("dev", "staging", "prod")),
+    suffix=st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=20),
+)
+def test_operations_configuration_round_trip_preserves_valid_scope(
+    environment: str, suffix: str
+) -> None:
+    from weather_story_bot.config import OperationsConfig
+
+    config = OperationsConfig.model_validate_json(
+        operations_config().model_dump_json().replace("dev", environment)
+    )
+    config = OperationsConfig.model_validate(
+        config.model_dump() | {"alarm_names": [f"weather-story-{environment}-{suffix}"]}
+    )
+    assert load_operations_config({"OPERATIONS_CONFIG": config.model_dump_json()}) == config
+
+
+@PBT_SETTINGS
+@given(title=st.text(alphabet="Office Milwaukee 天気 🌤️", min_size=1, max_size=256))
+def test_office_rendering_is_bounded_and_independent_of_private_destination(title: str) -> None:
+    office = OfficePorts().office
+    from weather_story_bot.config import OfficeRegistryRecord
+
+    original = OfficeRegistryRecord.model_validate(office.model_dump() | {"display_name": title})
+    other = OfficeRegistryRecord.model_validate(
+        original.model_dump() | {"telegram_channel_id": "mock:other"}
+    )
+    rendered = render_office_information(original)
+    assert rendered == render_office_information(other)
+    assert len(rendered.text.encode("utf-16-le")) // 2 <= 1024
+    assert "mock:" not in rendered.text
+
+
+@PBT_SETTINGS
+@given(candidate=st.dictionaries(st.text(max_size=30), SAFE_UNICODE, max_size=10))
+def test_observation_projection_is_allowlisted_and_idempotent(candidate: dict[str, str]) -> None:
+    result = sanitize_observation(candidate)
+    assert sanitize_observation(result.model_dump()) == result
+    assert result.summary == "Protected operation outcome"
+    assert result.correlation_id is None
+    assert set(result.model_dump()) == {"event_type", "classification", "correlation_id", "summary"}
+
+
+@PBT_SETTINGS
+@given(failures=st.lists(OFFICE_FAILURES, max_size=20))
+def test_office_refresh_sequences_match_one_current_record_model(failures: list[str]) -> None:
+    ports = OfficePorts()
+    service = OfficeInformationService(ports, ports, ports, environment="dev")
+    command = OfficeInformationCommand(
+        environment="dev", office_id="MKX", operator_id="operator", correlation_id="corr"
+    )
+    model_version: int | None = None
+    expected_ref: tuple[str, str] | None = None
+    for failure in failures:
+        ports.failure = failure
+        if failure == "none":
+            service.refresh(command, expected_version=model_version)
+            model_version = (model_version or 0) + 1
+            expected_ref = ("mock:managed-reference", "mock:invite-reference")
+        else:
+            with pytest.raises(RuntimeError):
+                service.refresh(command, expected_version=model_version)
+        assert ports.version == model_version
+        assert ports.current == expected_ref
+        assert set(ports.calls) <= {"load", "invite", "message", "pin", "verify", "commit"}
+
+
+@PBT_SETTINGS
+@given(sequence=st.lists(st.tuples(OPERATION_OUTCOMES, st.booleans()), max_size=20))
+def test_notification_sequences_are_terminal_and_match_fallback_model(
+    sequence: list[tuple[AlertDeliveryOutcome, bool]],
+) -> None:
+    alarm = parse_alarm_notification(alarm_event(), operations_config())
+    for outcome, failure in sequence:
+        notifier = Notifier(outcome, fail_fallback=failure)
+        result = dispatch_alarm(alarm, notifier)
+        assert notifier.primary_calls == 1
+        permitted = outcome is AlertDeliveryOutcome.DEFINITIVE_FAILURE
+        assert notifier.fallback_calls == int(permitted)
+        assert (
+            result.fallback_outcome.value == ("failed" if failure else "delivered")
+            if permitted
+            else result.fallback_outcome.value == "not_attempted"
+        )
+
+
+@PBT_SETTINGS
+@given(
+    account=st.sampled_from(("123456789012", "000000000000")),
+    state=st.sampled_from(("ALARM", "OK", "INSUFFICIENT_DATA")),
+    reason=st.text(alphabet=st.characters(exclude_categories=["Cs"]), max_size=512),
+)
+def test_alarm_acceptance_and_rendering_ignore_untrusted_reason(
+    account: str, state: str, reason: str
+) -> None:
+    event = alarm_event(AWSAccountId=account, NewStateValue=state, NewStateReason=reason)
+    if account != "123456789012" or state != "ALARM":
+        with pytest.raises(ValueError):
+            parse_alarm_notification(event, operations_config())
+    else:
+        alarm = parse_alarm_notification(event, operations_config())
+        alert = render_private_alert(alarm)
+        assert alert.summary == (
+            f"ERROR 2026-09-04 00:00:00Z Alarm {alarm.alarm_name} is ALARM: "
+            "CloudWatch alarm entered ALARM"
+        )
+        assert len(alert.summary) <= 512
+
+
+@PBT_SETTINGS
+@given(title=SAFE_UNICODE, body=SAFE_UNICODE)
+def test_explicit_telegram_entities_remain_in_utf16_bounds(title: str, body: str) -> None:
+    caption = render_caption(title, body, "")
+    units = len(caption.text.encode("utf-16-le")) // 2
+    assert units <= 1024
+    for entity in caption.entities:
+        offset, length = entity["offset"], entity["length"]
+        assert isinstance(offset, int) and isinstance(length, int)
+        assert 0 <= offset <= offset + length <= units
+        encoded = caption.text.encode("utf-16-le")
+        assert encoded[offset * 2 : (offset + length) * 2].decode("utf-16-le")
+        assert entity["type"] == "bold"
 
 
 def _story_payload(

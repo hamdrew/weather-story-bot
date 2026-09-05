@@ -5,11 +5,11 @@
 - **Project Type**: Brownfield
 - **Start Date**: 2026-08-26T04:31:29Z
 - **Current Phase**: CONSTRUCTION
-- **Current Stage**: U-01 Code Generation - Plan Approval Gate
-- **Last Completed**: U-01 NFR Design approved and reconciled Infrastructure Design generated on
-  2026-09-04T02:31:31Z
-- **Next Step**: Continue U-01 Code Generation from Step 2: office-information refresh and
-  conditional current-office persistence
+- **Current Stage**: U-01 Code Generation - Generated Code Review Gate
+- **Last Completed**: U-01 Steps 4-8 generated and locally validated on 2026-09-05:
+  272 tests pass with 93.72% line coverage, clean Ruff/mypy, and valid SAM schema/lint.
+- **Next Step**: Owner review of generated U-01 code and implementation summary. After approval,
+  proceed to U-03 design per the approved dependency sequence; cloud composition remains U-03 work.
 
 ## Workspace State
 
@@ -63,7 +63,7 @@
 - [x] INCEPTION - Application Design artifacts approved
 - [x] INCEPTION - Units Generation assessment - Execute
 - [x] INCEPTION - Units Generation artifacts approved
-- [ ] CONSTRUCTION - Per-unit design and code generation (U-01 Functional Design replanning)
+- [ ] CONSTRUCTION - Per-unit design and code generation (U-01 generated code awaiting review)
 - [ ] CONSTRUCTION - Build and Test
 - [ ] OPERATIONS - Placeholder
 
@@ -159,7 +159,7 @@
 - **Artifacts**: `aidlc-docs/inception/user-stories/personas.md` and
   `aidlc-docs/inception/user-stories/stories.md`
 - **Status**: Personal-Project Simplification and staging-approval reconciliations are approved on
-  2026-09-04T01:44:42Z; Application Design reconciliation is the next approval gate
+  2026-09-04T01:44:42Z; subsequent Application Design reconciliation is also approved
 - **PBT Compliance**: PBT-01 through PBT-10 are N/A during User Stories; the plan preserves PBT-10
   downstream example-test obligations
 - **Security Compliance**: SECURITY-01 through SECURITY-15 compliant or N/A at User Stories
@@ -201,7 +201,7 @@
   infrastructure, and delivery-control-plane boundaries.
 - **Plan**: `aidlc-docs/inception/plans/application-design-plan.md`
 - **Status**: Personal-Project Simplification and staging-approval reconciliations are approved on
-  2026-09-04T01:50:11; Units Generation reconciliation is the next approval gate
+  2026-09-04T01:50:11; subsequent Units Generation reconciliation is also approved
 - **Artifacts**: `aidlc-docs/inception/application-design/`
 - **PBT Compliance**: PBT-01 through PBT-10 N/A at Application Design under the extension stage
   matrix; downstream obligations remain scheduled.
@@ -229,36 +229,45 @@
 ## Construction Status
 
 - **Current Unit**: U-01 Protected Runtime Operations and Observability
-- **Current Stage**: Infrastructure Design reconciliation after approved U-01 NFR Design
-- **Plan**: `aidlc-docs/construction/plans/u-01-functional-design-plan.md`
-- **Next Unit Stages**: NFR Requirements, NFR Design, Infrastructure Design, Code Generation, and
-  Build and Test after Functional Design is approved.
-- **Artifacts**: `aidlc-docs/construction/u-01/functional-design/`
+- **Current Stage**: Generated Code review after approved plan implementation
+- **Plan**: `aidlc-docs/construction/plans/u-01-code-generation-plan.md`
+- **Next Unit Stages**: After U-01 code approval, design U-03; then U-02 once staging inputs are
+  known, U-04, and U-05. Build and Test follows all units.
+- **Artifacts**: `aidlc-docs/construction/u-01/`
+- **Resume Evidence**: All eight generation steps are complete at the U-01 contract boundary.
+  Concrete live adapters, packaging, and cloud validation remain explicitly assigned to U-03/U-05.
+- **Implementation Summary**: `aidlc-docs/construction/u-01/code/implementation-summary.md`
+- **Validation**: `make format`, `make check` (272 tests, 93.72% line coverage), local
+  `make validate-sam`, and `git diff --check` pass. No cloud/Telegram or GitHub mutation performed.
+- **Approval Record Gap**: Historical approval records remain absent; prospective approval of the
+  reconciled plan and Infrastructure Design prerequisite is now recorded in the audit.
 - **PBT Compliance**: PBT-01 compliant: safe sanitizer/schema, alarm validation, alert rendering,
   office refresh, Telegram entity rendering, and the single-notification lifecycle have applicable
   properties; round-trip, commutativity, oracle, and induction are N/A with rationale.
 - **Security Compliance**: SECURITY-01 through SECURITY-15 are compliant or N/A; SECURITY-02,
   SECURITY-04, and SECURITY-07 are N/A; no blocking finding.
-- **Functional Design Status**: Reconciled artifacts generated on 2026-09-04T02:11:06Z after plan
-  approval. They remove custom DynamoDB alert fingerprint/cooldown/aggregation/delivery state and
-  await explicit approval before NFR Requirements reconciliation.
+- **Functional Design Status**: Reconciled artifacts approved on 2026-09-04T02:22:26Z, per audit.
 - **NFR Requirements Plan**: `aidlc-docs/construction/plans/u-01-nfr-requirements-plan.md`
 - **NFR Requirements Artifacts**: `aidlc-docs/construction/u-01/nfr-requirements/`
 - **PBT Compliance**: PBT-09 compliant with the existing Hypothesis/pytest selection; PBT-01
   properties are carried forward, and PBT-02 through PBT-08/PBT-10 are deferred by stage matrix.
 - **Security Compliance**: SECURITY-01 through SECURITY-15 compliant or N/A; SECURITY-02,
   SECURITY-04, and SECURITY-07 are N/A; no blocking finding.
-- **NFR Requirements Status**: Previously approved on 2026-09-02T13:29:18Z; superseded portions
-  were regenerated on 2026-09-04T02:22:26Z without custom alert state and await explicit approval.
+- **NFR Requirements Status**: Reconciled artifacts approved on 2026-09-04T02:28:59Z, per audit.
 - **NFR Design Plan**: `aidlc-docs/construction/plans/u-01-nfr-design-plan.md`
 - **NFR Design Artifacts**: `aidlc-docs/construction/u-01/nfr-design/`
-- **NFR Design Compliance**: Superseded by the approved amendment because application fingerprint
-  and cooldown state were removed; the applicable PBT and SECURITY outcomes require reconciliation.
-- **NFR Design Status**: Reconciled artifacts generated on 2026-09-04T02:28:59Z without custom
-  alert state and await explicit approval.
+- **NFR Design Compliance**: Reconciled design removes custom alert state and carries forward
+  applicable SECURITY and PBT obligations; implementation verification remains open.
+- **NFR Design Status**: Reconciled artifacts approved on 2026-09-04T02:31:31Z, per audit.
 - **Infrastructure Design Plan**:
   `aidlc-docs/construction/plans/u-01-infrastructure-design-plan.md`
 - **Infrastructure Design Status**: Reconciled artifacts generated on 2026-09-04T02:31:31Z with
-  CloudWatch/SNS-only notification triggering and no custom alert-state store; approval pending.
-- **Amendment Impact**: FR-03, FR-07, FR-09, NFR-04, NFR-08, alerting stories, U-01 obligations,
-  and all drafted U-01 construction artifacts require reconciliation after amendment approval.
+  CloudWatch/SNS-only notification triggering and no custom alert-state store; explicitly approved
+  with the reconciled Code Generation plan in the current interaction.
+- **Amendment Impact**: U-01 design reconciliation and contract implementation are complete;
+  generated-code approval and downstream construction remain open.
+- **Active-Office Correction**: The owner's explicit 2026-09-05 direction replaces office-specific
+  enforcement with validated configured active-office membership and registry active state. Seed
+  validation requires no named office; IAM takes exact configured office partition keys. Existing
+  shipped office selections are unchanged. Requirements, story acceptance, contributor guidance,
+  implementation plan and tests are reconciled; generated code remains at its review gate.

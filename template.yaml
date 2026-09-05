@@ -1,0 +1,352 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: U-01 protected operation contracts; U-03 supplies packaged runtime composition.
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [staging]
+    Default: staging
+  DeploymentId:
+    Type: String
+    AllowedPattern: '[a-z][a-z0-9-]{0,19}'
+    Default: primary
+  Owner:
+    Type: String
+    AllowedPattern: '[a-zA-Z0-9-]{1,64}'
+  HistoryTableName:
+    Type: String
+    AllowedPattern: 'weather-story-staging-[a-z0-9-]{1,100}'
+  ActiveOfficeKeys:
+    Type: CommaDelimitedList
+    Description: Exact OFFICE partition keys derived from validated active-office configuration.
+    AllowedPattern: 'OFFICE#[A-Z]{3}'
+  OfficeSecretId:
+    Type: String
+    Description: Exact secret resource ID including its generated six-character ARN suffix.
+    AllowedPattern: 'weather-story-staging-office-[a-zA-Z0-9-]+-[a-zA-Z0-9]{6}'
+  AlertSecretId:
+    Type: String
+    Description: Exact secret resource ID including its generated six-character ARN suffix.
+    AllowedPattern: 'weather-story-staging-alert-[a-zA-Z0-9-]+-[a-zA-Z0-9]{6}'
+  OperatorRoleName:
+    Type: String
+    AllowedPattern: 'weather-story-staging-operator-[a-z0-9-]+'
+  FallbackEmail:
+    Type: String
+    NoEcho: true
+    AllowedPattern: '[^\s@]+@[^\s@]+\.[^\s@]+'
+Rules:
+  RegionIsolation:
+    Assertions:
+      - Assert: !Equals [!Ref AWS::Region, us-east-2]
+        AssertDescription: U-01 is restricted to us-east-2.
+Globals:
+  Function:
+    Runtime: python3.13
+    Architectures: [arm64]
+    MemorySize: 256
+    CodeUri: src/
+    Tags:
+      Application: weather-story-bot
+      Environment: !Ref Environment
+      Owner: !Ref Owner
+Resources:
+  NotificationKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          # KMS key policies require Resource '*': it denotes only this key.
+          - Sid: AccountKeyAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action:
+              - kms:DescribeKey
+              - kms:GetKeyPolicy
+              - kms:PutKeyPolicy
+              - kms:EnableKeyRotation
+              - kms:GetKeyRotationStatus
+              - kms:DisableKey
+              - kms:EnableKey
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:ListResourceTags
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: '*'
+          - Sid: CloudWatchTriggerEncryption
+            Effect: Allow
+            Principal: {Service: cloudwatch.amazonaws.com}
+            Action: [kms:Decrypt, kms:GenerateDataKey]
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnEquals:
+                aws:SourceArn: !Sub arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:weather-story-${Environment}-${DeploymentId}-office-failed
+      Tags:
+        - {Key: Application, Value: weather-story-bot}
+        - {Key: Environment, Value: !Ref Environment}
+        - {Key: Owner, Value: !Ref Owner}
+  TriggerTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub weather-story-${Environment}-${DeploymentId}-trigger
+      KmsMasterKeyId: !GetAtt NotificationKey.Arn
+      Tags:
+        - {Key: Application, Value: weather-story-bot}
+        - {Key: Environment, Value: !Ref Environment}
+        - {Key: Owner, Value: !Ref Owner}
+  FallbackTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub weather-story-${Environment}-${DeploymentId}-fallback
+      KmsMasterKeyId: !GetAtt NotificationKey.Arn
+      Tags:
+        - {Key: Application, Value: weather-story-bot}
+        - {Key: Environment, Value: !Ref Environment}
+        - {Key: Owner, Value: !Ref Owner}
+  TriggerPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref TriggerTopic]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: CloudWatchOnly
+            Effect: Allow
+            Principal: {Service: cloudwatch.amazonaws.com}
+            Action: sns:Publish
+            Resource: !Ref TriggerTopic
+            Condition:
+              StringEquals: {aws:SourceAccount: !Ref AWS::AccountId}
+              ArnEquals:
+                aws:SourceArn: !Sub arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:weather-story-${Environment}-${DeploymentId}-office-failed
+          - Sid: DenyNonCloudWatchPublishers
+            Effect: Deny
+            Principal: '*'
+            Action: sns:Publish
+            Resource: !Ref TriggerTopic
+            Condition:
+              StringNotEqualsIfExists: {aws:PrincipalServiceName: cloudwatch.amazonaws.com}
+          - Sid: RequireTLS
+            Effect: Deny
+            Principal: '*'
+            Action: sns:Publish
+            Resource: !Ref TriggerTopic
+            Condition: {Bool: {aws:SecureTransport: false}}
+  FallbackPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref FallbackTopic]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: OnlyAlertRole
+            Effect: Deny
+            Principal: '*'
+            Action: sns:Publish
+            Resource: !Ref FallbackTopic
+            Condition:
+              ArnNotEquals: {aws:PrincipalArn: !GetAtt AlertRole.Arn}
+          - Sid: RequireTLS
+            Effect: Deny
+            Principal: '*'
+            Action: sns:Publish
+            Resource: !Ref FallbackTopic
+            Condition: {Bool: {aws:SecureTransport: false}}
+  FallbackSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref FallbackTopic
+      Protocol: email
+      Endpoint: !Ref FallbackEmail
+  OfficeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ProtectedOfficeOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:GetItem
+                Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${HistoryTableName}
+                Condition: {'ForAllValues:StringEquals': {dynamodb:LeadingKeys: !Ref ActiveOfficeKeys}}
+              - Effect: Allow
+                Action: dynamodb:PutItem
+                Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${HistoryTableName}
+                Condition: {'ForAllValues:StringEquals': {dynamodb:LeadingKeys: !Ref ActiveOfficeKeys}}
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${OfficeSecretId}
+                Condition: {StringEquals: {secretsmanager:VersionStage: AWSCURRENT}}
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/weather-story-${Environment}-${DeploymentId}-office:log-stream:*
+      Tags:
+        - {Key: Application, Value: weather-story-bot}
+        - {Key: Environment, Value: !Ref Environment}
+        - {Key: Owner, Value: !Ref Owner}
+  AlertRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PrivateAlertOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AlertSecretId}
+                Condition: {StringEquals: {secretsmanager:VersionStage: AWSCURRENT}}
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref FallbackTopic
+              - Effect: Allow
+                Action: [kms:Decrypt, kms:GenerateDataKey]
+                Resource: !GetAtt NotificationKey.Arn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub sns.${AWS::Region}.amazonaws.com
+                    'kms:EncryptionContext:aws:sns:topicArn': !Ref FallbackTopic
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/weather-story-${Environment}-${DeploymentId}-alert:log-stream:*
+      Tags:
+        - {Key: Application, Value: weather-story-bot}
+        - {Key: Environment, Value: !Ref Environment}
+        - {Key: Owner, Value: !Ref Owner}
+  OfficeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub weather-story-${Environment}-${DeploymentId}-office
+      Handler: weather_story_bot.handler.office_information_handler
+      Role: !GetAtt OfficeRole.Arn
+      Timeout: 120
+      ReservedConcurrentExecutions: 1
+  AlertFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub weather-story-${Environment}-${DeploymentId}-alert
+      Handler: weather_story_bot.handler.alert_notification_handler
+      Role: !GetAtt AlertRole.Arn
+      Timeout: 30
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+        MaximumEventAgeInSeconds: 60
+  OfficeInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref OfficeFunction
+      Principal: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${OperatorRoleName}
+  AlertInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref AlertFunction
+      Principal: sns.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Ref TriggerTopic
+  AlertSubscription:
+    Type: AWS::SNS::Subscription
+    DependsOn: AlertInvokePermission
+    Properties:
+      TopicArn: !Ref TriggerTopic
+      Protocol: lambda
+      Endpoint: !GetAtt AlertFunction.Arn
+  OfficeLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/weather-story-${Environment}-${DeploymentId}-office
+      RetentionInDays: 90
+  AlertLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/weather-story-${Environment}-${DeploymentId}-alert
+      RetentionInDays: 90
+  OfficeFailureMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref OfficeLogGroup
+      FilterPattern: '{ $.classification = "failed" || $.classification = "rejected" }'
+      MetricTransformations:
+        - MetricNamespace: !Sub WeatherStory/${Environment}/${DeploymentId}
+          MetricName: OfficeFailures
+          MetricValue: '1'
+          DefaultValue: 0
+  OfficeFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub weather-story-${Environment}-${DeploymentId}-office-failed
+      Namespace: !Sub WeatherStory/${Environment}/${DeploymentId}
+      MetricName: OfficeFailures
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref TriggerTopic]
+  AlertFailureMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref AlertLogGroup
+      FilterPattern: '{ $.classification = "failed" || $.classification = "ambiguous" || $.classification = "rejected" }'
+      MetricTransformations:
+        - MetricNamespace: !Sub WeatherStory/${Environment}/${DeploymentId}
+          MetricName: AlertFailures
+          MetricValue: '1'
+          DefaultValue: 0
+  AlertFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub weather-story-${Environment}-${DeploymentId}-alert-failed
+      Namespace: !Sub WeatherStory/${Environment}/${DeploymentId}
+      MetricName: AlertFailures
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      # Deliberately has no notification action: dispatcher failures cannot trigger themselves.
+Outputs:
+  OfficeFunctionArn:
+    Description: U-03 protected office composition target.
+    Value: !GetAtt OfficeFunction.Arn
+  AlertFunctionArn:
+    Description: U-03 notification composition target.
+    Value: !GetAtt AlertFunction.Arn
+  TriggerTopicArn:
+    Description: CloudWatch-only notification source.
+    Value: !Ref TriggerTopic
+  FallbackTopicArn:
+    Description: Definitive-failure-only destination.
+    Value: !Ref FallbackTopic

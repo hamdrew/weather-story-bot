@@ -4,6 +4,8 @@ Business behavior is added in subsequent implementation tasks.  Keeping the
 entry point importable establishes the package shape used by SAM packaging.
 """
 
+import json
+import logging
 import os
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol, cast
@@ -11,6 +13,95 @@ from typing import Any, Protocol, cast
 import boto3
 
 from weather_story_bot.history import AttemptState, DynamoTable, HistoryStore
+from weather_story_bot.operations import (
+    OfficeInformationCommand,
+    dispatch_alarm,
+    observation_record,
+)
+from weather_story_bot.runtime import (
+    InvocationBudget,
+    InvocationContext,
+    OperationsRuntime,
+    parse_alarm_notification,
+)
+
+_operations_runtime_factory: Callable[[], OperationsRuntime] | None = None
+_operations_logger = logging.getLogger("weather_story_bot.operations")
+_operations_logger.setLevel(logging.INFO)
+_operations_logger.propagate = False
+
+
+def _operation_result(
+    kind: str,
+    outcome: str,
+    context: InvocationContext,
+    *,
+    fallback: str | None = None,
+) -> dict[str, object]:
+    record = observation_record(
+        {"event_type": kind, "classification": outcome},
+        getattr(context, "aws_request_id", ""),
+    )
+    result: dict[str, object] = {"outcome": outcome}
+    if fallback in {"not_attempted", "delivered", "failed"}:
+        record["fallback_outcome"] = fallback
+        result["fallback_outcome"] = fallback
+    if not _operations_logger.handlers:
+        # Emit one JSON object per line, without Lambda's text-log prefix or duplicate propagation.
+        stream = logging.StreamHandler()
+        stream.setFormatter(logging.Formatter("%(message)s"))
+        _operations_logger.addHandler(stream)
+    _operations_logger.log(
+        logging.ERROR if record["level"] == "ERROR" else logging.INFO, json.dumps(record)
+    )
+    return result
+
+
+def office_information_handler(
+    event: Mapping[str, object], context: InvocationContext
+) -> dict[str, object]:
+    """Protected on-demand boundary; untrusted actor labels never confer authorization."""
+    try:
+        command = OfficeInformationCommand.model_validate(event)
+        if _operations_runtime_factory is None:
+            raise RuntimeError("operations runtime is not configured")
+        runtime = _operations_runtime_factory()
+        runtime.authorize_office(command, context)
+        budget = InvocationBudget(context)
+        budget.check()
+        version = runtime.office_version(command.office_id)
+        result = runtime.office_service.refresh(
+            command, expected_version=version, check_budget=budget.check
+        )
+        return _operation_result("office", result.outcome, context)
+    except (ValueError, PermissionError):
+        return _operation_result("office", "rejected", context)
+    except Exception:
+        return _operation_result("office", "failed", context)
+
+
+def alert_notification_handler(
+    event: Mapping[str, object], context: InvocationContext
+) -> dict[str, object]:
+    """Terminal SNS handler: exceptions never request asynchronous notification redelivery."""
+    try:
+        if _operations_runtime_factory is None:
+            raise RuntimeError("operations runtime is not configured")
+        runtime = _operations_runtime_factory()
+        if context.invoked_function_arn != runtime.config.alert_function_arn:
+            raise PermissionError("alert operation is not authorized")
+        alarm = parse_alarm_notification(event, runtime.config)
+        result = dispatch_alarm(
+            alarm, runtime.notifier, check_budget=InvocationBudget(context).check
+        )
+        outcome = result.primary_outcome.value
+        if outcome == "definitive_failure":
+            outcome = "failed"
+        return _operation_result("alert", outcome, context, fallback=result.fallback_outcome.value)
+    except (ValueError, PermissionError):
+        return _operation_result("alert", "rejected", context)
+    except Exception:
+        return _operation_result("alert", "failed", context)
 
 
 class PublisherRuntime(Protocol):

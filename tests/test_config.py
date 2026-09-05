@@ -21,14 +21,13 @@ from weather_story_bot.config import (
 ROOT = Path(__file__).parent.parent
 
 
-def test_seed_set_rejects_duplicate_ids_and_missing_mkx() -> None:
+def test_seed_set_rejects_duplicate_ids_without_requiring_a_specific_office() -> None:
     base = {"schema_version": 1, "source": "https://example.test/offices"}
 
     with pytest.raises(ValidationError, match="office_ids must be unique"):
         NWSOfficeSeedSet.model_validate(base | {"office_ids": ("MKX", "MKX")})
 
-    with pytest.raises(ValidationError, match="office_ids must include MKX"):
-        NWSOfficeSeedSet.model_validate(base | {"office_ids": ("GRB",)})
+    assert NWSOfficeSeedSet.model_validate(base | {"office_ids": ("GRB",)}).office_ids == ("GRB",)
 
 
 def test_versioned_seed_set_contains_every_current_wfo_and_mkx() -> None:
@@ -36,23 +35,37 @@ def test_versioned_seed_set_contains_every_current_wfo_and_mkx() -> None:
 
     assert len(seeds.office_ids) == 124
     assert len(set(seeds.office_ids)) == 124
-    assert "MKX" in seeds.office_ids
     assert weather_stories_url("MKX") == "https://api.weather.gov/offices/MKX/weatherstories"
 
 
-def test_environment_configuration_is_isolated_and_mkx_only() -> None:
+def test_environment_configuration_is_isolated_and_destinations_match_active_offices() -> None:
     configs = [
         load_environment_config(ROOT / "config/environments" / f"{environment}.json")
         for environment in ("dev", "staging", "prod")
     ]
 
     validate_environment_isolation(configs)
-    assert all(config.active_office_ids == ("MKX",) for config in configs)
+    assert all(set(config.active_office_ids) == set(config.office_channels) for config in configs)
     assert all(
         set(config.nws_image_host_allowlist) == {"weather.gov", "*.weather.gov"}
         for config in configs
     )
     assert configs[0].telegram_mode == "mock"
+
+
+@pytest.mark.parametrize("offices", [(), ("GRB",), ("GRB", "ARX")])
+def test_environment_accepts_configured_offices_without_a_required_office(
+    offices: tuple[str, ...],
+) -> None:
+    base = load_environment_config(ROOT / "config/environments/dev.json")
+    config = EnvironmentConfig.model_validate(
+        base.model_dump(exclude={"office_channels"})
+        | {
+            "active_office_ids": offices,
+            "office_channels": {office: f"mock:channel-{office}" for office in offices},
+        }
+    )
+    assert config.active_office_ids == offices
 
 
 def test_active_registry_channels_must_be_present_and_unique() -> None:
@@ -160,13 +173,13 @@ def test_environment_rejects_invalid_telegram_modes_for_every_destination() -> N
             alert_recipient="mock:weather-story-operator",
         )
 
-    with pytest.raises(ValidationError, match="only MKX may be active"):
+    with pytest.raises(ValidationError, match="active_office_ids must be unique"):
         EnvironmentConfig(
             schema_version=1,
             environment="staging",
             telegram_mode="live",
             nws_image_host_allowlist=("weather.gov", "*.weather.gov"),
-            active_office_ids=("GRB",),
+            active_office_ids=("GRB", "GRB"),
             office_channels={"GRB": "-1001"},
             alert_recipient="-1002",
         )
@@ -254,3 +267,12 @@ def test_timezone_and_versioned_secret_validation() -> None:
 def test_versioned_secret_rejects_malformed_json_shapes(secret_json: str, message: str) -> None:
     with pytest.raises(ConfigurationError, match=message):
         validate_telegram_secret(secret_json)
+
+
+@pytest.mark.parametrize("field", ["display_name", "telephone", "email", "region_name"])
+def test_office_profile_rejects_unbounded_rendered_fields(field: str) -> None:
+    from test_runtime import _registry
+
+    value = _registry().offices[0].model_dump() | {field: "a" * 257}
+    with pytest.raises(ValueError):
+        OfficeRegistryRecord.model_validate(value)

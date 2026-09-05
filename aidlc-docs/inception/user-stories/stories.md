@@ -24,7 +24,7 @@ the service polls only intended offices with safe environment configuration.**
 
 - Given the versioned office seed and environment configuration, when configuration loads, then
   schema, office ID, coordinates, timezone, active state, and destination invariants are validated.
-- Given the MVP configuration, when active offices are selected, then only MKX is active and dev
+- Given validated configuration, when offices are selected, then only configured active offices are eligible and dev
   Telegram operations remain mock-only.
 - Invalid, cross-environment, secret-bearing, or unbounded values fail closed without logging their
   raw contents.

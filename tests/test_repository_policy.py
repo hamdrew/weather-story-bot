@@ -2,6 +2,128 @@
 
 import re
 from pathlib import Path
+from typing import Any, cast
+
+import yaml
+
+
+class TemplateLoader(yaml.SafeLoader):
+    """Safe intrinsic preservation for assertions; never execute YAML constructors."""
+
+
+def intrinsic(loader: TemplateLoader, tag: str, node: yaml.Node) -> dict[str, object]:
+    name = tag if tag == "Ref" else "Fn::" + tag
+    if isinstance(node, yaml.ScalarNode):
+        value: object = loader.construct_scalar(node)
+    elif isinstance(node, yaml.SequenceNode):
+        value = loader.construct_sequence(node)
+    else:
+        raise ValueError("unsupported intrinsic node")
+    return {name: value}
+
+
+TemplateLoader.add_multi_constructor("!", intrinsic)
+
+
+def template() -> dict[str, Any]:
+    return cast(
+        dict[str, Any], yaml.load(read_repository_file("template.yaml"), Loader=TemplateLoader)
+    )
+
+
+def test_operations_template_has_no_schedule_public_endpoint_or_custom_state() -> None:
+    document = template()
+    resources = document["Resources"]
+    forbidden = {
+        "AWS::SQS::Queue",
+        "AWS::DynamoDB::Table",
+        "AWS::Scheduler::Schedule",
+        "AWS::Lambda::Url",
+        "AWS::Serverless::Api",
+        "AWS::ApiGateway::RestApi",
+    }
+    assert not {resource["Type"] for resource in resources.values()} & forbidden
+    for name in ("OfficeFunction", "AlertFunction"):
+        function = resources[name]["Properties"]
+        assert "Events" not in function
+        assert "Policies" not in function
+    assert document["Globals"]["Function"]["Runtime"] == "python3.13"
+    assert document["Globals"]["Function"]["Architectures"] == ["arm64"]
+    assert document["Parameters"]["Environment"]["AllowedValues"] == ["staging"]
+
+
+def test_notification_graph_cannot_return_to_trigger_or_retry_on_function_error() -> None:
+    resources = template()["Resources"]
+    subscriptions = [
+        r["Properties"] for r in resources.values() if r["Type"] == "AWS::SNS::Subscription"
+    ]
+    assert {(str(s["TopicArn"]), s["Protocol"]) for s in subscriptions} == {
+        (str({"Ref": "TriggerTopic"}), "lambda"),
+        (str({"Ref": "FallbackTopic"}), "email"),
+    }
+    role = resources["AlertRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
+    allowed = [s for s in role if s["Effect"] == "Allow"]
+    publications = [s["Resource"] for s in allowed if s["Action"] == "sns:Publish"]
+    assert publications == [{"Ref": "FallbackTopic"}]
+    assert not any("dynamodb" in str(s["Action"]) for s in allowed)
+    assert "AlarmActions" not in resources["AlertFailureAlarm"]["Properties"]
+    assert (
+        resources["AlertFunction"]["Properties"]["EventInvokeConfig"]["MaximumRetryAttempts"] == 0
+    )
+    source = resources["AlertInvokePermission"]["Properties"]
+    assert source["Principal"] == "sns.amazonaws.com"
+    assert source["SourceArn"] == {"Ref": "TriggerTopic"}
+    assert source["SourceAccount"] == {"Ref": "AWS::AccountId"}
+
+
+def test_office_role_can_only_read_and_write_its_office_partition() -> None:
+    statements = template()["Resources"]["OfficeRole"]["Properties"]["Policies"][0][
+        "PolicyDocument"
+    ]["Statement"]
+    dynamo = [s for s in statements if str(s["Action"]).startswith("dynamodb:")]
+    assert {s["Action"] for s in dynamo} == {"dynamodb:GetItem", "dynamodb:PutItem"}
+    for statement in dynamo:
+        assert statement["Condition"]["ForAllValues:StringEquals"]["dynamodb:LeadingKeys"] == {
+            "Ref": "ActiveOfficeKeys"
+        }
+    assert template()["Parameters"]["ActiveOfficeKeys"]["AllowedPattern"] == "OFFICE#[A-Z]{3}"
+    assert not any(
+        "sns:" in str(s["Action"]) or "scheduler:" in str(s["Action"]) for s in statements
+    )
+
+
+def test_operation_template_retains_logs_encrypts_topics_and_scopes_secrets() -> None:
+    resources = template()["Resources"]
+    for name in ("OfficeLogGroup", "AlertLogGroup"):
+        assert resources[name]["Properties"]["RetentionInDays"] >= 90
+        assert resources[name]["DeletionPolicy"] == "Retain"
+        assert resources[name]["UpdateReplacePolicy"] == "Retain"
+    for name in ("TriggerTopic", "FallbackTopic"):
+        assert resources[name]["Properties"]["KmsMasterKeyId"] == {
+            "Fn::GetAtt": "NotificationKey.Arn"
+        }
+    for role_name in ("OfficeRole", "AlertRole"):
+        statements = resources[role_name]["Properties"]["Policies"][0]["PolicyDocument"][
+            "Statement"
+        ]
+        assert not any("Delete" in str(s["Action"]) for s in statements)
+        for statement in statements:
+            assert statement["Resource"] != "*"
+            assert "*" not in str(statement["Action"])
+            if statement["Action"] == "secretsmanager:GetSecretValue":
+                assert (
+                    statement["Condition"]["StringEquals"]["secretsmanager:VersionStage"]
+                    == "AWSCURRENT"
+                )
+    assert template()["Parameters"]["FallbackEmail"]["NoEcho"] is True
+
+
+def test_office_alarm_has_explicit_noise_and_missing_data_policy() -> None:
+    alarm = template()["Resources"]["OfficeFailureAlarm"]["Properties"]
+    assert 1 <= alarm["DatapointsToAlarm"] <= alarm["EvaluationPeriods"]
+    assert alarm["TreatMissingData"] == "notBreaching"
+    assert alarm["AlarmActions"] == [{"Ref": "TriggerTopic"}]
+
 
 ROOT = Path(__file__).parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
