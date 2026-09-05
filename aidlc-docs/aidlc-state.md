@@ -5,11 +5,11 @@
 - **Project Type**: Brownfield
 - **Start Date**: 2026-08-26T04:31:29Z
 - **Current Phase**: CONSTRUCTION
-- **Current Stage**: U-01 Code Generation - Generated Code Review Gate
-- **Last Completed**: U-01 Steps 4-8 generated and locally validated on 2026-09-05:
-  272 tests pass with 93.72% line coverage, clean Ruff/mypy, and valid SAM schema/lint.
-- **Next Step**: Owner review of generated U-01 code and implementation summary. After approval,
-  proceed to U-03 design per the approved dependency sequence; cloud composition remains U-03 work.
+- **Current Stage**: U-03 Code Generation - Approved and paused before implementation
+- **Last Completed**: U-03 Code Generation plan approved by the owner on 2026-09-05.
+- **Next Step**: Paused at the owner's direction before U-03 Step 1. On explicit resumption, create
+  a compliant feature branch and begin local implementation; no cloud or Telegram mutation is
+  authorized.
 
 ## Workspace State
 
@@ -63,7 +63,7 @@
 - [x] INCEPTION - Application Design artifacts approved
 - [x] INCEPTION - Units Generation assessment - Execute
 - [x] INCEPTION - Units Generation artifacts approved
-- [ ] CONSTRUCTION - Per-unit design and code generation (U-01 generated code awaiting review)
+- [ ] CONSTRUCTION - Per-unit design and code generation (U-01 complete; U-03 Functional Design active)
 - [ ] CONSTRUCTION - Build and Test
 - [ ] OPERATIONS - Placeholder
 
@@ -228,17 +228,53 @@
 
 ## Construction Status
 
-- **Current Unit**: U-01 Protected Runtime Operations and Observability
-- **Current Stage**: Generated Code review after approved plan implementation
-- **Plan**: `aidlc-docs/construction/plans/u-01-code-generation-plan.md`
-- **Next Unit Stages**: After U-01 code approval, design U-03; then U-02 once staging inputs are
-  known, U-04, and U-05. Build and Test follows all units.
+- **Current Unit**: U-03 Staging SAM Infrastructure and Runtime Composition
+- **Current Stage**: Code Generation approved and paused before Step 1
+- **Plan**: `aidlc-docs/construction/plans/u-03-code-generation-plan.md`
+- **Next Unit Stages**: The owner has paused U-03 before Step 1. On explicit resumption, perform
+  local implementation on a compliant feature branch. U-02 follows when staging inputs are known,
+  then U-04 and U-05. Build and Test follows all units.
 - **Artifacts**: `aidlc-docs/construction/u-01/`
-- **Resume Evidence**: All eight generation steps are complete at the U-01 contract boundary.
-  Concrete live adapters, packaging, and cloud validation remain explicitly assigned to U-03/U-05.
+- **Resume Evidence**: U-01 all eight generation steps are complete and the owner approved its
+  generated code. Concrete live adapters, packaging, and cloud validation remain explicitly
+  assigned to U-03/U-05.
 - **Implementation Summary**: `aidlc-docs/construction/u-01/code/implementation-summary.md`
 - **Validation**: `make format`, `make check` (272 tests, 93.72% line coverage), local
   `make validate-sam`, and `git diff --check` pass. No cloud/Telegram or GitHub mutation performed.
+- **U-01 Code Approval**: Owner explicitly approved generated code on 2026-09-05. U-01 is complete
+  at its contract boundary; its U-03 handoff is concrete runtime adapters, exact resource bindings,
+  package evidence, and staging composition.
+- **U-03 Functional Design Plan**: Created and owner-approved on 2026-09-05. Approved requirements
+  resolve relevant business choices, so the plan contains no clarification question.
+- **U-03 Functional Design Artifacts**: Generated on 2026-09-05 and awaiting owner review at
+  `aidlc-docs/construction/u-03/functional-design/`. They define composition, admission, state/media
+  lifecycle, protected-operation binding, safe evidence, and PBT-01/Security Baseline treatment.
+- **U-03 Functional Design Approval**: Owner explicitly approved the artifacts on 2026-09-05.
+- **U-03 NFR Requirements Plan**: Created and owner-approved on 2026-09-05. Approved requirements
+  resolve the capacity, performance, reliability, security, technology, maintainability, and
+  usability choices; no clarification question is required.
+- **U-03 NFR Requirements Artifacts**: Generated on 2026-09-05 and awaiting owner review at
+  `aidlc-docs/construction/u-03/nfr-requirements/`. They define bounded composition, retained state,
+  isolated staging, safe evidence, and the compatible technology stack.
+- **U-03 NFR Requirements Approval**: Owner explicitly approved the artifacts on 2026-09-05.
+- **U-03 NFR Design Plan**: Created and owner-approved on 2026-09-05. Approved requirements resolve
+  the resilience, performance, security, and logical-component choices; no clarification question is
+  required.
+- **U-03 NFR Design Artifacts**: Generated on 2026-09-05 and await owner review at
+  `aidlc-docs/construction/u-03/nfr-design/`. They define immutable assembly, bounded effects,
+  conditional current facts, isolated lifecycle, safe evidence, and logical boundaries.
+- **U-03 NFR Design Approval**: Owner explicitly approved the artifacts on 2026-09-05.
+- **U-03 Infrastructure Design Plan**: Created and owner-approved on 2026-09-05. Approved
+  requirements resolve environment, compute, storage, messaging, monitoring, networking, and
+  shared-infrastructure decisions; no clarification question is required.
+- **U-03 Infrastructure Design Artifacts**: Generated on 2026-09-05 and await owner review at
+  `aidlc-docs/construction/u-03/infrastructure-design/`. They map runtime, storage, schedules,
+  observability, IAM, and non-mutating delivery boundaries to the staging SAM contract.
+- **U-03 Infrastructure Design Approval**: Owner explicitly approved the artifacts on 2026-09-05.
+- **U-03 Code Generation Plan**: Created and owner-approved on 2026-09-05. It is the single source
+  of truth for local brownfield runtime, template, test, and evidence implementation. The owner
+  directed a pause before Step 1; implementation will begin only after explicit resumption on a
+  compliant feature branch.
 - **Approval Record Gap**: Historical approval records remain absent; prospective approval of the
   reconciled plan and Infrastructure Design prerequisite is now recorded in the audit.
 - **PBT Compliance**: PBT-01 compliant: safe sanitizer/schema, alarm validation, alert rendering,

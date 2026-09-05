@@ -1302,3 +1302,237 @@ enabled; Resiliency Baseline remains disabled. Validation: 272 tests, 93.72% cov
 validation, Ruff and strict mypy. No remote action taken.
 
 ---
+
+## Session Resumption - U-01 Generated Code Review
+
+**Timestamp**: 2026-09-05T14:32:26Z
+
+**User Input**: "Continue AI-DLC workflow"
+
+**AI Response**: "Resumed the approved AI-DLC workflow from the U-01 generated-code review gate.
+Loaded the governing workflow, recorded state, approved requirements, stories, application/unit
+design, U-01 construction artifacts, code-generation plan, implementation summary, enabled
+Security Baseline and Property-Based Testing rules, and repository status. The working tree was
+clean before this continuity record; no application, infrastructure, cloud, Telegram, GitHub, or
+deployment action was performed."
+
+**Approval Prompt**: "Review the generated U-01 code and
+`aidlc-docs/construction/u-01/code/implementation-summary.md`. Request changes, or approve Code
+Generation to continue to U-03 design under the approved dependency sequence."
+
+**Context**: CONSTRUCTION - U-01 generated-code approval gate. Explicit owner approval remains
+required before U-03 design starts. Security Baseline and Property-Based Testing remain enabled;
+Resiliency Baseline remains disabled.
+
+---
+
+## U-01 Code Generation Approval and U-03 Functional Design Plan
+
+**Timestamp**: 2026-09-05T14:35:48Z
+
+**User Input**: "Approved"
+
+**AI Response**: "Recorded the owner's explicit approval of U-01 generated code. U-01 is complete
+at its contract boundary. Created the U-03 Functional Design plan for staging runtime composition
+and SAM-managed service behavior. Approved requirements resolve the relevant functional decisions;
+the plan has no clarification question and awaits review."
+
+**Approval Prompt**: "Review
+`aidlc-docs/construction/plans/u-03-functional-design-plan.md`. Explicitly approve the plan to
+generate U-03 Functional Design artifacts, or request changes."
+
+**Context**: CONSTRUCTION - U-01 completed and U-03 Functional Design plan approval gate. Security
+Baseline and Property-Based Testing remain enabled; Resiliency Baseline remains disabled. No
+application, infrastructure, cloud, Telegram, GitHub, or deployment mutation was performed.
+
+---
+
+## U-03 Functional Design Plan Approval and Artifact Generation
+
+**Timestamp**: 2026-09-05T14:40:28Z
+
+**User Input**: "Approved"
+
+**AI Response**: "Recorded approval of the U-03 Functional Design plan and generated the
+technology-agnostic business-logic model, domain entities, and business rules. The artifacts define
+runtime assembly, admission, conditional state/media lifecycle, protected-operation binding, safe
+evidence, PBT-01 properties, and Security Baseline compliance without authoring infrastructure or
+performing a remote action."
+
+**Approval Prompt**: "Review `aidlc-docs/construction/u-03/functional-design/`. Explicitly approve
+the U-03 Functional Design artifacts to assess U-03 NFR Requirements, or request changes."
+
+**Context**: CONSTRUCTION - U-03 Functional Design artifact approval gate. Security Baseline and
+Property-Based Testing remain enabled; Resiliency Baseline remains disabled. No application,
+infrastructure, cloud, Telegram, GitHub, or deployment mutation was performed.
+
+---
+
+## U-03 Functional Design Approval and NFR Requirements Plan
+
+**Timestamp**: 2026-09-05T14:47:28Z
+
+**User Input**: "Approved"
+
+**AI Response**: "Recorded approval of the U-03 Functional Design artifacts. Created the U-03 NFR
+Requirements plan for real runtime composition, staging service boundaries, retained resources,
+package evidence, and restore preparation. The approved requirements resolve all NFR categories;
+the plan contains no clarification question and awaits review."
+
+**Approval Prompt**: "Review
+`aidlc-docs/construction/plans/u-03-nfr-requirements-plan.md`. Explicitly approve the plan to
+generate U-03 NFR Requirements artifacts, or request changes."
+
+**Context**: CONSTRUCTION - U-03 Functional Design completed and NFR Requirements plan approval
+gate. Security Baseline and Property-Based Testing remain enabled; Resiliency Baseline remains
+disabled. No application, infrastructure, cloud, Telegram, GitHub, or deployment mutation was
+performed.
+
+---
+
+## U-03 NFR Requirements Plan Approval and Artifact Generation
+
+**Timestamp**: 2026-09-05T14:49:37Z
+
+**User Input**: "Approved"
+
+**AI Response**: "Recorded approval of the U-03 NFR Requirements plan and generated the U-03 NFR
+requirements and technology-decision artifacts. They define bounded runtime work, reliability and
+restore preparation, isolation, security/privacy, observability, reproducible evidence, and the
+existing Python/AWS/Hypothesis stack."
+
+**Approval Prompt**: "Review `aidlc-docs/construction/u-03/nfr-requirements/`. Explicitly approve
+the U-03 NFR Requirements artifacts to assess U-03 NFR Design, or request changes."
+
+**Context**: CONSTRUCTION - U-03 NFR Requirements artifact approval gate. Security Baseline and
+Property-Based Testing remain enabled; Resiliency Baseline remains disabled. No application,
+infrastructure, cloud, Telegram, GitHub, or deployment mutation was performed.
+
+---
+
+## U-03 NFR Requirements Approval and NFR Design Plan
+
+**Timestamp**: 2026-09-05T14:52:07Z
+
+**User Input**: "approved"
+
+**AI Response**: "Recorded approval of U-03 NFR Requirements and created the U-03 NFR Design plan.
+The plan translates the approved bounded runtime, conditional state/media, isolated staging, safe
+evidence, and least-privilege constraints into patterns and logical components. No NFR-design
+decision is ambiguous, so no clarification question was created."
+
+**Approval Prompt**: "Review `aidlc-docs/construction/plans/u-03-nfr-design-plan.md`. Explicitly
+approve the plan to generate U-03 NFR Design artifacts, or request changes."
+
+**Context**: CONSTRUCTION - U-03 NFR Requirements completed and NFR Design plan approval gate.
+Security Baseline and Property-Based Testing remain enabled; Resiliency Baseline remains disabled.
+No application, infrastructure, cloud, Telegram, GitHub, or deployment mutation was performed.
+
+---
+
+## U-03 NFR Design Plan Approval and Artifact Generation
+
+**Timestamp**: 2026-09-05T14:53:48Z
+
+**User Input**: "approved"
+
+**AI Response**: "Recorded approval of the U-03 NFR Design plan and generated NFR design-pattern
+and logical-component artifacts. They define fail-closed immutable assembly, budget propagation,
+conditional current-state/media behavior, isolation/recovery preparation, safe evidence, and narrow
+component boundaries without mapping to infrastructure or performing any remote action."
+
+**Approval Prompt**: "Review `aidlc-docs/construction/u-03/nfr-design/`. Explicitly approve the
+U-03 NFR Design artifacts to assess U-03 Infrastructure Design, or request changes."
+
+**Context**: CONSTRUCTION - U-03 NFR Design artifact approval gate. Security Baseline and
+Property-Based Testing remain enabled; Resiliency Baseline remains disabled. No application,
+infrastructure, cloud, Telegram, GitHub, or deployment mutation was performed.
+
+---
+
+## U-03 NFR Design Approval and Infrastructure Design Plan
+
+**Timestamp**: 2026-09-05T14:56:33Z
+
+**User Input**: "Approved"
+
+**AI Response**: "Recorded approval of the U-03 NFR Design artifacts and created the U-03
+Infrastructure Design plan. It maps the approved runtime boundary to staging SAM resources, retained
+state/media, disabled per-active-office schedules, observability, scoped IAM, and U-04 delivery
+handoff. No infrastructure decision is ambiguous, so no clarification question was created."
+
+**Approval Prompt**: "Review
+`aidlc-docs/construction/plans/u-03-infrastructure-design-plan.md`. Explicitly approve the plan to
+generate U-03 Infrastructure Design artifacts, or request changes."
+
+**Context**: CONSTRUCTION - U-03 NFR Design completed and Infrastructure Design plan approval gate.
+Security Baseline and Property-Based Testing remain enabled; Resiliency Baseline remains disabled.
+AWS serverless guidance informed the local resource-boundary plan. No application, infrastructure,
+cloud, Telegram, GitHub, or deployment mutation was performed.
+
+---
+
+## U-03 Infrastructure Design Plan Approval and Artifact Generation
+
+**Timestamp**: 2026-09-05T14:58:13Z
+
+**User Input**: "Approved"
+
+**AI Response**: "Recorded approval of the U-03 Infrastructure Design plan and generated the
+staging resource and deployment-boundary artifacts. They map real runtime composition, retained
+state/media, disabled schedules, safe observability, exact IAM, and U-04 delivery handoff without
+authorizing or performing any cloud mutation."
+
+**Approval Prompt**: "Review `aidlc-docs/construction/u-03/infrastructure-design/`. Explicitly
+approve the U-03 Infrastructure Design artifacts to create the U-03 Code Generation plan, or
+request changes."
+
+**Context**: CONSTRUCTION - U-03 Infrastructure Design artifact approval gate. Security Baseline
+and Property-Based Testing remain enabled; Resiliency Baseline remains disabled. AWS serverless
+guidance informed the staging resource mappings. No application, infrastructure, cloud, Telegram,
+GitHub, or deployment mutation was performed.
+
+---
+
+## U-03 Infrastructure Design Approval and Code Generation Plan
+
+**Timestamp**: 2026-09-05T15:00:39Z
+
+**User Input**: "Approved"
+
+**AI Response**: "Recorded approval of U-03 Infrastructure Design and created the detailed U-03
+Code Generation plan. It sequences feature-branch setup, real runtime composition, staged SAM
+resources, deterministic and property tests, local validation, and traceability evidence. The plan
+preserves mock-only dev and explicitly excludes all remote cloud, Telegram, GitHub, and deployment
+mutation."
+
+**Approval Prompt**: "Review `aidlc-docs/construction/plans/u-03-code-generation-plan.md`.
+Explicitly approve the full plan and local generation sequence to begin U-03 implementation, or
+request changes."
+
+**Context**: CONSTRUCTION - U-03 Infrastructure Design completed and Code Generation plan approval
+gate. Security Baseline and Property-Based Testing remain enabled; Resiliency Baseline remains
+disabled. No application, infrastructure, cloud, Telegram, GitHub, or deployment mutation was
+performed.
+
+---
+
+## U-03 Code Generation Plan Approval and Owner Pause
+
+**Timestamp**: 2026-09-05T15:04:59Z
+
+**User Input**: "Code generation plan approved. Record approval, commit, and push to main, but
+pause before continuing with code generation."
+
+**AI Response**: "Recorded the owner's explicit approval of the U-03 Code Generation plan. The
+owner also explicitly authorized committing and pushing the accumulated AI-DLC documentation to
+`main`, overriding the normal feature-branch restriction for this documentation-only checkpoint.
+U-03 is paused before Step 1; no application, template, test, AWS, Telegram, or deployment action
+is authorized until the owner explicitly resumes implementation."
+
+**Context**: CONSTRUCTION - U-03 Code Generation plan approved; paused before local implementation.
+Security Baseline and Property-Based Testing remain enabled; Resiliency Baseline remains disabled.
+The separately authorized Git commit/push contains AI-DLC documentation only and does not authorize
+any cloud, Telegram, or deployment mutation.
+
+---
