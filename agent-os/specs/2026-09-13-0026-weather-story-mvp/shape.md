@@ -40,4 +40,4 @@ The full Phase 1 MVP. A scheduled AWS Lambda checks the NWS MKX (Milwaukee/Sulli
 
 ## Standards Applied
 
-None. `agent-os/standards/index.yml` has no standards defined yet.
+backend/client-errors, backend/injected-clients, backend/retries, backend/secrets-in-errors. See standards.md.

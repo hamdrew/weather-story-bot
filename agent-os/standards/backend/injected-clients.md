@@ -13,6 +13,7 @@ class NwsClient:
         sleep: Callable[[float], None] = time.sleep,
     ) -> None: ...
 
+
 PostedStore(boto3.client("dynamodb"), table_name)
 ```
 

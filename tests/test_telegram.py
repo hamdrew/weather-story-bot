@@ -147,6 +147,27 @@ def test_other_errors_raise_without_fallback(client: TelegramClient) -> None:
     assert not document.called
 
 
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(200, json={"ok": True, "result": {}}),
+        httpx.Response(200, json={"ok": True, "result": {"message_id": "abc"}}),
+        httpx.Response(200, json={"ok": True}),
+        error(429, "Too Many Requests", parameters={"retry_after": "soon"}),
+    ],
+)
+@respx.mock
+def test_malformed_payload_raises_telegram_error(
+    client: TelegramClient, response: httpx.Response
+) -> None:
+    respx.post(PHOTO_URL).mock(return_value=response)
+
+    with pytest.raises(TelegramError) as exc_info:
+        client.send_photo("-1001", b"x", "cap", "a.png")
+    assert TOKEN not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+
+
 @respx.mock
 def test_transport_error_is_not_retried_and_hides_token(client: TelegramClient) -> None:
     route = respx.post(PHOTO_URL).mock(side_effect=httpx.ReadTimeout(f"timeout on {PHOTO_URL}"))

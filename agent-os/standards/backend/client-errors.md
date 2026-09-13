@@ -6,6 +6,7 @@ Each client raises exactly one public error type. It wraps transport errors, bad
 class NwsError(Exception):
     """The NWS API could not be reached or returned an unusable response."""
 
+
 try:
     stories = [Story.from_api(i) for i in response.json()["stories"]]
 except (ValueError, KeyError, TypeError) as exc:

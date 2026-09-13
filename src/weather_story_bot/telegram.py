@@ -92,7 +92,10 @@ class TelegramClient:
             result = self._call(
                 "sendDocument", data, {"document": (filename, image_bytes, "image/png")}
             )
-        return int(result["message_id"])
+        try:
+            return int(result["message_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise TelegramError(f"Unexpected Telegram result: {type(exc).__name__}") from None
 
     def _call(self, method: str, data: dict[str, str], files: dict[str, Any]) -> dict[str, Any]:
         url = f"{self._base_url}/bot{self._token}/{method}"
@@ -109,12 +112,15 @@ class TelegramClient:
 
             body = _json_body(response)
             if response.is_success and body.get("ok"):
-                return body["result"]
+                result = body.get("result")
+                if not isinstance(result, dict):
+                    raise TelegramError(f"{method} returned no result object")
+                return result
 
             description = str(body.get("description") or response.reason_phrase)
             if response.status_code == 429 and not retried:
-                retry_after = int((body.get("parameters") or {}).get("retry_after", 1))
-                if retry_after <= MAX_RETRY_AFTER_SECONDS:
+                retry_after = _retry_after(body)
+                if retry_after is not None and retry_after <= MAX_RETRY_AFTER_SECONDS:
                     logger.warning(
                         "Telegram rate limited, retrying",
                         extra={"method": method, "retry_after": retry_after},
@@ -143,3 +149,13 @@ def _json_body(response: httpx.Response) -> dict[str, Any]:
     except ValueError:
         return {}
     return body if isinstance(body, dict) else {}
+
+
+def _retry_after(body: dict[str, Any]) -> int | None:
+    """Seconds from `parameters.retry_after` (default 1), or None if the value is unusable."""
+    parameters = body.get("parameters")
+    raw = parameters.get("retry_after", 1) if isinstance(parameters, dict) else 1
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
