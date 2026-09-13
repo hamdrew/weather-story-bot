@@ -1,2 +1,11 @@
 # Agent OS Standards Index
 
+backend:
+  client-errors:
+    description: One public error type per client; handler.run is the only catch-all boundary
+  injected-clients:
+    description: Service wrappers take httpx/boto3 clients and sleep from the caller
+  retries:
+    description: At most one in-client retry, decided by side effects; next run is the real retry
+  secrets-in-errors:
+    description: Keep the Telegram token URL out of exceptions, tracebacks and logs
