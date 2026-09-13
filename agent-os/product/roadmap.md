@@ -15,4 +15,14 @@
 
 - **Multiple offices:** Support more NWS offices, with a separate Telegram channel for each office.
 - **Story archive:** Save past Weather Stories so they can be looked up later.
+- **CI/CD pipeline:** Deploy from GitHub Actions instead of running `make deploy` from my laptop.
+  - **Starting approach:** One workflow that reuses the Makefile. Pull requests run lint, test, build, and `terraform plan`. Merges to `main` run the same steps plus `terraform apply` in a protected environment.
+  - **AWS access:** GitHub OIDC with a narrowly scoped IAM role (managed in Terraform), so no long-lived keys. Variables that aren't committed (`nws_user_agent`, backend config) come from GitHub Actions variables.
+  - **Fixes it needs first:** Make the Lambda zip reproducible so a plan only shows a change when the code really changed. Make `plan`/`deploy` build first, or fail if the zip is missing.
+  - **Later, if needed:** Upload versioned zips to S3 (keyed by git SHA) so plan and apply can be separate jobs with an approval between them, and rollback is just re-applying an older SHA.
+  - **Alternative to evaluate: a cloud Terraform runner** (HCP Terraform, or Spacelift/env0/Scalr, which can also run OpenTofu).
+    - **Gives:** a web UI for plans and applies, run history, approval buttons, drift detection, and policy checks.
+    - **Costs:** another account and vendor, and variables kept in the platform. The S3 backend already covers state and locking for a project this size.
+    - **The zip problem:** Remote runs don't have `build/lambda.zip`, because it's gitignored. Runs triggered from GitHub need S3 zips (above) or a build step inside the run (Spacelift hooks with a custom image). HCP Terraform can't run a build first, so either GitHub Actions builds the zip and starts a CLI-driven run that uploads it, or it uses S3 zips.
+    - **If chosen:** Start with S3 zips so the runner never needs a local file. Move state from the S3 backend with `terraform init -migrate-state`. Point the OIDC role's trust at the platform instead of GitHub. Check current free-tier limits before committing.
 - **Channel promotion (long-term):** Possibly promote the per-office channels to a wider audience.
