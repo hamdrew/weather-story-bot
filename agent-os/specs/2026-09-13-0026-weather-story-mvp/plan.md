@@ -167,7 +167,8 @@ Why: the handler raises `ProcessingError` whenever anything fails, and timeouts 
   - `repost_alarm_max_posts` (number, default `8`), counted over a 3-hour window
 - **SNS:** Create topic `weather-story-bot-alerts` with an `email` subscription to `var.alert_email`.
   - Leave the topic unencrypted, or use a customer-managed KMS key that allows `cloudwatch.amazonaws.com`. With the AWS-managed `aws/sns` key, CloudWatch can't publish alarm notifications.
-- **Metric filter:** On the Lambda log group, pattern `{ $.message = "Story posted" }` → metric `StoriesPosted` in namespace `WeatherStoryBot`, value `1`, no default value. New posts and "Updated" reposts both count.
+- **Metric filter:** On the Lambda log group, pattern `{ $.message = "Telegram message sent" }` → metric `StoriesPosted` in namespace `WeatherStoryBot`, value `1`, no default value. New posts and "Updated" reposts both count.
+  - `TelegramClient.send_photo` logs that line as soon as Telegram accepts the message, before parsing `message_id` and before the DynamoDB write. Counting the handler's `"Story posted"` line instead would hide a repost loop, because that line only runs after `record_posted` succeeds.
 - **Alarms:** Every alarm sets both `alarm_actions` and `ok_actions` to the topic. Each `alarm_description` says what probably happened, what to check first, and links to the log group in the CloudWatch Logs console (`https://<region>.console.aws.amazon.com/cloudwatch/home?region=<region>#logsV2:log-groups/log-group/$252Faws$252Flambda$252Fweather-story-bot`).
 
 | Alarm | Metric | Stat / period | Condition | Missing data |
@@ -181,7 +182,8 @@ Why: the handler raises `ProcessingError` whenever anything fails, and timeouts 
 - **Budget:** An `aws_budgets_budget` of type `COST`, monthly, limited to `var.monthly_budget_usd`. Email `var.alert_email` directly (no SNS) when ACTUAL spend passes 80% and when FORECASTED spend passes 100%. It covers the whole account, not just this project.
 - **Outputs:** Add `alert_topic_arn`.
 - **Tests:**
-  - Add a handler test that checks exactly one `"Story posted"` log record per new or updated story, and none for skipped stories. The metric filter depends on that message text.
+  - Add a handler test that checks exactly one `"Story posted"` log record per new or updated story, and none for skipped stories.
+  - Add tests that a `"Telegram message sent"` record is logged for every message Telegram accepts, including when the `message_id` is unusable or `record_posted` fails, and not when Telegram rejects the message. The metric filter depends on that message text.
   - Run `terraform validate`.
 - **Out of scope:**
   - Duration alarm (a timeout already counts as an error, and failing on very large data is acceptable)

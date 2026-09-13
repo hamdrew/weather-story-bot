@@ -96,6 +96,54 @@ def test_changed_update_time_reposts_with_prefix(
     assert services.store.get_update_time("MKX", image_id) == "2026-09-12T23:00:00+00:00"
 
 
+def test_one_story_posted_log_per_new_or_updated_story(
+    services: handler.Services,
+    api: Any,
+    mkx_payload: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # "Story posted" marks a recorded post; the repost-loop runbook compares it with
+    # "Telegram message sent", which is what the StoriesPosted metric filter counts.
+    def posted_records() -> list[logging.LogRecord]:
+        return [r for r in caplog.records if r.getMessage() == "Story posted"]
+
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+    handler.run((MKX,), services)
+    assert [r.status for r in posted_records()] == ["new", "new"]
+
+    caplog.clear()
+    mkx_payload["stories"][1]["updateTime"] = "2026-09-12T23:00:00+00:00"
+    api.get(MKX_URL).respond(json=mkx_payload)
+    handler.run((MKX,), services)
+    assert [r.status for r in posted_records()] == ["updated"]
+
+    caplog.clear()
+    handler.run((MKX,), services)
+    assert posted_records() == []
+
+
+def test_post_is_counted_even_when_recording_fails(
+    services: handler.Services,
+    api: Any,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The StoriesPosted CloudWatch metric filter matches "Telegram message sent", so the
+    # repost-loop alarm must still see posts whose DynamoDB write fails.
+    def fail(*_: object) -> None:
+        raise RuntimeError("PutItem throttled")
+
+    monkeypatch.setattr(services.store, "record_posted", fail)
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    summary = handler.run((MKX,), services)
+
+    assert summary["MKX"]["failed"] == 2
+    messages = [r.getMessage() for r in caplog.records]
+    assert messages.count("Telegram message sent") == 2
+    assert "Story posted" not in messages
+
+
 def test_telegram_failure_leaves_story_unrecorded(
     services: handler.Services, api: Any, mkx_payload: dict[str, Any]
 ) -> None:

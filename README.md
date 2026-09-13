@@ -48,7 +48,7 @@ Prerequisites: [uv](https://docs.astral.sh/uv/), Terraform ≥ 1.11, and the AWS
 6. **Configure Terraform.** Both copies are gitignored:
    ```sh
    cp infra/backend.hcl.example infra/backend.hcl             # set the bucket name
-   cp infra/terraform.tfvars.example infra/terraform.tfvars   # set chat_id and nws_user_agent
+   cp infra/terraform.tfvars.example infra/terraform.tfvars   # set chat_id, nws_user_agent and alert_email
    terraform -chdir=infra init -backend-config=backend.hcl
    ```
    NWS asks API clients to send a `User-Agent` that identifies the app and gives a way to contact you, e.g. `weather-story-bot (you@example.com)`.
@@ -104,6 +104,57 @@ aws lambda invoke --function-name weather-story-bot out.json && cat out.json
 ```
 
 Invoke it again and every story should show as `skipped`. Logs are structured JSON in the CloudWatch log group `/aws/lambda/weather-story-bot`.
+
+## Alerts
+
+CloudWatch alarms email `alert_email` through the SNS topic `weather-story-bot-alerts`, and send a second email when the alarm returns to OK. Alerts never go through Telegram, because Telegram might be what's broken. Separately, an AWS Budget emails `alert_email` directly when spend runs high.
+
+**After the first deploy**, open the "AWS Notification - Subscription Confirmation" email and click the link. Until you do, SNS drops every alarm email. To check:
+
+```sh
+aws sns list-subscriptions-by-topic \
+  --topic-arn "$(terraform -chdir=infra output -raw alert_topic_arn)"   # must not say PendingConfirmation
+```
+
+**Make the alerts notify on your phone.** In Gmail, add a filter for the alert senders:
+
+- SNS alarm emails come from `no-reply@sns.amazonaws.com`.
+- Budget emails come from an AWS address. Check the sender on the first one you receive and add it to the filter.
+
+Set the filter to **Never send it to Spam**, **Always mark it as important**, and **Categorize as: Primary**. Then the Gmail app notifies you even if it's set to notify only for Primary or high-priority mail.
+
+To test the whole path, force an alarm and wait for both emails (the OK email follows at the next evaluation):
+
+```sh
+aws cloudwatch set-alarm-state --alarm-name weather-story-bot-errors \
+  --state-value ALARM --state-reason "test"
+```
+
+### What each alert means
+
+| Alert | Fires when | What to check first |
+|---|---|---|
+| `weather-story-bot-errors` | Runs failed in 2 consecutive 15-minute periods. One flaky run doesn't alert. Any failed story or office, and any timeout, counts. | The `ERROR` lines in the log group. They name the office and story, plus the NWS, Telegram or AWS error. |
+| `weather-story-bot-missed-runs` | No invocations in the last hour. | The EventBridge Scheduler schedule `weather-story-bot` is enabled, and the scheduler role can still invoke the function. |
+| `weather-story-bot-quiet` | No stories posted for `quiet_alarm_days` days, even though runs aren't failing. | The `Run complete` summaries in the logs. If they show only `skipped` while weather.gov has new stories, NWS may have changed the API. |
+| `weather-story-bot-repost-loop` | More than `repost_alarm_max_posts` stories posted in 3 hours. | The Telegram channel for duplicates, and `Telegram message sent` log lines for the same `image_filename` again and again, without a matching `Story posted` line (for example, DynamoDB writes failing after each post). |
+| `weather-story-bot-monthly` (budget) | Actual account spend passes 80% of `monthly_budget_usd`, or forecasted spend passes 100%. | AWS Cost Explorer, grouped by service. The budget covers the **whole account**, not just this bot. |
+
+Each alarm email includes the same hints and a link to the log group.
+
+`quiet` and `repost-loop` count the Telegram client's `Telegram message sent` log line through a log metric filter (`WeatherStoryBot/StoriesPosted`), so don't change that message text. It's logged as soon as Telegram accepts a message, so posts whose DynamoDB write then fails still count. Until a full day of data exists, `quiet` may show `INSUFFICIENT_DATA`.
+
+### Tuning thresholds
+
+The starting values are guesses until there's real posting data. Override them in `infra/terraform.tfvars` and run `make deploy`:
+
+```hcl
+monthly_budget_usd     = 5  # USD per month, whole account
+quiet_alarm_days       = 2  # 1-7; CloudWatch can't look back further than 7 days
+repost_alarm_max_posts = 8  # posts per 3 hours
+```
+
+If you slow the schedule down to less than once an hour, `missed-runs` will fire on every gap. Change its `period` in `infra/monitoring.tf` to match.
 
 ## Adding an office
 

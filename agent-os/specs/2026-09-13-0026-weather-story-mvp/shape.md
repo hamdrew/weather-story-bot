@@ -25,7 +25,7 @@ The full Phase 1 MVP. A scheduled AWS Lambda checks the NWS MKX (Milwaukee/Sulli
   - **Repost loop:** More than 8 posts in 3 hours.
   - **Cost:** A monthly AWS Budget.
   The quiet and repost-loop alarms catch bugs that don't raise errors, so the Errors metric can't see them.
-- **Post counts come from a log metric filter** on the existing `"Story posted"` log line. The code doesn't publish its own metrics, so no extra IAM permission or runtime dependency is needed.
+- **Post counts come from a log metric filter** on the Telegram client's `"Telegram message sent"` log line. It's logged before the DynamoDB write, so posts that fail to record still count toward the repost-loop alarm. The code doesn't publish its own metrics, so no extra IAM permission or runtime dependency is needed.
 - **Thresholds are Terraform variables.** The starting values are guesses until there's real MKX posting data.
 - **Cost estimates come from Infracost, run by hand.** `make cost` runs `infracost breakdown` on `infra/`. It doesn't run before deploys or in CI, and no baseline gets written down.
   - **Chosen over a custom Python script** that would look up prices with the AWS pricing API. Infracost is much less code, and it picks up new Terraform resources without anyone keeping a list up to date.

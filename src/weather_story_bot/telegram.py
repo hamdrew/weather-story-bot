@@ -92,6 +92,9 @@ class TelegramClient:
             result = self._call(
                 "sendDocument", data, {"document": (filename, image_bytes, "image/png")}
             )
+        # Logged before anything else can fail: the StoriesPosted metric filter counts this exact
+        # message, so the repost-loop alarm sees every delivered post, even ones never recorded.
+        logger.info("Telegram message sent", extra={"chat_id": chat_id, "image_filename": filename})
         try:
             return int(result["message_id"])
         except (KeyError, TypeError, ValueError) as exc:

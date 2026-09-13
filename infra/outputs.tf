@@ -9,3 +9,7 @@ output "table_name" {
 output "bucket_name" {
   value = aws_s3_bucket.archive.bucket
 }
+
+output "alert_topic_arn" {
+  value = aws_sns_topic.alerts.arn
+}

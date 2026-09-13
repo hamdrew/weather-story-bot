@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import contextlib
+import logging
+
 import httpx
 import pytest
 import respx
@@ -166,6 +169,35 @@ def test_malformed_payload_raises_telegram_error(
         client.send_photo("-1001", b"x", "cap", "a.png")
     assert TOKEN not in str(exc_info.value)
     assert exc_info.value.__cause__ is None
+
+
+@pytest.mark.parametrize(
+    ("response", "sent"),
+    [
+        (ok(7), True),
+        # Delivered, but the message_id is unusable: still counted as sent.
+        (httpx.Response(200, json={"ok": True, "result": {"message_id": "abc"}}), True),
+        (error(400, "Bad Request: chat not found"), False),
+    ],
+)
+@respx.mock
+def test_sent_log_marks_every_accepted_message(
+    client: TelegramClient,
+    caplog: pytest.LogCaptureFixture,
+    response: httpx.Response,
+    sent: bool,
+) -> None:
+    # The StoriesPosted CloudWatch metric filter matches this exact message.
+    respx.post(PHOTO_URL).mock(return_value=response)
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    with contextlib.suppress(TelegramError):
+        client.send_photo("-1001", b"x", "cap", "a.png")
+
+    records = [r for r in caplog.records if r.getMessage() == "Telegram message sent"]
+    expected = [("-1001", "a.png")] if sent else []
+    assert [(r.chat_id, r.image_filename) for r in records] == expected
+    assert all(TOKEN not in r.getMessage() for r in caplog.records)
 
 
 @respx.mock
