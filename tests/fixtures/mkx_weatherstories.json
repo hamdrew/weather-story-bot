@@ -1,0 +1,31 @@
+{
+    "@context": {
+        "@version": "1.1"
+    },
+    "stories": [
+        {
+            "officeId": "MKX",
+            "startTime": "2026-09-12T19:24:00+00:00",
+            "endTime": "2026-09-13T19:24:00+00:00",
+            "updateTime": "2026-09-12T19:30:25+00:00",
+            "title": "Active Start To The Week - Timing",
+            "description": "An active start to the work week is expected, with multiple periods of showers and storms anticipated from Monday evening through at least Tuesday. An isolated severe storm with gusty winds is possible, but the main impact will be heavy downpours & possible flooding impacts. ",
+            "altText": "Graphicast breaking down the timing of an active start to the work week with multiple rounds of showers & storms. ",
+            "priority": false,
+            "order": 1,
+            "download": "https://api.weather.gov/offices/MKX/weatherstories/download/596aaed9-3f9a-46cf-aaa1-a22d9ea8c0c2"
+        },
+        {
+            "officeId": "MKX",
+            "startTime": "2026-09-12T19:34:00+00:00",
+            "endTime": "2026-09-13T19:34:00+00:00",
+            "updateTime": "2026-09-12T19:39:04+00:00",
+            "title": "Monday Night-Tuesday Rain Potential",
+            "description": "A batch of widespread showers & storms is expected Monday night into Tuesday morning across southern Wisconsin. Torrential downpours will accompany storms, with flooding impacts possible where storms track repeatedly. Best potential for impacts is currently over the western part of the area. Shifts in heavy rain corridors remain possible, so keep up with later forecast updates.",
+            "altText": "Graphicast showing the potential for 1\"+ of rainfall & heavy rain impacts Monday night into Tuesday.",
+            "priority": false,
+            "order": 2,
+            "download": "https://api.weather.gov/offices/MKX/weatherstories/download/597eed25-75eb-4535-b814-84ba0b44b2eb"
+        }
+    ]
+}

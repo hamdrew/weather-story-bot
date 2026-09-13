@@ -173,3 +173,11 @@ terraform.rc
 
 # End of https://www.toptal.com/developers/gitignore/api/python,terraform
 
+
+### Project ###
+# Lambda build artifacts
+*.zip
+# Terraform backend config (per-environment, contains bucket names)
+infra/backend.hcl
+# Local Lambda invoke output
+out.json

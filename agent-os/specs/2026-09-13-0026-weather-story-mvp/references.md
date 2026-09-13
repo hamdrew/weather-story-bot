@@ -1,0 +1,50 @@
+# References for Weather Story MVP
+
+## Similar Implementations
+
+None. The repository had no application code when this spec was written.
+
+## External References
+
+### NWS API — office weather stories
+
+- **Location:** `https://api.weather.gov/openapi.json`, operations `office_weatherstory` (`GET /offices/{officeId}/weatherstories`) and `office_weatherstory_image` (`GET /offices/{officeId}/weatherstories/download/{imageId}`)
+- **Relevance:** The data source for stories and their images.
+- **Key patterns:**
+  - Response is `{"stories": [...]}`. Each story has `officeId`, `startTime`, `endTime`, `updateTime`, `title` (≤50 chars), `description`, `altText`, `priority`, `order` (1–7), and `download`.
+  - Images are PNGs, about 1.1 MB at 1536×864.
+  - Requests need a descriptive `User-Agent` header with contact info.
+  - The list response is cached for about 3 minutes (`max-age=180`).
+
+### NWS MKX Weather Story page
+
+- **Location:** `https://www.weather.gov/mkx/weatherstory`
+- **Relevance:** The human-readable page each Telegram caption links to.
+- **Key patterns:** Not used as a data source. It reuses fixed image filenames (`/images/mkx/wxstory/Tab2FileL.png`), so images can't be told apart by URL.
+
+### Telegram Bot API
+
+- **Location:** `https://core.telegram.org/bots/api#sendphoto`, `#senddocument`
+- **Relevance:** Delivers each story to the office channel.
+- **Key patterns:**
+  - Upload the photo as multipart. Photo captions are limited to 1024 characters.
+  - `parse_mode=HTML` needs `<`, `>`, and `&` escaped.
+  - A 429 response includes `parameters.retry_after`.
+  - Photos over 10 MB, or with extreme dimensions, are rejected; `sendDocument` works as a fallback.
+
+### CloudWatch alarms, metric filters, SNS, and Budgets
+
+- **Location:**
+  - `https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/AlarmThatSendsEmail.html`
+  - `https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/FilterAndPatternSyntax.html`
+  - `https://docs.aws.amazon.com/lambda/latest/dg/monitoring-metrics-types.html`
+  - `https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html`
+  - Terraform resources: `aws_cloudwatch_metric_alarm`, `aws_cloudwatch_log_metric_filter`, `aws_sns_topic_subscription`, `aws_budgets_budget`
+- **Relevance:** Failure, silent-problem, and cost alerts (plan Task 10).
+- **Key patterns:**
+  - Lambda's `Errors` metric counts unhandled exceptions and timeouts.
+  - `treat_missing_data = "breaching"` is what makes "nothing happened" alarms work.
+  - Alarms with periods of 1 hour or longer can evaluate at most 7 days.
+  - JSON metric filters use `{ $.field = "value" }`.
+  - SNS email subscriptions stay `PendingConfirmation` until the link is clicked.
+  - CloudWatch can't publish to a topic encrypted with the AWS-managed `aws/sns` key.
