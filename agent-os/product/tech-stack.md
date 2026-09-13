@@ -20,4 +20,5 @@ N/A. Telegram is the interface: stories are posted to a Telegram channel through
 - **NWS Weather Stories:** Where the stories come from (MKX office for the MVP)
 - **AWS CloudWatch Alarms:** Watch the Lambda for errors and missed scheduled runs. A log metric filter counts posted stories, which catches the bot going quiet or reposting in a loop
 - **AWS Budgets:** Emails me if monthly spend goes over a small limit
+- **Infracost:** Estimates the monthly cost of the Terraform in `infra/` when I run `make cost`
 - **AWS SNS:** Sends alarm notifications to my email address (the email subscription must be confirmed once)

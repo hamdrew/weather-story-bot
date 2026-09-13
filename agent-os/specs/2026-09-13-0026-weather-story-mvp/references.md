@@ -48,3 +48,13 @@ None. The repository had no application code when this spec was written.
   - JSON metric filters use `{ $.field = "value" }`.
   - SNS email subscriptions stay `PendingConfirmation` until the link is clicked.
   - CloudWatch can't publish to a topic encrypted with the AWS-managed `aws/sns` key.
+
+### Infracost
+
+- **Location:** `https://github.com/infracost/infracost` (README and `infracost-usage-example.yml`)
+- **Relevance:** The `make cost` estimate (plan Task 11).
+- **Key patterns:**
+  - Install with `brew install infracost`, then run `infracost setup` for authentication. The CLI also reads `INFRACOST_API_KEY`.
+  - `infracost breakdown --path <dir> --usage-file <file>` estimates monthly cost straight from Terraform files.
+  - Usage-based costs are left out unless a usage file supplies values. The file format is `version: 0.1` with a `resource_usage:` map keyed by Terraform resource address (for example `aws_lambda_function.bot`).
+  - `--sync-usage-file` writes the usage keys each resource supports into the file.

@@ -10,6 +10,7 @@
   - **Gone quiet:** No stories posted for a couple of days (for example, the NWS API changed and now returns nothing).
   - **Repost loop:** Far more posts than normal in a short time.
 - **Cost alert:** Email me if monthly AWS spend for the account goes over a small budget.
+- **Cost estimate command:** A command I can run whenever I want (`make cost`) that shows the estimated monthly AWS cost of what's in `infra/`, using Infracost. It doesn't run before deploys or in CI.
 
 ## Phase 2: Post-Launch
 

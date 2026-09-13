@@ -23,12 +23,13 @@ NWS Weather Stories are only on weather.gov, which you have to remember to check
 | Python | uv, httpx, Lambda `python3.13` on arm64. Zip is built with `uv pip install --target` |
 | First run | Posts whatever stories are active at the time. This is fine for a personal tool |
 | Alerting | CloudWatch alarms send to an SNS topic with an email subscription, and alarms also notify on return to OK. Separately, an AWS Budget emails when spend runs high. Alerts never go through Telegram |
+| Cost estimate | `make cost` runs Infracost by hand (not before deploys, not in CI), with a committed usage file for the usage-based resources |
 
 ## Target layout
 
 ```
 pyproject.toml / uv.lock / .python-version (3.13)
-Makefile                      # test, coverage, lint, format, build, plan, deploy, clean
+Makefile                      # test, coverage, lint, format, build, plan, deploy, cost, clean
 src/weather_story_bot/
   config.py     # load env: OFFICES_JSON, STATE_TABLE, ARCHIVE_BUCKET, TELEGRAM_TOKEN_PARAM, NWS_USER_AGENT
   models.py     # Story dataclass (+ image_id parsed from download URL)
@@ -39,7 +40,7 @@ src/weather_story_bot/
   handler.py    # lambda_handler: orchestrates per office
   __main__.py   # local `--dry-run` against the live NWS API (no AWS, no Telegram)
 tests/ (+ tests/fixtures/mkx_weatherstories.json captured from the live API)
-infra/          # Terraform (monitoring.tf holds the alarms, SNS topic, and budget)
+infra/          # Terraform (monitoring.tf holds the alarms, SNS topic, and budget; infracost-usage.yml holds usage for cost estimates)
 ```
 
 ---
@@ -189,6 +190,27 @@ Why: the handler raises `ProcessingError` whenever anything fails, and timeouts 
   - EventBridge Scheduler metrics (a missed run already alarms)
   - Alarms on warning log lines
 
+## Task 11: Cost estimate command (`make cost`)
+
+Why: every resource except the CloudWatch alarms is billed by usage, and the bill depends on the schedule and story volume more than on the resource list. This task adds a command I can run whenever I want to see the estimated monthly cost. It doesn't run before deploys or in CI.
+
+- **Tool:** Infracost CLI. It reads `infra/` as HCL, so it needs no Terraform plan and no AWS credentials.
+  - One-time setup is `brew install infracost` and `infracost setup`. That stores a free API key in the local Infracost config, or the key can be set as `INFRACOST_API_KEY`. The key is never committed.
+- **Usage file** `infra/infracost-usage.yml` (committed):
+  - Generate the template with `infracost breakdown --path infra --usage-file infra/infracost-usage.yml --sync-usage-file`. That fills in the usage keys for every supported resource.
+  - Fill in the values, starting from 2,880 runs a month (one every 15 minutes over 30 days). Base the rest on typical run duration, stories per run, posts per month, image size (about 1.1 MB PNG plus JSON per post), and log volume.
+  - Put a comment on each value saying how it was worked out, so it's easy to update when the schedule or thresholds change.
+  - Delete keys that don't apply to this project rather than leaving them at zero.
+- **Makefile:** Add `cost` to `.PHONY`.
+  - `cost` runs `infracost breakdown --path infra --usage-file infra/infracost-usage.yml`.
+  - If `infracost` isn't on `PATH`, fail with a one-line hint pointing to the README setup section.
+  - Check the flags against the installed CLI version when implementing.
+- **README:** Add a short "Cost estimate" section covering one-time setup, `make cost`, and how to update the usage file. Also note whether the output subtracts the AWS free tier (check the real output, don't assume).
+- **Out of scope:**
+  - Running before deploys, in CI, or as a PR comment (see the Phase 2 CI/CD roadmap item)
+  - Writing down a baseline estimate
+  - Comparing the estimate with actual spend (the budget alert in Task 10 covers overspending)
+
 ---
 
 ## Verification
@@ -207,3 +229,7 @@ Why: the handler raises `ProcessingError` whenever anything fails, and timeouts 
 9. For each alarm, run `aws cloudwatch set-alarm-state --alarm-name <name> --state-value ALARM --state-reason "test"`. Check that the ALARM email shows up as a Gmail app notification on the iPhone, and that the OK email follows at the next evaluation.
 10. After a few invocations, confirm `WeatherStoryBot/StoriesPosted` has data points in CloudWatch Metrics, and that all alarms are `OK`, not `INSUFFICIENT_DATA`. The `quiet` alarm may stay `INSUFFICIENT_DATA` until a full day has passed.
 11. Confirm the budget appears in the AWS Budgets console with both notifications.
+12. `make cost` with no AWS credentials set:
+    - it prints a monthly breakdown that includes the Lambda, DynamoDB table, S3 bucket, log group, and CloudWatch alarms
+    - usage-based resources show nonzero costs from the usage file, with no "usage costs not included" warnings for them
+    - with `infracost` removed from `PATH`, it prints the setup hint and exits non-zero

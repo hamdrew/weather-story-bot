@@ -2,7 +2,7 @@
 
 ## Scope
 
-The full Phase 1 MVP. A scheduled AWS Lambda checks the NWS MKX (Milwaukee/Sullivan) office for Weather Stories every 15 minutes. For each new or updated story, it archives the image and metadata to S3, posts the image and description to a Telegram channel, and records the story in DynamoDB so it isn't posted twice. CloudWatch alarms and an AWS Budget email me when the bot fails, stops running, goes quiet, reposts in a loop, or costs more than expected.
+The full Phase 1 MVP. A scheduled AWS Lambda checks the NWS MKX (Milwaukee/Sullivan) office for Weather Stories every 15 minutes. For each new or updated story, it archives the image and metadata to S3, posts the image and description to a Telegram channel, and records the story in DynamoDB so it isn't posted twice. CloudWatch alarms and an AWS Budget email me when the bot fails, stops running, goes quiet, reposts in a loop, or costs more than expected. A `make cost` command shows the estimated monthly cost of the infrastructure whenever I want to check.
 
 ## Decisions
 
@@ -27,12 +27,16 @@ The full Phase 1 MVP. A scheduled AWS Lambda checks the NWS MKX (Milwaukee/Sulli
   The quiet and repost-loop alarms catch bugs that don't raise errors, so the Errors metric can't see them.
 - **Post counts come from a log metric filter** on the existing `"Story posted"` log line. The code doesn't publish its own metrics, so no extra IAM permission or runtime dependency is needed.
 - **Thresholds are Terraform variables.** The starting values are guesses until there's real MKX posting data.
+- **Cost estimates come from Infracost, run by hand.** `make cost` runs `infracost breakdown` on `infra/`. It doesn't run before deploys or in CI, and no baseline gets written down.
+  - **Chosen over a custom Python script** that would look up prices with the AWS pricing API. Infracost is much less code, and it picks up new Terraform resources without anyone keeping a list up to date.
+  - **Usage-based costs need a usage file.** Almost everything here is billed by usage, so Infracost would show $0 without one. A committed `infra/infracost-usage.yml` holds monthly usage worked out from the 15-minute schedule and expected story volume, with a comment on each value explaining where it came from.
+  - **One-time setup:** Install the CLI and get a free Infracost API key. The key stays in the local Infracost config and is never committed. The command needs no AWS credentials.
 
 ## Context
 
 - **Visuals:** None
 - **References:** None in the repo (greenfield). External API docs are listed in references.md.
-- **Product alignment:** Matches Phase 1 of `agent-os/product/roadmap.md` (MKX only, Telegram delivery, easy to add offices, and failure, silent-problem, and cost alerts). The Phase 2 story archive is intentionally pulled in. Per-office channels match the Phase 2 multi-office plan.
+- **Product alignment:** Matches Phase 1 of `agent-os/product/roadmap.md` (MKX only, Telegram delivery, easy to add offices, failure, silent-problem, and cost alerts, and the cost estimate command). The Phase 2 story archive is intentionally pulled in. Per-office channels match the Phase 2 multi-office plan.
 
 ## Standards Applied
 
