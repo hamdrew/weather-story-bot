@@ -24,7 +24,7 @@ format:
 # Vendor runtime dependencies for Lambda (python3.13, arm64) and zip them with the package.
 build: clean
 	mkdir -p $(PACKAGE_DIR)
-	uv export --no-dev --no-hashes --no-emit-project --frozen -o $(BUILD_DIR)/requirements.txt
+	uv export --no-dev --no-emit-project --frozen -o $(BUILD_DIR)/requirements.txt
 	uv pip install -r $(BUILD_DIR)/requirements.txt --target $(PACKAGE_DIR) \
 		--python-platform aarch64-manylinux2014 --python-version 3.13 --only-binary :all:
 	cp -R src/weather_story_bot $(PACKAGE_DIR)/
