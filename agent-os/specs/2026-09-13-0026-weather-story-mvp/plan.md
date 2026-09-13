@@ -208,6 +208,13 @@ Why: every resource except the CloudWatch alarms is billed by usage, and the bil
   - If `infracost` isn't on `PATH`, fail with a one-line hint pointing to the README setup section.
   - Check the flags against the installed CLI version when implementing.
 - **README:** Add a short "Cost estimate" section covering one-time setup, `make cost`, and how to update the usage file. Also note whether the output subtracts the AWS free tier (check the real output, don't assume).
+- **As built (Infracost CLI v2.16.3):** v2 differs from the flags above.
+  - `breakdown` is deprecated and forwards to `scan`. `scan` has no `--usage-file`, `--path` or `--sync-usage-file` flags.
+  - The usage file is set in a root `infracost.yml` (`projects: [{path: infra, usage_file: infra/infracost-usage.yml, terraform_vars: {...}}]`). The placeholder `terraform_vars` stop missing-variable warnings, since `terraform.tfvars` is gitignored.
+  - With no sync command, usage keys were checked by confirming each value changed its cost component in `infracost scan --json`.
+  - Tables and summaries round to whole dollars (the whole stack shows `$0`). `make cost` runs `scan --json` into `build/infracost.json`, prints `inspect --file … --group-by resource --costs-only --llm` (full precision), and prints the total from the JSON.
+  - Auth is `infracost auth login`. `infracost setup` also configures agents, IDEs and CI, which aren't needed here.
+  - The free tier is not subtracted (verified: Lambda requests and GB-seconds are priced from the first unit).
 - **Out of scope:**
   - Running before deploys, in CI, or as a PR comment (see the Phase 2 CI/CD roadmap item)
   - Writing down a baseline estimate

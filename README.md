@@ -156,6 +156,40 @@ repost_alarm_max_posts = 8  # posts per 3 hours
 
 If you slow the schedule down to less than once an hour, `missed-runs` will fire on every gap. Change its `period` in `infra/monitoring.tf` to match.
 
+## Cost estimate
+
+`make cost` estimates the monthly AWS cost of everything in `infra/` with [Infracost](https://www.infracost.io/). It reads the Terraform files directly, so it needs no Terraform plan and no AWS credentials. It's for running by hand, not before deploys or in CI.
+
+One-time setup:
+
+```sh
+brew install infracost
+infracost auth login   # opens a browser; the free account's credentials stay in Infracost's local config
+infracost doctor       # checks that auth works
+```
+
+Then:
+
+```sh
+make cost
+```
+
+It prints each costed resource with its full-precision monthly cost, then the total (about $0.44/month at the committed estimates, mostly the four $0.10 CloudWatch alarms). The full scan result is saved to `build/infracost.json`. Infracost's own tables round to whole dollars, which would show `$0` for everything here, so `make cost` doesn't use them.
+
+**The estimate does not subtract the AWS free tier.** Every request, GB-second and GB is priced at list price, so the real bill can be lower.
+
+Infracost also lists FinOps suggestions (such as S3 lifecycle rules). To see them:
+
+```sh
+infracost inspect --file build/infracost.json --failing
+```
+
+### Updating the usage file
+
+Almost everything here is billed by usage, which Infracost can't read from Terraform. `infra/infracost-usage.yml` holds monthly usage worked out from the 15-minute schedule and the expected story volume, and `infracost.yml` points the scan at it. When the schedule, story volume or retention changes, update the base assumptions at the top of the usage file, then the values that depend on them (each value's comment shows the math), and run `make cost` again.
+
+Keys are Terraform resource addresses, such as `aws_lambda_function.bot`. A misspelled key or address is silently ignored, so check that the resource's cost changed in `build/infracost.json`. Infracost treats values under 1 GB of DynamoDB storage as 0.
+
 ## Adding an office
 
 1. Create another channel with the bot as admin, and get its chat ID (steps 2–3 above).

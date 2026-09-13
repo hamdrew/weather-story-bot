@@ -1,4 +1,4 @@
-.PHONY: test coverage lint format build plan deploy clean
+.PHONY: test coverage lint format build plan deploy cost clean
 
 BUILD_DIR := build
 PACKAGE_DIR := $(BUILD_DIR)/package
@@ -37,6 +37,16 @@ plan:
 
 deploy:
 	terraform -chdir=infra apply
+
+# Estimated monthly cost of infra/ using infracost.yml and infra/infracost-usage.yml (no AWS credentials).
+# Infracost v2 replaced `breakdown --usage-file` with `scan` + infracost.yml. Its tables and summary round
+# to whole dollars, so print per-resource costs with --llm (full precision) and the total from the JSON.
+cost:
+	@command -v infracost >/dev/null || { echo "infracost not found; see 'Cost estimate' in README.md for setup" >&2; exit 1; }
+	@mkdir -p $(BUILD_DIR)
+	infracost scan --json > $(BUILD_DIR)/infracost.json
+	@infracost inspect --file $(BUILD_DIR)/infracost.json --group-by resource --costs-only --llm
+	@uv run python -c 'import json, sys; total = json.load(open(sys.argv[1]))["summary"]["total_monthly_cost"]; print(f"Total monthly cost: $${float(total):.2f} USD")' $(BUILD_DIR)/infracost.json
 
 clean:
 	rm -rf $(BUILD_DIR)

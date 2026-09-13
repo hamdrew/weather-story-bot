@@ -58,3 +58,4 @@ None. The repository had no application code when this spec was written.
   - `infracost breakdown --path <dir> --usage-file <file>` estimates monthly cost straight from Terraform files.
   - Usage-based costs are left out unless a usage file supplies values. The file format is `version: 0.1` with a `resource_usage:` map keyed by Terraform resource address (for example `aws_lambda_function.bot`).
   - `--sync-usage-file` writes the usage keys each resource supports into the file.
+  - **CLI v2 (2.16.3) changes all of the above:** `breakdown` forwards to `scan [path]`, the usage file is set with `usage_file` in a project entry of `infracost.yml`, and `inspect --file <scan.json>` re-renders a saved result. The `resource_usage` key names are unchanged. See plan.md Task 11, "As built".
