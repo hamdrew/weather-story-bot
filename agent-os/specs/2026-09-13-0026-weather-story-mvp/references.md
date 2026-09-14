@@ -50,6 +50,18 @@ None. The repository had no application code when this spec was written.
   - SNS email subscriptions stay `PendingConfirmation` until the link is clicked.
   - CloudWatch can't publish to a topic encrypted with the AWS-managed `aws/sns` key.
 
+### DynamoDB point-in-time recovery
+
+- **Location:**
+  - `https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/PointInTimeRecovery_Howitworks.html`
+  - Terraform `aws_dynamodb_table` (hashicorp/aws 6.64.0), `point_in_time_recovery` block
+- **Relevance:** Backups for the posted-stories table (plan Task 13).
+- **Key patterns:**
+  - `point_in_time_recovery { enabled, recovery_period_in_days }`, with a 1–35 day window (default 35). Enabling can take about 10 minutes.
+  - Billed on table size (data plus LSIs); the window length doesn't change the price. us-east-2: $0.20 per GB-month, $0.15 per GB restored (AWS Price List, 2026-09-14).
+  - A restore always creates a new table. Stream, TTL and PITR settings, tags and alarms aren't copied to it.
+  - Infracost usage key: `pitr_backup_storage_gb` on `aws_dynamodb_table`.
+
 ### Infracost
 
 - **Location:** `https://github.com/infracost/infracost` (README and `infracost-usage-example.yml`)

@@ -19,10 +19,11 @@ resource_usage:
 
   aws_dynamodb_table.posted:
     monthly_read_request_units: 5760 # 2,880 runs * 2 stories * 1 RRU (strongly consistent GetItem, item < 4 KB)
-    monthly_write_request_units: 60 # 60 posts * 1 WRU (PutItem, item < 1 KB)
-    # 12 months * 60 items * ~0.5 KB with overhead = ~0.4 MB, rounded up. Infracost treats anything
-    # under 1 GB as 0, so this shows $0 (the real cost is a fraction of a cent).
+    monthly_write_request_units: 120 # 60 posts * 2 PutItems (story + content fingerprint) * 1 WRU (item < 1 KB)
+    # 12 months * 60 posts * 2 items * ~0.4 KB with overhead = ~0.6 MB, rounded up. Infracost treats
+    # anything under 1 GB as 0, so this shows $0 (the real cost is a fraction of a cent).
     storage_gb: 0.001
+    pitr_backup_storage_gb: 0.001 # PITR is billed on table size, so same as storage_gb
 
   aws_s3_bucket.archive:
     standard:

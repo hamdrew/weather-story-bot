@@ -192,6 +192,54 @@ Almost everything here is billed by usage, which Infracost can't read from Terra
 
 Keys are Terraform resource addresses, such as `aws_lambda_function.bot`. A misspelled key or address is silently ignored, so check that the resource's cost changed in `build/infracost.json`. Infracost treats values under 1 GB of DynamoDB storage as 0.
 
+## Recovering data
+
+Both data stores keep a 35-day undo window. Recovery is done by hand with an admin profile (`AWS_PROFILE=mfa-administrator`). The Lambda role can't delete or restore anything.
+
+The DynamoDB table also has deletion protection, so `terraform destroy`, or a change that makes Terraform replace the table, fails instead of deleting it. To really remove the table, set `deletion_protection_enabled = false` in `infra/storage.tf` and apply that first.
+
+### Restoring the posted-stories table
+
+The DynamoDB table has point-in-time recovery, so it can be restored to any second in the last 35 days. A restore always creates a new table. Never restore over the live one, which Terraform manages.
+
+1. Pick a time just before the bad change. Check the window:
+   ```sh
+   aws dynamodb describe-continuous-backups --table-name weather-story-bot-posted \
+     --query 'ContinuousBackupsDescription.PointInTimeRecoveryDescription'
+   ```
+2. Restore into a scratch table and wait for it:
+   ```sh
+   aws dynamodb restore-table-to-point-in-time \
+     --source-table-name weather-story-bot-posted \
+     --target-table-name weather-story-bot-posted-restore-202609141200 \
+     --restore-date-time 2026-09-14T12:00:00Z \
+     --billing-mode-override PAY_PER_REQUEST
+   aws dynamodb wait table-exists --table-name weather-story-bot-posted-restore-202609141200
+   ```
+3. Compare it with the live table and copy the items you need back with `put-item`. For a full rollback, scan the restored table and put every item. The table is only a few KB. Disable the schedule first if a run could interfere.
+4. Delete the scratch table. Restored tables don't get PITR, tags or alarms:
+   ```sh
+   aws dynamodb delete-table --table-name weather-story-bot-posted-restore-202609141200
+   ```
+
+### Recovering archive files
+
+The archive bucket is versioned. A deleted or overwritten file keeps its old version for 35 days, then S3 removes it.
+
+```sh
+BUCKET=$(terraform -chdir=infra output -raw bucket_name)
+aws s3api list-object-versions --bucket "$BUCKET" --prefix stories/MKX/2026/09/14/
+```
+
+- **Deleted file:** delete its delete marker (the entry under `DeleteMarkers` with `IsLatest: true`), and the previous version becomes current again:
+  ```sh
+  aws s3api delete-object --bucket "$BUCKET" --key <key> --version-id <delete-marker-version-id>
+  ```
+- **Overwritten file:** copy the old version back over the current one:
+  ```sh
+  aws s3api copy-object --bucket "$BUCKET" --key <key> --copy-source "$BUCKET/<key>?versionId=<old-version-id>"
+  ```
+
 ## Adding an office
 
 1. Create another channel with the bot as admin, and get its chat ID (steps 2–3 above).

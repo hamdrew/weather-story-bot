@@ -15,6 +15,7 @@ NWS Weather Stories are only on weather.gov, which you have to remember to check
 |---|---|
 | Source | api.weather.gov weatherstories endpoint (not page scraping) |
 | Dedupe | Key = office + image UUID. Post when the UUID is new. Repost with an "Updated" prefix when `updateTime` changes. Skip a new UUID or revision whose content fingerprint (image bytes + title, description, start/end/update times) was already posted (Task 12) |
+| Backups | Point-in-time recovery on the DynamoDB table, 35-day window. Restore to a new table, then copy items back (Task 13). Versioning on the S3 archive, with old versions expiring after 35 days (Task 14) |
 | Destination | One Telegram channel per office, with the bot as admin. MVP config has only MKX |
 | Archive | Phase 2 S3 archive pulled in: save image + metadata JSON for every post |
 | Schedule | Every 15 minutes (EventBridge Scheduler) |
@@ -239,6 +240,79 @@ Why: Task 4 assumed an image UUID identifies one story. On 2026-09-14, NWS re-is
   - Store: `record_posted` writes the fingerprint item; `find_by_fingerprint` returns it; `record_duplicate` makes the new UUID SEEN.
   - Handler: a story re-issued under a new UUID with identical bytes and metadata is skipped, recorded with `duplicate_of`, logged, not archived, and not posted; the next run skips it without downloading. A new UUID with a different image, or the same image with a new `updateTime` or description, still posts.
 - **Out of scope:** Deleting the duplicate Telegram message already posted on 2026-09-14; a GSI; perceptual (near-identical) image matching.
+
+## Task 13: Point-in-time recovery for the DynamoDB table (added 2026-09-14)
+
+Why: `weather-story-bot-posted` is the bot's only memory of what it has posted. If it's lost or corrupted, the next run reposts every active story, or a bad write hides a story forever. Task 12 needed the first hand-run write to the live table (the fingerprint backfill), and more one-off fixes like that are likely. PITR makes those mistakes undoable. As of 2026-09-14, `describe-continuous-backups` shows `PointInTimeRecoveryStatus: DISABLED`.
+
+- **Terraform (`infra/storage.tf`):** add to `aws_dynamodb_table.posted`:
+
+  ```hcl
+  point_in_time_recovery {
+    enabled                 = true
+    recovery_period_in_days = 35
+  }
+  ```
+
+  - Set `recovery_period_in_days` explicitly even though 35 is the default, so the window is visible in code. The AWS docs say the PITR price is the same for any window.
+  - Also set `deletion_protection_enabled = true` (free). PITR can undo bad writes, but it doesn't stop the table from being deleted by `terraform destroy`, or replaced when a key attribute changes. With protection on, DeleteTable fails, so a destroy or replacement plan fails at apply instead of deleting the table. To really remove or replace the table, apply with it set to `false` first.
+  - Updates the table in place (no replacement). No Lambda or IAM change; the deploy role already has admin.
+  - Enabling can take up to about 10 minutes. The restore window starts when it's enabled, not earlier.
+- **Cost estimate (`infra/infracost-usage.yml`):**
+  - Add `pitr_backup_storage_gb` under `aws_dynamodb_table.posted`, equal to `storage_gb`, with a comment.
+  - Also fix the DynamoDB values Task 12 made stale: `monthly_write_request_units` 60 → 120 (two PutItems per post), and storage covers 2 items per post (12 months * 60 posts * 2 items * ~0.4 KB = ~0.6 MB, still `0.001` GB).
+  - Leave out `monthly_data_restored_gb`, since restores are rare, one-off events.
+- **Estimated cost** (checked 2026-09-14):
+
+  | Item | Price (us-east-2, AWS Price List) | This table | Monthly |
+  |---|---|---|---|
+  | PITR backup storage | $0.20 per GB-month (`USE2-TimedPITRStorage-ByteHrs`) | 3.2 KB today, ~0.6 MB after a year | ~$0.0001 |
+  | Restore (only when used) | $0.15 per GB restored (`USE2-RestoreDataSize-Bytes`) | ~0.6 MB | ~$0.0001 per restore |
+  | Restored scratch table | $0.25 per GB-month beyond the free 25 GB | deleted after copying back | $0 |
+
+  - **Infracost (CLI v2.16.3, scratch copy of `infra/`):** a 1 GB `pitr_backup_storage_gb` probe added exactly $0.20/month to `aws_dynamodb_table.posted`, which confirms both the usage key and the rate. At the realistic `0.001` GB the stack total is unchanged at $0.44/month, because Infracost rounds sub-GB DynamoDB storage to $0, as it does for `storage_gb`.
+  - The monthly budget alert (Task 10) doesn't need to change.
+- **Restore runbook (README, "Restoring the posted-stories table"):** Restore to a new table, never over the live one, so Terraform state stays valid:
+  1. Pick a time just before the bad change. Check the window with `aws dynamodb describe-continuous-backups --table-name weather-story-bot-posted`.
+  2. `aws dynamodb restore-table-to-point-in-time --source-table-name weather-story-bot-posted --target-table-name weather-story-bot-posted-restore-<YYYYMMDDHHMM> --restore-date-time <ISO time> --billing-mode-override PAY_PER_REQUEST`, then wait for `aws dynamodb wait table-exists`.
+  3. Compare the restored table with the live one, and copy the needed items back with PutItem (a scan-and-put for a full rollback). The table is a few KB, so a small script is enough. Pause the schedule during a full rollback if a run could interfere.
+  4. Delete the restore table. Restored tables don't inherit PITR, tags or alarms, so it shouldn't be left around.
+  - Run the runbook with the `mfa-administrator` profile, like deploys. The Lambda role never gets restore permissions.
+- **Verification:**
+  1. `terraform validate`, then a `make plan` showing one in-place update to `aws_dynamodb_table.posted` and nothing else.
+  2. After deploy, `describe-continuous-backups` shows `PointInTimeRecoveryStatus: ENABLED`, `RecoveryPeriodInDays: 35`, and an `EarliestRestorableDateTime`. `describe-table` shows `DeletionProtectionEnabled: true`.
+  3. `make cost` still runs, and `aws_dynamodb_table.posted` lists a PITR cost component.
+  4. Optional drill once PITR has been on for a few minutes: run runbook steps 1, 2 and 4 against a scratch target, and confirm the restored item count matches. Costs well under $0.01.
+- **Out of scope:**
+  - AWS Backup plans, on-demand backups, cross-region copies.
+  - PITR or versioning for the S3 archive.
+  - An alarm on PITR being turned off.
+
+## Task 14: Versioning for the S3 archive (added 2026-09-14)
+
+Why: a read-only audit on 2026-09-14 found the archive bucket (`weather-story-bot-archive-<account_id>`, 14 objects, 10.3 MB) had versioning never enabled, and no lifecycle, Object Lock or replication. Encryption, the public access block and `BucketOwnerEnforced` were already correct. The Terraform state bucket was already versioned. It's created by hand outside Terraform, so it's left alone. Its old state versions pile up with no expiry, which costs next to nothing at ~58 KB per apply.
+
+- **Terraform (`infra/storage.tf`):**
+  - `aws_s3_bucket_versioning.archive` with `status = "Enabled"`.
+  - `aws_s3_bucket_lifecycle_configuration.archive`, `depends_on` the versioning resource, with one rule covering the whole bucket:
+    - `noncurrent_version_expiration { noncurrent_days = 35 }`, the same undo window as DynamoDB PITR (Task 13)
+    - `expiration { expired_object_delete_marker = true }`, which cleans up delete markers once their old versions have expired
+  - **Current objects never expire.** The archive is kept forever for later analysis. The rule has no `expiration { days | date }` and no transitions. It only removes noncurrent versions and orphaned delete markers.
+  - Both are in-place additions (no bucket replacement). No IAM change: the Lambda keeps `PutObject` only, and writes to a versioned bucket need nothing extra.
+  - Once enabled, versioning can only be suspended, never removed. That's fine for an archive.
+- **Estimated cost:** effectively $0.
+  - Normal runs never create noncurrent versions: keys include the story's `updateTime`, and re-archiving the same revision is rare and identical.
+  - Noncurrent versions only come from hand-made deletes or overwrites, and they're billed at normal S3 Standard storage for at most 35 days. Lifecycle expirations are free.
+  - `make cost` should show no change beyond the new resources pricing at $0.
+- **README restore runbook ("Recovering archive files"):**
+  - **Deleted file:** find the delete marker with `aws s3api list-object-versions --bucket <bucket> --prefix <key>`, then remove it with `aws s3api delete-object --bucket <bucket> --key <key> --version-id <delete-marker-version-id>`.
+  - **Overwritten file:** copy the old version back over the current one with `aws s3api copy-object --copy-source "<bucket>/<key>?versionId=<id>" --bucket <bucket> --key <key>`.
+  - Both need to happen within 35 days.
+- **Verification:**
+  1. `terraform validate`, then a `make plan` showing only the two new S3 resources (plus Task 13's in-place table update, if deployed together).
+  2. After deploy, `get-bucket-versioning` shows `Enabled`, and `get-bucket-lifecycle-configuration` shows the rule.
+  3. Optional drill: upload a scratch object under a non-`stories/` prefix as admin, delete it, confirm a delete marker and a noncurrent version exist, recover it with the runbook, then permanently delete both versions.
+- **Out of scope:** Object Lock, cross-region replication, S3 Intelligent-Tiering or Glacier transitions for old stories, and a lifecycle rule for the state bucket.
 
 ---
 
