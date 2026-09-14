@@ -1,0 +1,30 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Weather Story Bot: Dry Run",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "weather_story_bot",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            // A string (not an array) so an empty pick adds no argument instead of "".
+            "args": "--dry-run ${input:sendTelegram}"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "sendTelegram",
+            "type": "pickString",
+            "description": "Also post the stories to $TELEGRAM_CHAT_ID (set in .env)?",
+            "options": [
+                { "label": "No — print captions only", "value": "" },
+                { "label": "Yes — send to Telegram (--send-telegram)", "value": "--send-telegram" }
+            ],
+            "default": ""
+        }
+    ]
+}

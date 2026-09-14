@@ -1,0 +1,55 @@
+[project]
+name = "weather-story-bot"
+version = "0.1.0"
+description = "Posts new NWS Weather Stories to Telegram"
+readme = "README.md"
+authors = [
+    { name = "Andrew Hoffmann", email = "andrew.hoffmann.wi@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "httpx>=0.28.1",
+]
+
+[project.scripts]
+weather-story-bot = "weather_story_bot.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+# boto3 is provided by the Lambda runtime, so it is a dev-only dependency.
+dev = [
+    "boto3>=1.43.93",
+    "moto[dynamodb,s3,ssm]>=5.2.3",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "python-dotenv>=1.1.1",
+    "respx>=0.23.1",
+    "ruff>=0.16.7",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers"]
+
+# Coverage is opt-in (`make coverage`) rather than in addopts, which would break debugger breakpoints.
+[tool.coverage.run]
+source = ["weather_story_bot"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "raise AssertionError\\(\"unreachable\"\\)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]

@@ -1,0 +1,11 @@
+# Infracost project config for `make cost`. Read from the repo root by `infracost scan`.
+version: 0.1
+projects:
+  - path: infra
+    usage_file: infra/infracost-usage.yml
+    # Placeholders for variables without defaults, so the scan needs no terraform.tfvars.
+    # None of them affect cost.
+    terraform_vars:
+      offices: '{"MKX": {"chat_id": "-100", "name": "Milwaukee/Sullivan"}}'
+      nws_user_agent: weather-story-bot (cost estimate)
+      alert_email: cost-estimate@example.com

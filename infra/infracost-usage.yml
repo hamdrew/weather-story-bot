@@ -1,0 +1,37 @@
+# Monthly usage for `make cost` (Infracost). Values are estimates, not measurements.
+#
+# Base assumptions (update these first when the schedule or story volume changes):
+#   runs/month   = 2,880  -> rate(15 minutes) = 4/hour * 24 * 30 days
+#   stories/run  = 2      -> MKX usually has 1-3 active stories
+#   posts/month  = 60     -> about 2 new or updated stories a day
+#   archive age  = 12 mo  -> S3 and DynamoDB grow forever, so storage is priced after a year
+#
+# Left out on purpose:
+#   aws_sns_topic.alerts   -> a few alarm emails a month stays inside the first 1,000 free emails
+#   aws_scheduler_schedule -> Infracost prices it at $0 and takes no usage (2,880 invocations is far below the free 14M)
+version: 0.1
+resource_usage:
+  aws_lambda_function.bot:
+    monthly_requests: 2880 # one invocation per scheduled run
+    # Most runs are one NWS GET plus a GetItem per story (well under 1 s), but runs after an
+    # idle gap pay a cold start (imports + SSM) and posting runs upload a ~1.1 MB image twice.
+    request_duration_ms: 1500
+
+  aws_dynamodb_table.posted:
+    monthly_read_request_units: 5760 # 2,880 runs * 2 stories * 1 RRU (strongly consistent GetItem, item < 4 KB)
+    monthly_write_request_units: 120 # 60 posts * 2 PutItems (story + content fingerprint) * 1 WRU (item < 1 KB)
+    # 12 months * 60 posts * 2 items * ~0.4 KB with overhead = ~0.6 MB, rounded up. Infracost treats
+    # anything under 1 GB as 0, so this shows $0 (the real cost is a fraction of a cent).
+    storage_gb: 0.001
+    pitr_backup_storage_gb: 0.001 # PITR is billed on table size, so same as storage_gb
+
+  aws_s3_bucket.archive:
+    standard:
+      storage_gb: 0.8 # 12 months * 60 posts * (~1.1 MB PNG + ~2 KB JSON) = ~0.79 GB
+      monthly_tier_1_requests: 120 # 60 posts * 2 PutObject (.png + .json)
+
+  aws_cloudwatch_log_group.lambda:
+    # ~600 bytes/run (START/END/REPORT + "Run complete") * 2,880 runs, plus ~600 bytes
+    # per post ("Telegram message sent" + "Story posted" lines) * 60 posts = ~1.8 MB
+    monthly_data_ingested_gb: 0.002
+    storage_gb: 0.002 # 30-day retention keeps about one month of logs (before compression)

@@ -1,0 +1,19 @@
+region = "us-east-2"
+
+offices = {
+  MKX = {
+    chat_id = "-100REPLACE_ME"
+    name    = "Milwaukee/Sullivan"
+  }
+}
+
+nws_user_agent = "weather-story-bot (you@example.com)"
+
+alert_email = "you@example.com"
+
+# Optional overrides:
+# telegram_token_param_name = "/weather-story-bot/telegram-token"
+# schedule_expression       = "rate(15 minutes)"
+# monthly_budget_usd        = 5
+# quiet_alarm_days          = 2 # 1-7
+# repost_alarm_max_posts    = 8 # per 3 hours
