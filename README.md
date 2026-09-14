@@ -36,13 +36,14 @@ Prerequisites: [uv](https://docs.astral.sh/uv/), Terraform ≥ 1.11, and the AWS
 4. **Store the token in SSM.** Use Parameter Store, not Terraform, so the token never ends up in Terraform state:
    ```sh
    read -rs TELEGRAM_TOKEN
-   aws ssm put-parameter --region us-east-1 --type SecureString \
+   aws ssm put-parameter --region us-east-2 --type SecureString \
      --name /weather-story-bot/telegram-token --value "$TELEGRAM_TOKEN"
    ```
 5. **Create a Terraform state bucket** (skip this if you already have one):
    ```sh
-   aws s3api create-bucket --bucket <your-tf-state-bucket> --region us-east-1
-   aws s3api put-bucket-versioning --bucket <your-tf-state-bucket> \
+   aws s3api create-bucket --bucket <your-tf-state-bucket> --region us-east-2 \
+     --create-bucket-configuration LocationConstraint=us-east-2
+   aws s3api put-bucket-versioning --bucket <your-tf-state-bucket> --region us-east-2 \
      --versioning-configuration Status=Enabled
    ```
 6. **Configure Terraform.** Both copies are gitignored:

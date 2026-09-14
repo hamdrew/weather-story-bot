@@ -114,9 +114,9 @@ Create `agent-os/specs/2026-09-13-0026-weather-story-mvp/` with:
   - `hashicorp/aws ~> 6.0`, locked in `.terraform.lock.hcl`.
   - `default_tags` of `Project = weather-story-bot` and `ManagedBy = terraform`.
   - Also holds `local.name` and the `aws_caller_identity` data source.
-- `backend.tf` has `backend "s3" {}` with partial config. `backend.hcl.example` sets bucket, key `weather-story-bot/terraform.tfstate`, region `us-east-1`, `encrypt = true`, and `use_lockfile = true`.
+- `backend.tf` has `backend "s3" {}` with partial config. `backend.hcl.example` sets bucket, key `weather-story-bot/terraform.tfstate`, region `us-east-2`, `encrypt = true`, and `use_lockfile = true`.
 - `variables.tf`:
-  - `region` (default `us-east-1`)
+  - `region` (default `us-east-2`)
   - `offices` (map of object: chat_id, name), validated to be non-empty and keyed by three-letter uppercase office ids
   - `telegram_token_param_name` (default `/weather-story-bot/telegram-token`)
   - `nws_user_agent`

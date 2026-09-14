@@ -22,7 +22,7 @@ def aws_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
     monkeypatch.setenv("AWS_SESSION_TOKEN", "testing")
-    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-2")
     monkeypatch.delenv("AWS_PROFILE", raising=False)
 
 
@@ -80,5 +80,8 @@ def dynamodb(aws: None) -> Any:
 @pytest.fixture
 def s3(aws: None) -> Any:
     client = boto3.client("s3")
-    client.create_bucket(Bucket=BUCKET_NAME)
+    client.create_bucket(
+        Bucket=BUCKET_NAME,
+        CreateBucketConfiguration={"LocationConstraint": "us-east-2"},
+    )
     return client
