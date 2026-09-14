@@ -44,7 +44,7 @@ def api(mkx_payload: dict[str, Any]) -> Any:
         for story in mkx_payload["stories"]:
             router.get(story["download"]).respond(content=b"PNG-" + story["order"].to_bytes())
         message_ids = iter(range(100, 200))
-        router.post(PHOTO_URL).mock(
+        router.post(PHOTO_URL, name="photo").mock(
             side_effect=lambda _: httpx.Response(
                 200, json={"ok": True, "result": {"message_id": next(message_ids)}}
             )
@@ -55,7 +55,7 @@ def api(mkx_payload: dict[str, Any]) -> Any:
 def captions(api: Any) -> list[str]:
     return [
         call.request.content.split(b'name="caption"\r\n\r\n')[1].split(b"\r\n--")[0].decode()
-        for call in api.routes[-1].calls
+        for call in api.routes["photo"].calls
     ]
 
 
@@ -66,8 +66,13 @@ def test_new_stories_are_archived_posted_and_recorded(
 
     assert summary == {"MKX": {"posted": 2, "updated": 0, "skipped": 0, "failed": 0}}
     assert [c.startswith("<b>Active Start") for c in captions(api)] == [True, False]
-    items = dynamodb.scan(TableName=TABLE_NAME)["Items"]
+    all_items = dynamodb.scan(TableName=TABLE_NAME)["Items"]
+    items = [i for i in all_items if not i["image_id"]["S"].startswith("content#")]
+    fingerprints = [i for i in all_items if i["image_id"]["S"].startswith("content#")]
     assert sorted(int(i["telegram_message_id"]["N"]) for i in items) == [100, 101]
+    assert sorted(i["posted_image_id"]["S"] for i in fingerprints) == sorted(
+        i["image_id"]["S"] for i in items
+    )
     keys = [o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET_NAME)["Contents"]]
     assert len(keys) == 4
     assert all(item["archive_prefix"]["S"] + ".png" in keys for item in items)
@@ -78,7 +83,7 @@ def test_seen_stories_are_skipped(services: handler.Services, api: Any) -> None:
     summary = handler.run((MKX,), services)
 
     assert summary["MKX"] == {"posted": 0, "updated": 0, "skipped": 2, "failed": 0}
-    assert api.routes[-1].call_count == 2
+    assert api.routes["photo"].call_count == 2
 
 
 def test_changed_update_time_reposts_with_prefix(
@@ -94,6 +99,76 @@ def test_changed_update_time_reposts_with_prefix(
     assert captions(api)[-1].startswith("🔄 Updated: <b>Monday Night")
     image_id = mkx_payload["stories"][1]["download"].rpartition("/")[2]
     assert services.store.get_update_time("MKX", image_id) == "2026-09-12T23:00:00+00:00"
+
+
+REISSUED_DOWNLOAD = "https://api.weather.gov/offices/MKX/weatherstories/download/reissued-uuid"
+
+
+def reissue(api: Any, mkx_payload: dict[str, Any], image: bytes, **changes: Any) -> dict[str, Any]:
+    """Re-serve story order 2 under a new image UUID, as NWS did on 2026-09-14."""
+    story = mkx_payload["stories"][1]
+    original = dict(story)
+    story.update(download=REISSUED_DOWNLOAD, **changes)
+    api.get(MKX_URL).respond(json=mkx_payload)
+    api.get(REISSUED_DOWNLOAD, name="reissued").respond(content=image)
+    return original
+
+
+def test_identical_story_reissued_under_new_uuid_is_skipped(
+    services: handler.Services,
+    api: Any,
+    mkx_payload: dict[str, Any],
+    dynamodb: Any,
+    s3: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    handler.run((MKX,), services)
+    original = reissue(api, mkx_payload, b"PNG-" + mkx_payload["stories"][1]["order"].to_bytes())
+    original_id = original["download"].rpartition("/")[2]
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    summary = handler.run((MKX,), services)
+
+    assert summary["MKX"] == {"posted": 0, "updated": 0, "skipped": 2, "failed": 0}
+    assert api.routes["photo"].call_count == 2
+    assert len(s3.list_objects_v2(Bucket=BUCKET_NAME)["Contents"]) == 4
+    item = dynamodb.get_item(
+        TableName=TABLE_NAME,
+        Key={"office_id": {"S": "MKX"}, "image_id": {"S": "reissued-uuid"}},
+    )["Item"]
+    assert item["duplicate_of"] == {"S": original_id}
+    assert item["telegram_message_id"] == {"N": "101"}
+    [skipped] = [r for r in caplog.records if r.getMessage() == "Duplicate story skipped"]
+    assert skipped.image_id == "reissued-uuid"
+    assert skipped.duplicate_of == original_id
+
+    handler.run((MKX,), services)
+    assert api.routes["reissued"].call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("image", "changes"),
+    [
+        (b"PNG-different", {}),
+        (None, {"updateTime": "2026-09-12T23:00:00+00:00"}),
+        (None, {"description": "Storm timing has shifted."}),
+    ],
+)
+def test_reissue_with_changed_content_is_posted(
+    services: handler.Services,
+    api: Any,
+    mkx_payload: dict[str, Any],
+    image: bytes | None,
+    changes: dict[str, Any],
+) -> None:
+    handler.run((MKX,), services)
+    same_image = b"PNG-" + mkx_payload["stories"][1]["order"].to_bytes()
+    reissue(api, mkx_payload, image or same_image, **changes)
+
+    summary = handler.run((MKX,), services)
+
+    assert summary["MKX"] == {"posted": 1, "updated": 0, "skipped": 1, "failed": 0}
+    assert api.routes["photo"].call_count == 3
 
 
 def test_one_story_posted_log_per_new_or_updated_story(

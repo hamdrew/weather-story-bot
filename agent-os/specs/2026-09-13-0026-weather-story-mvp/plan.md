@@ -14,7 +14,7 @@ NWS Weather Stories are only on weather.gov, which you have to remember to check
 | Topic | Decision |
 |---|---|
 | Source | api.weather.gov weatherstories endpoint (not page scraping) |
-| Dedupe | Key = office + image UUID. Post when the UUID is new. Repost with an "Updated" prefix when `updateTime` changes |
+| Dedupe | Key = office + image UUID. Post when the UUID is new. Repost with an "Updated" prefix when `updateTime` changes. Skip a new UUID or revision whose content fingerprint (image bytes + title, description, start/end/update times) was already posted (Task 12) |
 | Destination | One Telegram channel per office, with the bot as admin. MVP config has only MKX |
 | Archive | Phase 2 S3 archive pulled in: save image + metadata JSON for every post |
 | Schedule | Every 15 minutes (EventBridge Scheduler) |
@@ -219,6 +219,26 @@ Why: every resource except the CloudWatch alarms is billed by usage, and the bil
   - Running before deploys, in CI, or as a PR comment (see the Phase 2 CI/CD roadmap item)
   - Writing down a baseline estimate
   - Comparing the estimate with actual spend (the budget alert in Task 10 covers overspending)
+
+## Task 12: Content fingerprint dedupe (added 2026-09-14)
+
+Why: Task 4 assumed an image UUID identifies one story. On 2026-09-14, NWS re-issued MKX "High Swim Risk" under a new UUID (`4b014770…` → `e7a27513…`). The PNG was byte-identical and the story JSON matched except for `download`, including `updateTime`. The bot classified it as NEW and posted it a second time, about 6.5 hours after the first.
+
+- **Fingerprint:** `content_fingerprint(story, image_bytes)` in `state.py` is the SHA-256 of canonical JSON holding the image's SHA-256 plus `title`, `description`, `startTime`, `endTime` and `updateTime` (times normalized to UTC).
+  - The fields are listed explicitly rather than "raw JSON minus `download`", so new API fields or an `order` reshuffle can't hide a duplicate.
+  - `updateTime` is included so a revert to earlier content (A → B → A) still posts, since the revert gets a new `updateTime`.
+  - The image is included because two different graphics can share a title and `updateTime`.
+- **Storage:** Same table, no schema or IAM change. After a post, `record_posted` writes the story item (now with a `fingerprint` attribute), then a fingerprint item with sort key `content#<fingerprint>` holding `image_id`, `telegram_message_id` and `archive_prefix`. Image UUIDs never contain `#`, so the keys can't collide.
+  - These are two separate PutItems. If the second one fails, the run fails (and alarms as usual). The story is still recorded as SEEN, and only a later re-issue of that exact revision could repost. That's consistent with at-least-once delivery.
+- **Handler flow** for NEW or UPDATED stories: download → fingerprint → look up `content#<fingerprint>`.
+  - **Match:** `record_duplicate` writes the new UUID's item with the story's `update_time`, `duplicate_of` (the original `image_id`), and the original's `telegram_message_id` and `archive_prefix`, so later runs see it as SEEN without downloading. Nothing is archived or posted. The handler logs `"Duplicate story skipped"` and counts it as `skipped`.
+  - **No match:** archive → post → `record_posted` as before.
+- **Existing items** from before this change have no fingerprint item. A re-issue of one of them posts once more. Backfilling from the S3 archive (each prefix has the PNG and raw JSON) is an optional one-off after deploy.
+- **Tests:**
+  - Fingerprint: stable for the same content; changes when the image bytes, title, description, or any of the three times change; ignores `download` and `order`; equal for equivalent times in different offsets.
+  - Store: `record_posted` writes the fingerprint item; `find_by_fingerprint` returns it; `record_duplicate` makes the new UUID SEEN.
+  - Handler: a story re-issued under a new UUID with identical bytes and metadata is skipped, recorded with `duplicate_of`, logged, not archived, and not posted; the next run skips it without downloading. A new UUID with a different image, or the same image with a new `updateTime` or description, still posts.
+- **Out of scope:** Deleting the duplicate Telegram message already posted on 2026-09-14; a GSI; perceptual (near-identical) image matching.
 
 ---
 

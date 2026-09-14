@@ -14,7 +14,7 @@ from weather_story_bot.archive import StoryArchive
 from weather_story_bot.config import OfficeConfig, Settings
 from weather_story_bot.models import Story
 from weather_story_bot.nws import NwsClient
-from weather_story_bot.state import PostedStore, Status, classify
+from weather_story_bot.state import PostedStore, Status, classify, content_fingerprint
 from weather_story_bot.telegram import TelegramClient, build_caption
 
 logger = logging.getLogger("weather_story_bot")
@@ -94,6 +94,22 @@ def _process_story(office: OfficeConfig, story: Story, services: Services) -> St
         return status
 
     image = services.nws.download_image(story)
+    fingerprint = content_fingerprint(story, image)
+    original = services.store.find_by_fingerprint(office.office_id, fingerprint)
+    if original is not None:
+        # NWS re-issued an already-posted revision under a new image UUID.
+        services.store.record_duplicate(story, original)
+        logger.info(
+            "Duplicate story skipped",
+            extra={
+                "office": office.office_id,
+                "image_id": image_id,
+                "duplicate_of": original.image_id,
+                "telegram_message_id": original.telegram_message_id,
+            },
+        )
+        return Status.DUPLICATE
+
     prefix = services.archive.save(story, image)
     message_id = post_story(
         services.telegram,
@@ -104,7 +120,7 @@ def _process_story(office: OfficeConfig, story: Story, services: Services) -> St
         updated=status is Status.UPDATED,
     )
     # Recorded only after a successful post: a failure here may cause a repost, never a miss.
-    services.store.record_posted(story, message_id, prefix)
+    services.store.record_posted(story, message_id, prefix, fingerprint)
     logger.info(
         "Story posted",
         extra={

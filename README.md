@@ -10,6 +10,7 @@ Every 15 minutes, an AWS Lambda:
 2. Skips stories it has already posted. It tracks them in DynamoDB by office and image ID.
 3. For each new story, and each story whose `updateTime` changed:
    - downloads the image
+   - skips it if the same image and metadata were already posted under a different image ID (NWS sometimes re-issues an unchanged story with a new ID), logging `Duplicate story skipped`
    - archives the image and raw metadata to S3
    - posts the image and description to that office's Telegram channel (updates get a "🔄 Updated:" prefix)
 

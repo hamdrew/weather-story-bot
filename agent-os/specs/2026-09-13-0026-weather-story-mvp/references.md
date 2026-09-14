@@ -15,6 +15,7 @@ None. The repository had no application code when this spec was written.
   - Images are PNGs, about 1.1 MB at 1536×864.
   - Requests need a descriptive `User-Agent` header with contact info.
   - The list response is cached for about 3 minutes (`max-age=180`).
+  - **Image UUIDs aren't stable.** Observed 2026-09-14: the same MKX story (identical PNG bytes, identical metadata including `updateTime`) was re-issued under a new UUID. Don't treat a new UUID alone as a new story (plan Task 12).
 
 ### NWS MKX Weather Story page
 

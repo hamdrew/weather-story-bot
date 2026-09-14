@@ -8,6 +8,7 @@ The full Phase 1 MVP. A scheduled AWS Lambda checks the NWS MKX (Milwaukee/Sulli
 
 - **Source is the NWS API, not the web page.** `GET https://api.weather.gov/offices/{office}/weatherstories` returns structured stories. Each has a `download` URL containing a unique image UUID. The weatherstory web page instead reuses fixed image filenames (`Tab2FileL.png`), which makes change detection unreliable.
 - **Dedupe key = office + image UUID.** A new UUID gets posted. If a known UUID's `updateTime` changes, it's reposted with an "Updated" prefix.
+- **Plus a content fingerprint, because image UUIDs aren't stable** (added 2026-09-14, plan Task 12). NWS re-issued "High Swim Risk" under a new UUID with a byte-identical image and identical metadata apart from `download`, and the bot posted it twice. Before posting, the bot now hashes the image bytes together with the story's title, description, start, end and update times. If that fingerprint was already posted for the office, it records the new UUID as a duplicate and skips it. Anything that changes the image, the text or `updateTime` still posts, so a real story or update is never skipped.
 - **Telegram channel per office**, with the bot added as admin. The MVP config has only MKX, but offices are a config map (office → chat ID, name), and the office ID is part of every DynamoDB and S3 key.
 - **S3 archive pulled forward from Phase 2.** Every posted story (and every update) saves its PNG plus the raw story JSON.
 - **Terraform** for infrastructure, with remote state in S3 (native lockfile).
