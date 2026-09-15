@@ -115,7 +115,7 @@ A JSON with no PNG, or a post whose archive pair is missing, raises `MigrationEr
      ```
   2. If a run was in progress, wait for its `Run complete` log line.
   3. `scripts/migrate_story_keys.py --apply`.
-  4. `make build`, then `make deploy`. The plan also shows the schedule's `state` going `DISABLED` → `ENABLED`: that's the unpause.
+  4. `make build`, then `make deploy`. The plan also shows the schedule's `state` going `DISABLED` → `ENABLED`: that's the unpause. The schedule sets no `StartDate`, so EventBridge Scheduler treats the unpause as activation and invokes the Lambda immediately, giving a verification run within seconds. The 15-minute rate runs from there.
   5. If the deploy fails, re-enable the schedule the same way with `--state ENABLED`. The old Lambda ignores `story#` items and the new archive keys, so it keeps working.
 - After deploy: the first run skips the live stories (no reposts) and writes new archive objects only for changed stories. Force `weather-story-bot-nws-ambiguous` with `set-alarm-state` to check the email path.
 - Once the new version has run cleanly: `scripts/migrate_story_keys.py --apply --delete-old`.
