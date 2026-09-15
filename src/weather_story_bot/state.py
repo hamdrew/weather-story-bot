@@ -7,9 +7,12 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING
 
 from weather_story_bot.models import Story, parse_time
+
+if TYPE_CHECKING:
+    from types_boto3_dynamodb import DynamoDBClient
 
 
 class Status(StrEnum):
@@ -63,7 +66,7 @@ class PostedStore:
     Each posted story also has a `content#<fingerprint>` item pointing at its post.
     """
 
-    def __init__(self, dynamodb_client: Any, table_name: str) -> None:
+    def __init__(self, dynamodb_client: DynamoDBClient, table_name: str) -> None:
         self._client = dynamodb_client
         self._table = table_name
 

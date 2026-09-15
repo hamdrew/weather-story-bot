@@ -14,6 +14,7 @@ coverage:
 lint:
 	uv run ruff check .
 	uv run ruff format --check .
+	uv run ty check
 	terraform -chdir=infra fmt -check
 
 format:

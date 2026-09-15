@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 from datetime import UTC
-from typing import Any
+from typing import TYPE_CHECKING
 
 from weather_story_bot.models import Story
+
+if TYPE_CHECKING:
+    from types_boto3_s3 import S3Client
 
 
 def archive_prefix(story: Story) -> str:
@@ -17,7 +20,7 @@ def archive_prefix(story: Story) -> str:
 
 
 class StoryArchive:
-    def __init__(self, s3_client: Any, bucket: str) -> None:
+    def __init__(self, s3_client: S3Client, bucket: str) -> None:
         self._s3 = s3_client
         self._bucket = bucket
 

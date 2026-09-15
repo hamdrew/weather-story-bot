@@ -116,7 +116,9 @@ def test_record_duplicate_marks_new_image_seen(dynamodb: Any) -> None:
         download="https://api.weather.gov/offices/MKX/weatherstories/download/bbbb-2222"
     )
 
-    store.record_duplicate(reissued, store.find_by_fingerprint("MKX", "fp1"))
+    posted = store.find_by_fingerprint("MKX", "fp1")
+    assert posted is not None
+    store.record_duplicate(reissued, posted)
 
     assert classify(reissued, store.get_update_time("MKX", "bbbb-2222")) is Status.SEEN
     item = dynamodb.get_item(

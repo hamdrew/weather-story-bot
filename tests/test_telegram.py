@@ -196,7 +196,7 @@ def test_sent_log_marks_every_accepted_message(
 
     records = [r for r in caplog.records if r.getMessage() == "Telegram message sent"]
     expected = [("-1001", "a.png")] if sent else []
-    assert [(r.chat_id, r.image_filename) for r in records] == expected
+    assert [(vars(r)["chat_id"], vars(r)["image_filename"]) for r in records] == expected
     assert all(TOKEN not in r.getMessage() for r in caplog.records)
 
 

@@ -139,8 +139,8 @@ def test_identical_story_reissued_under_new_uuid_is_skipped(
     assert item["duplicate_of"] == {"S": original_id}
     assert item["telegram_message_id"] == {"N": "101"}
     [skipped] = [r for r in caplog.records if r.getMessage() == "Duplicate story skipped"]
-    assert skipped.image_id == "reissued-uuid"
-    assert skipped.duplicate_of == original_id
+    assert vars(skipped)["image_id"] == "reissued-uuid"
+    assert vars(skipped)["duplicate_of"] == original_id
 
     handler.run((MKX,), services)
     assert api.routes["reissued"].call_count == 1
@@ -184,13 +184,13 @@ def test_one_story_posted_log_per_new_or_updated_story(
 
     caplog.set_level(logging.INFO, logger="weather_story_bot")
     handler.run((MKX,), services)
-    assert [r.status for r in posted_records()] == ["new", "new"]
+    assert [vars(r)["status"] for r in posted_records()] == ["new", "new"]
 
     caplog.clear()
     mkx_payload["stories"][1]["updateTime"] = "2026-09-12T23:00:00+00:00"
     api.get(MKX_URL).respond(json=mkx_payload)
     handler.run((MKX,), services)
-    assert [r.status for r in posted_records()] == ["updated"]
+    assert [vars(r)["status"] for r in posted_records()] == ["updated"]
 
     caplog.clear()
     handler.run((MKX,), services)
