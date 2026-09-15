@@ -9,3 +9,5 @@ backend:
     description: At most one in-client retry, decided by side effects; next run is the real retry
   secrets-in-errors:
     description: Keep the Telegram token URL out of exceptions, tracebacks and logs
+  untrusted-nws-data:
+    description: Reject and alert on ambiguous NWS listings (shared image ID, title + start, or image); ignore expired stories
