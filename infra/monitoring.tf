@@ -107,6 +107,38 @@ resource "aws_cloudwatch_metric_alarm" "repost_loop" {
   ok_actions    = [aws_sns_topic.alerts.arn]
 }
 
+# One line per office per run while NWS lists ambiguous stories. Depends on the handler's exact
+# "Ambiguous stories from NWS" message. Rejections don't fail the run, so the errors alarm stays quiet.
+resource "aws_cloudwatch_log_metric_filter" "nws_ambiguous" {
+  name           = "${local.name}-nws-ambiguous"
+  log_group_name = aws_cloudwatch_log_group.lambda.name
+  pattern        = "{ $.message = \"Ambiguous stories from NWS\" }"
+
+  metric_transformation {
+    name      = "AmbiguousStories"
+    namespace = local.metric_namespace
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "nws_ambiguous" {
+  alarm_name        = "${local.name}-nws-ambiguous"
+  alarm_description = "NWS listed active stories that share an image ID, a title and start time, or an identical image, so the bot skipped all of them. No action is needed if NWS fixes its data; the OK email follows once a run sees a clean listing. Check the \"stories\" and \"reasons\" fields of \"Ambiguous stories from NWS\" lines in the logs and compare with each office's weather.gov weatherstory page: ${local.logs_console_url}"
+
+  namespace           = local.metric_namespace
+  metric_name         = aws_cloudwatch_log_metric_filter.nws_ambiguous.metric_transformation[0].name
+  statistic           = "Sum"
+  period              = 900
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 1
+  # No rejections means no data points.
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+}
+
 # Covers the whole account, not just this project. Emails directly rather than through SNS.
 resource "aws_budgets_budget" "monthly" {
   name         = "${local.name}-monthly"

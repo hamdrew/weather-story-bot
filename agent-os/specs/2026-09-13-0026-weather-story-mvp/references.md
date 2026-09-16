@@ -16,6 +16,7 @@ None. The repository had no application code when this spec was written.
   - Requests need a descriptive `User-Agent` header with contact info.
   - The list response is cached for about 3 minutes (`max-age=180`).
   - **Image UUIDs aren't stable.** Observed 2026-09-14: the same MKX story (identical PNG bytes, identical metadata including `updateTime`) was re-issued under a new UUID. Don't treat a new UUID alone as a new story (plan Task 12).
+  - **`updateTime` isn't reliable either.** Observed 2026-09-15: two MKX stories were re-issued under new UUIDs with `"updateTime": "1970-01-01T00:00:00+00:00"` and a blank `altText`. One was otherwise byte-identical. The other was a real revision whose later re-issue carried a real `updateTime`. Title and `startTime` stayed fixed across revisions (spec `2026-09-15-1149-story-updates-and-nws-validation`).
 
 ### NWS MKX Weather Story page
 

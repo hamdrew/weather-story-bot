@@ -12,6 +12,15 @@
 - **Cost alert:** Email me if monthly AWS spend for the account goes over a small budget.
 - **Cost estimate command:** A command I can run whenever I want (`make cost`) that shows the estimated monthly AWS cost of what's in `infra/`, using Infracost. It doesn't run before deploys or in CI.
 
+## Phase 1.1: Soak Hardening
+
+Fixes from the first days of running the MVP (spec `2026-09-15-1149-story-updates-and-nws-validation`).
+
+- **Updates notify:** When a story's image or description changes, post it again as "🔄 Updated:" and delete the old message.
+- **Reject ambiguous NWS content:** If active stories share an image ID, a title and start time, or the same image, post none of them and email me right away.
+- **Ignore expired stories:** Take no action on stories past their end time.
+- **Archive by story:** Keep one S3 folder per story (title and start time) with one file pair per distinct revision, and migrate the existing archive and records to match.
+
 ## Phase 2: Post-Launch
 
 - **Multiple offices:** Support more NWS offices, with a separate Telegram channel for each office.

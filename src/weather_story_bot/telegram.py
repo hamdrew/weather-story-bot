@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import html
 import logging
 import time
@@ -100,7 +101,19 @@ class TelegramClient:
         except (KeyError, TypeError, ValueError) as exc:
             raise TelegramError(f"Unexpected Telegram result: {type(exc).__name__}") from None
 
-    def _call(self, method: str, data: dict[str, str], files: dict[str, Any]) -> dict[str, Any]:
+    def delete_message(self, chat_id: str, message_id: int) -> None:
+        """Delete a message; one that's already gone counts as deleted.
+
+        Telegram refuses to delete messages sent more than 48 hours ago, which raises.
+        """
+        data = {"chat_id": chat_id, "message_id": str(message_id)}
+        with contextlib.suppress(_MessageNotFoundError):
+            self._call("deleteMessage", data, {})
+        logger.info(
+            "Telegram message deleted", extra={"chat_id": chat_id, "message_id": message_id}
+        )
+
+    def _call(self, method: str, data: dict[str, str], files: dict[str, Any]) -> Any:
         url = f"{self._base_url}/bot{self._token}/{method}"
         retried = False
         while True:
@@ -115,10 +128,10 @@ class TelegramClient:
 
             body = _json_body(response)
             if response.is_success and body.get("ok"):
-                result = body.get("result")
-                if not isinstance(result, dict):
-                    raise TelegramError(f"{method} returned no result object")
-                return result
+                # An object for sends, `true` for deleteMessage.
+                if body.get("result") is None:
+                    raise TelegramError(f"{method} returned no result")
+                return body["result"]
 
             description = str(body.get("description") or response.reason_phrase)
             if response.status_code == 429 and not retried:
@@ -139,10 +152,16 @@ class TelegramClient:
                 )
             ):
                 raise _PhotoRejectedError(description)
+            if method == "deleteMessage" and "message to delete not found" in description:
+                raise _MessageNotFoundError(description)
             raise TelegramError(f"{method} failed with HTTP {response.status_code}: {description}")
 
 
 class _PhotoRejectedError(TelegramError):
+    pass
+
+
+class _MessageNotFoundError(TelegramError):
     pass
 
 

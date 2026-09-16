@@ -1,4 +1,4 @@
-"""DynamoDB record of which stories (and which revisions of them) have been posted."""
+"""DynamoDB record of which stories have been posted, and the message showing each one."""
 
 from __future__ import annotations
 
@@ -7,83 +7,73 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING
 
-from weather_story_bot.models import Story, parse_time
+from weather_story_bot.models import Story
+
+if TYPE_CHECKING:
+    from types_boto3_dynamodb import DynamoDBClient
 
 
 class Status(StrEnum):
     NEW = "new"
     UPDATED = "updated"
-    SEEN = "seen"
-    DUPLICATE = "duplicate"
+    UNCHANGED = "unchanged"
 
 
-def classify(story: Story, seen_update_time: str | None) -> Status:
-    """Decide whether a story needs posting, given the `updateTime` recorded when last posted."""
-    if seen_update_time is None:
-        return Status.NEW
-    if parse_time(seen_update_time) != story.update_time:
-        return Status.UPDATED
-    return Status.SEEN
+def _sha256_json(content: dict[str, str]) -> str:
+    return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
+
+
+def image_sha256(image: bytes) -> str:
+    return hashlib.sha256(image).hexdigest()
 
 
 def content_fingerprint(story: Story, image: bytes) -> str:
-    """Identify a story revision by its image bytes and metadata, ignoring the image UUID.
+    """Identify what a story's Telegram message shows: the image bytes and description.
 
-    NWS can re-issue an unchanged story under a new UUID, so the UUID alone can't dedupe.
-    `updateTime` is included so a revert to earlier content still counts as new.
+    Ignores the image UUID and `updateTime`, which NWS changes (even to the Unix epoch) on
+    re-issues whose content is identical, and `endTime`, which the message doesn't show.
+    Title and start time are the story's identity, compared through `story_key`.
     """
-    content = {
-        "image_sha256": hashlib.sha256(image).hexdigest(),
-        "title": story.title,
-        "description": story.description,
-        "start_time": story.start_time.astimezone(UTC).isoformat(),
-        "end_time": story.end_time.astimezone(UTC).isoformat(),
-        "update_time": story.update_time.astimezone(UTC).isoformat(),
-    }
-    return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
+    return _sha256_json({"image_sha256": image_sha256(image), "description": story.description})
+
+
+def story_key(story: Story) -> str:
+    """Identify one story across revisions and image UUIDs: title plus start time."""
+    return _sha256_json(
+        {"title": story.title, "start_time": story.start_time.astimezone(UTC).isoformat()}
+    )
 
 
 @dataclass(frozen=True, slots=True)
 class PostedRecord:
-    """The post that first carried a given content fingerprint."""
+    """The latest posted revision of a story and the Telegram message showing it."""
 
     image_id: str
     telegram_message_id: int
     archive_prefix: str
+    fingerprint: str
 
 
-_FINGERPRINT_PREFIX = "content#"
+_STORY_PREFIX = "story#"
 
 
 class PostedStore:
-    """Items keyed by `office_id` (partition) and `image_id` (sort).
+    """One `story#<story_key>` item per posted story, keyed by `office_id` (partition).
 
-    Each posted story also has a `content#<fingerprint>` item pointing at its post.
+    The sort key attribute is still named `image_id`. Items from before 2026-09-15 (keyed by
+    image UUID or `content#<fingerprint>`) are no longer read.
     """
 
-    def __init__(self, dynamodb_client: Any, table_name: str) -> None:
+    def __init__(self, dynamodb_client: DynamoDBClient, table_name: str) -> None:
         self._client = dynamodb_client
         self._table = table_name
 
-    def get_update_time(self, office_id: str, image_id: str) -> str | None:
+    def find_story(self, office_id: str, key: str) -> PostedRecord | None:
         response = self._client.get_item(
             TableName=self._table,
-            Key={"office_id": {"S": office_id}, "image_id": {"S": image_id}},
-            ProjectionExpression="update_time",
-            ConsistentRead=True,
-        )
-        item = response.get("Item")
-        return item["update_time"]["S"] if item else None
-
-    def find_by_fingerprint(self, office_id: str, fingerprint: str) -> PostedRecord | None:
-        response = self._client.get_item(
-            TableName=self._table,
-            Key={
-                "office_id": {"S": office_id},
-                "image_id": {"S": _FINGERPRINT_PREFIX + fingerprint},
-            },
+            Key={"office_id": {"S": office_id}, "image_id": {"S": _STORY_PREFIX + key}},
             ConsistentRead=True,
         )
         item = response.get("Item")
@@ -93,6 +83,7 @@ class PostedStore:
             image_id=item["posted_image_id"]["S"],
             telegram_message_id=int(item["telegram_message_id"]["N"]),
             archive_prefix=item["archive_prefix"]["S"],
+            fingerprint=item["fingerprint"]["S"],
         )
 
     def record_posted(
@@ -105,43 +96,19 @@ class PostedStore:
         posted_at: datetime | None = None,
     ) -> None:
         posted_at = posted_at or datetime.now(UTC)
-        common = {
-            "office_id": {"S": story.office_id},
-            "update_time": {"S": story.update_time.isoformat()},
-            "title": {"S": story.title},
-            "posted_at": {"S": posted_at.isoformat()},
-            "telegram_message_id": {"N": str(message_id)},
-            "archive_prefix": {"S": archive_prefix},
-        }
-        # Story item first: if the fingerprint write then fails, the story is still SEEN.
-        self._client.put_item(
-            TableName=self._table,
-            Item={**common, "image_id": {"S": story.image_id}, "fingerprint": {"S": fingerprint}},
-        )
-        self._client.put_item(
-            TableName=self._table,
-            Item={
-                **common,
-                "image_id": {"S": _FINGERPRINT_PREFIX + fingerprint},
-                "posted_image_id": {"S": story.image_id},
-            },
-        )
-
-    def record_duplicate(
-        self, story: Story, original: PostedRecord, *, seen_at: datetime | None = None
-    ) -> None:
-        """Mark a re-issued story as seen without posting it again."""
-        seen_at = seen_at or datetime.now(UTC)
         self._client.put_item(
             TableName=self._table,
             Item={
                 "office_id": {"S": story.office_id},
-                "image_id": {"S": story.image_id},
-                "update_time": {"S": story.update_time.isoformat()},
+                "image_id": {"S": _STORY_PREFIX + story_key(story)},
+                "posted_image_id": {"S": story.image_id},
                 "title": {"S": story.title},
-                "duplicate_of": {"S": original.image_id},
-                "duplicate_seen_at": {"S": seen_at.isoformat()},
-                "telegram_message_id": {"N": str(original.telegram_message_id)},
-                "archive_prefix": {"S": original.archive_prefix},
+                "start_time": {"S": story.start_time.isoformat()},
+                "end_time": {"S": story.end_time.isoformat()},
+                "update_time": {"S": story.update_time.isoformat()},
+                "posted_at": {"S": posted_at.isoformat()},
+                "telegram_message_id": {"N": str(message_id)},
+                "archive_prefix": {"S": archive_prefix},
+                "fingerprint": {"S": fingerprint},
             },
         )

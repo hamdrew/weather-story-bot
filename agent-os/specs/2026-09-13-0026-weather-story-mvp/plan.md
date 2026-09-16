@@ -14,7 +14,7 @@ NWS Weather Stories are only on weather.gov, which you have to remember to check
 | Topic | Decision |
 |---|---|
 | Source | api.weather.gov weatherstories endpoint (not page scraping) |
-| Dedupe | Key = office + image UUID. Post when the UUID is new. Repost with an "Updated" prefix when `updateTime` changes. Skip a new UUID or revision whose content fingerprint (image bytes + title, description, start/end/update times) was already posted (Task 12) |
+| Dedupe | Key = office + image UUID. Post when the UUID is new. Repost with an "Updated" prefix when `updateTime` changes. Skip a new UUID or revision whose content fingerprint (image bytes + title, description, start/end/update times) was already posted (Task 12). Replaced after launch by spec `2026-09-15-1149-story-updates-and-nws-validation` |
 | Backups | Point-in-time recovery on the DynamoDB table, 35-day window. Restore to a new table, then copy items back (Task 13). Versioning on the S3 archive, with old versions expiring after 35 days (Task 14) |
 | Destination | One Telegram channel per office, with the bot as admin. MVP config has only MKX |
 | Archive | Phase 2 S3 archive pulled in: save image + metadata JSON for every post |
@@ -221,7 +221,7 @@ Why: every resource except the CloudWatch alarms is billed by usage, and the bil
   - Writing down a baseline estimate
   - Comparing the estimate with actual spend (the budget alert in Task 10 covers overspending)
 
-## Task 12: Content fingerprint dedupe (added 2026-09-14)
+## Task 12: Content fingerprint dedupe (added 2026-09-14, superseded by spec 2026-09-15-1149-story-updates-and-nws-validation)
 
 Why: Task 4 assumed an image UUID identifies one story. On 2026-09-14, NWS re-issued MKX "High Swim Risk" under a new UUID (`4b014770…` → `e7a27513…`). The PNG was byte-identical and the story JSON matched except for `download`, including `updateTime`. The bot classified it as NEW and posted it a second time, about 6.5 hours after the first.
 
