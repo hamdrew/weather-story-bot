@@ -21,13 +21,15 @@ build-backend = "hatchling.build"
 [dependency-groups]
 # boto3 is provided by the Lambda runtime, so it is a dev-only dependency.
 dev = [
-    "boto3>=1.43.93",
+    "boto3[crt]>=1.43.93",
     "moto[dynamodb,s3,ssm]>=5.2.3",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "python-dotenv>=1.1.1",
     "respx>=0.23.1",
     "ruff>=0.16.7",
+    "ty>=0.0.81",
+    "types-boto3[dynamodb,s3,ssm,sts]>=1.43.94",
 ]
 
 [tool.pytest.ini_options]

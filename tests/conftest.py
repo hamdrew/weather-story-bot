@@ -3,13 +3,17 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import boto3
 import pytest
 from moto import mock_aws
 
 from weather_story_bot.models import Story
+
+if TYPE_CHECKING:
+    from types_boto3_dynamodb import DynamoDBClient
+    from types_boto3_s3 import S3Client
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TABLE_NAME = "weather-story-bot-posted"
@@ -60,7 +64,7 @@ def aws() -> Iterator[None]:
 
 
 @pytest.fixture
-def dynamodb(aws: None) -> Any:
+def dynamodb(aws: None) -> DynamoDBClient:
     client = boto3.client("dynamodb")
     client.create_table(
         TableName=TABLE_NAME,
@@ -78,7 +82,7 @@ def dynamodb(aws: None) -> Any:
 
 
 @pytest.fixture
-def s3(aws: None) -> Any:
+def s3(aws: None) -> S3Client:
     client = boto3.client("s3")
     client.create_bucket(
         Bucket=BUCKET_NAME,

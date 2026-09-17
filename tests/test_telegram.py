@@ -19,6 +19,7 @@ from weather_story_bot.telegram import (
 TOKEN = "123:secret-token"
 PHOTO_URL = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
 DOCUMENT_URL = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
+DELETE_URL = f"https://api.telegram.org/bot{TOKEN}/deleteMessage"
 LINK = '<a href="https://www.weather.gov/mkx/weatherstory">View on weather.gov</a>'
 
 
@@ -196,8 +197,78 @@ def test_sent_log_marks_every_accepted_message(
 
     records = [r for r in caplog.records if r.getMessage() == "Telegram message sent"]
     expected = [("-1001", "a.png")] if sent else []
-    assert [(r.chat_id, r.image_filename) for r in records] == expected
+    assert [(vars(r)["chat_id"], vars(r)["image_filename"]) for r in records] == expected
     assert all(TOKEN not in r.getMessage() for r in caplog.records)
+
+
+@respx.mock
+def test_delete_message_sends_ids_and_logs(
+    client: TelegramClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    route = respx.post(DELETE_URL).mock(
+        return_value=httpx.Response(200, json={"ok": True, "result": True})
+    )
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    client.delete_message("-1001", 7)
+
+    body = route.calls.last.request.content
+    assert b"chat_id=-1001" in body
+    assert b"message_id=7" in body
+    [deleted] = [r for r in caplog.records if r.getMessage() == "Telegram message deleted"]
+    assert (vars(deleted)["chat_id"], vars(deleted)["message_id"]) == ("-1001", 7)
+    assert "Telegram message sent" not in [r.getMessage() for r in caplog.records]
+
+
+@respx.mock
+def test_delete_message_treats_not_found_as_deleted(client: TelegramClient) -> None:
+    respx.post(DELETE_URL).mock(return_value=error(400, "Bad Request: message to delete not found"))
+    client.delete_message("-1001", 7)
+
+
+@respx.mock
+def test_delete_message_retries_rate_limit_once(
+    client: TelegramClient, sleeps: list[float]
+) -> None:
+    route = respx.post(DELETE_URL)
+    route.side_effect = [
+        error(429, "Too Many Requests", parameters={"retry_after": 2}),
+        httpx.Response(200, json={"ok": True, "result": True}),
+    ]
+
+    client.delete_message("-1001", 7)
+    assert sleeps == [2]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        # Telegram refuses to delete messages sent more than 48 hours ago.
+        error(400, "Bad Request: message can't be deleted"),
+        error(403, "Forbidden: bot is not a member of the channel chat"),
+        httpx.Response(200, json={"ok": True}),
+    ],
+)
+@respx.mock
+def test_delete_message_failures_raise_telegram_error(
+    client: TelegramClient, response: httpx.Response
+) -> None:
+    respx.post(DELETE_URL).mock(return_value=response)
+
+    with pytest.raises(TelegramError) as exc_info:
+        client.delete_message("-1001", 7)
+    assert TOKEN not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+
+
+@respx.mock
+def test_delete_transport_error_hides_token(client: TelegramClient) -> None:
+    route = respx.post(DELETE_URL).mock(side_effect=httpx.ConnectError(f"failed {DELETE_URL}"))
+
+    with pytest.raises(TelegramError) as exc_info:
+        client.delete_message("-1001", 7)
+    assert route.call_count == 1
+    assert TOKEN not in str(exc_info.value)
 
 
 @respx.mock

@@ -7,20 +7,20 @@ Posts new [NWS Weather Stories](https://www.weather.gov/mkx/weatherstory) to a T
 Every 15 minutes, an AWS Lambda:
 
 1. Fetches the active stories for each configured office from `api.weather.gov/offices/{office}/weatherstories`.
-2. Skips stories it has already posted. It tracks them in DynamoDB by office and image ID.
-3. For each new story, and each story whose `updateTime` changed:
-   - downloads the image
-   - skips it if the same image and metadata were already posted under a different image ID (NWS sometimes re-issues an unchanged story with a new ID), logging `Duplicate story skipped`
-   - archives the image and raw metadata to S3
-   - posts the image and description to that office's Telegram channel (updates get a "🔄 Updated:" prefix)
+2. Ignores stories past their `endTime`.
+3. Downloads every remaining story's image, and rejects any stories that share an image ID, a title and start time, or identical image bytes. None of them are posted; the run logs one `Ambiguous stories from NWS` error and the `nws-ambiguous` alarm emails you.
+4. For each other story, identified by its title and start time (NWS re-issues stories under new image IDs, even with `updateTime` set to 1970):
+   - skips it if its image and description match what was last posted for it
+   - archives the image and raw metadata to S3, in one folder per story with one file pair per distinct image and description
+   - posts the image and description to that office's Telegram channel, logging `Story posted`. A changed story gets a "🔄 Updated:" prefix, and its previous message is then deleted.
 
-A story is recorded as posted only after Telegram accepts it. A failure can cause a repost, but never a missed story. If any story fails, the invocation reports an error, and the next scheduled run tries again.
+A story is recorded as posted only after Telegram accepts it, and an old message is deleted only after its replacement is recorded. A failure can cause a repost, but never a missed story. Telegram won't let bots delete messages older than 48 hours, so an update to an older story leaves both messages, and logs `Telegram delete failed, old message kept`. If any story fails, the invocation reports an error, and the next scheduled run tries again. Rejected stories don't fail the run.
 
 ```
 EventBridge Scheduler ──► Lambda ──► api.weather.gov
-                            ├──► S3 archive   stories/{office}/{YYYY}/{MM}/{DD}/{image_id}/{updateTime}.{png,json}
-                            ├──► Telegram     sendPhoto (falls back to sendDocument)
-                            └──► DynamoDB     weather-story-bot-posted
+                            ├──► S3 archive   stories/{office}/{YYYY}/{MM}/{DD}/{HHMM}Z-{title}-{story key}/{fingerprint}.{png,json}
+                            ├──► Telegram     sendPhoto (falls back to sendDocument), deleteMessage
+                            └──► DynamoDB     weather-story-bot-posted (one story#<title+start hash> item per story)
 ```
 
 ## One-time setup
@@ -102,7 +102,7 @@ Smoke test:
 
 ```sh
 aws lambda invoke --function-name weather-story-bot out.json && cat out.json
-# {"MKX": {"posted": 2, "updated": 0, "skipped": 0, "failed": 0}}
+# {"MKX": {"posted": 2, "updated": 0, "skipped": 0, "rejected": 0, "failed": 0}}
 ```
 
 Invoke it again and every story should show as `skipped`. Logs are structured JSON in the CloudWatch log group `/aws/lambda/weather-story-bot`.
@@ -140,11 +140,12 @@ aws cloudwatch set-alarm-state --alarm-name weather-story-bot-errors \
 | `weather-story-bot-missed-runs` | No invocations in the last hour. | The EventBridge Scheduler schedule `weather-story-bot` is enabled, and the scheduler role can still invoke the function. |
 | `weather-story-bot-quiet` | No stories posted for `quiet_alarm_days` days, even though runs aren't failing. | The `Run complete` summaries in the logs. If they show only `skipped` while weather.gov has new stories, NWS may have changed the API. |
 | `weather-story-bot-repost-loop` | More than `repost_alarm_max_posts` stories posted in 3 hours. | The Telegram channel for duplicates, and `Telegram message sent` log lines for the same `image_filename` again and again, without a matching `Story posted` line (for example, DynamoDB writes failing after each post). |
+| `weather-story-bot-nws-ambiguous` | NWS listed active stories that share an image ID, a title and start time, or an identical image, so the bot skipped all of them. Fires on the first run that sees it. | The `Ambiguous stories from NWS` log lines: `stories` lists each rejected story's `image_id`, `title` and `reasons`. Usually NWS fixes its data within a run or two, and the OK email follows. |
 | `weather-story-bot-monthly` (budget) | Actual account spend passes 80% of `monthly_budget_usd`, or forecasted spend passes 100%. | AWS Cost Explorer, grouped by service. The budget covers the **whole account**, not just this bot. |
 
 Each alarm email includes the same hints and a link to the log group.
 
-`quiet` and `repost-loop` count the Telegram client's `Telegram message sent` log line through a log metric filter (`WeatherStoryBot/StoriesPosted`), so don't change that message text. It's logged as soon as Telegram accepts a message, so posts whose DynamoDB write then fails still count. Until a full day of data exists, `quiet` may show `INSUFFICIENT_DATA`.
+`quiet` and `repost-loop` count the Telegram client's `Telegram message sent` log line through a log metric filter (`WeatherStoryBot/StoriesPosted`), so don't change that message text. It's logged as soon as Telegram accepts a message, so posts whose DynamoDB write then fails still count. "Updated" reposts count too. Until a full day of data exists, `quiet` may show `INSUFFICIENT_DATA`. `nws-ambiguous` counts the handler's `Ambiguous stories from NWS` line (`WeatherStoryBot/AmbiguousStories`), so don't change that message text either.
 
 ### Tuning thresholds
 
@@ -176,7 +177,7 @@ Then:
 make cost
 ```
 
-It prints each costed resource with its full-precision monthly cost, then the total (about $0.44/month at the committed estimates, mostly the four $0.10 CloudWatch alarms). The full scan result is saved to `build/infracost.json`. Infracost's own tables round to whole dollars, which would show `$0` for everything here, so `make cost` doesn't use them.
+It prints each costed resource with its full-precision monthly cost, then the total (about $0.54/month at the committed estimates, mostly the five $0.10 CloudWatch alarms). The full scan result is saved to `build/infracost.json`. Infracost's own tables round to whole dollars, which would show `$0` for everything here, so `make cost` doesn't use them.
 
 **The estimate does not subtract the AWS free tier.** Every request, GB-second and GB is priced at list price, so the real bill can be lower.
 
@@ -224,7 +225,7 @@ The DynamoDB table has point-in-time recovery, so it can be restored to any seco
 
 ### Recovering archive files
 
-The archive bucket is versioned. A deleted or overwritten file keeps its old version for 35 days, then S3 removes it.
+The archive bucket is versioned. A deleted or overwritten file keeps its old version for 35 days, then S3 removes it. The date and time in a key are the story's start in UTC.
 
 ```sh
 BUCKET=$(terraform -chdir=infra output -raw bucket_name)
