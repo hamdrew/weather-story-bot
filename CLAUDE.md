@@ -11,7 +11,7 @@ Python 3.13 Lambda (arm64) that posts NWS Weather Stories to Telegram. Infra is 
 - `uv run weather-story-bot --dry-run [--office MKX] [--send-telegram]` - live NWS fetch, prints captions; `--dry-run` is required, and only `--send-telegram` posts (uses `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` from env/`.env`)
 
 ## Standards
-- Read `agent-os/standards/index.yml` and the relevant files before changing clients, error handling or retries
+- Read `agent-os/standards/index.yml` and the relevant files before changing clients, error handling, retries, logging, config, state/archive, the CLI, tests or infra
 
 ## Gotchas
 - boto3 is a dev-only dependency (the Lambda runtime provides it). The only runtime dependency is httpx; don't add boto3 to `dependencies`.

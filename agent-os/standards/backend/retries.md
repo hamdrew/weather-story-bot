@@ -1,6 +1,6 @@
 # Retries
 
-Retry at most once inside a client. The next scheduled run (every 15 min) is the real retry, and Lambda async retries are 0.
+Retry at most once inside a client. The next scheduled run (every 15 min) is the real retry. Platform retries stay off: `aws_lambda_function_event_invoke_config.maximum_retry_attempts = 0` and the Scheduler target's `retry_policy.maximum_retry_attempts = 0`. They would only repeat failures sooner, like more sends while Telegram is rate-limiting. Any new trigger (SQS, EventBridge rule and so on) also sets retries to 0.
 
 Decide by side effects:
 
