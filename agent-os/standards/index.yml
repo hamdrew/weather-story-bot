@@ -1,13 +1,47 @@
 # Agent OS Standards Index
 
 backend:
+  archive-layout:
+    description: S3 path layout via archive_prefix(); raw NWS JSON verbatim; never move objects without a migration
+  cli:
+    description: Local CLI requires --dry-run, posts only with --send-telegram + test creds, never uses AWS; exit codes 0/1/2
   client-errors:
     description: One public error type per client; handler.run is the only catch-all boundary
+  dynamodb-schema:
+    description: MVP-only key design (image_id holds story#<key>, not sortable); typed prefixes; migration script pattern
+  env-config:
+    description: Settings.from_env(Mapping) with ConfigError; add a setting in config.py, lambda.tf, variables.tf and a test; office id regex in both places
   injected-clients:
     description: Service wrappers take httpx/boto3 clients and sleep from the caller
   retries:
-    description: At most one in-client retry, decided by side effects; next run is the real retry
+    description: At most one in-client retry, decided by side effects; next run is the real retry; platform retries off
+  run-outcomes:
+    description: Fixed summary counts; failed = next run may fix, refused upstream data gets its own count; cold-start token cache
   secrets-in-errors:
     description: Keep the Telegram token URL out of exceptions, tracebacks and logs
+  side-effect-order:
+    description: find, archive, send, record, delete old message; each failure leaves the old message or both, never zero
+  story-identity:
+    description: story_key (title + UTC start) vs content_fingerprint (image + description); no NWS-volatile fields
+  structured-logging:
+    description: Fixed message + extra fields, no f-strings; reserved LogRecord keys; log level by consequence
   untrusted-nws-data:
     description: Reject and alert on ambiguous NWS listings (shared image ID, title + start, or image); ignore expired stories
+
+infra:
+  alarms:
+    description: Alarm descriptions are runbooks; ok_actions, commented treat_missing_data, tunable thresholds as variables
+  data-retention:
+    description: Archive kept forever with matched 35-day undo windows; stop and ask before replacing table or bucket
+  iam:
+    description: Exact actions on narrowest ARNs via policy documents; SourceAccount guard on service trust policies
+
+testing:
+  handler-tests:
+    description: Handler tests run real clients over respx+moto; inject now/sleep; assert counts(); rerun after state changes
+  log-contracts:
+    description: Pin metric-filter/runbook log messages with tests; rename log, test and monitoring.tf together
+  offline-tests:
+    description: Tests never reach NWS/Telegram/AWS; fake failures at the wire, monkeypatch last, no MagicMock
+  test-data:
+    description: make_story camelCase overrides and mkx_payload; production NWS quirks become dated parametrized cases
