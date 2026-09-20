@@ -1,6 +1,6 @@
 # Year in Review: Ideas
 
-Date: 2026-09-16. Status: ideas for a future spec (`agent-os:shape-spec`). Nothing here is decided or built unless it's marked **Decided**. Related: `2026-09-16-standards-review.md` (ledger, DynamoDB keys, analytics layout).
+Date: 2026-09-16. Status: **triaged 2026-09-20 into the roadmap** — the data capture this depends on is phase **1.2**, and the review itself is phase **3**. Still ideas for a future spec (`agent-os:shape-spec`); nothing here is decided or built unless it's marked **Decided**. Related: `2026-09-16-standards-review.md` (ledger, DynamoDB keys, analytics layout).
 
 ## Intent
 
