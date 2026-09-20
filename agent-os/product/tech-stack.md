@@ -15,7 +15,7 @@ N/A. Telegram is the interface: stories are posted to a Telegram channel through
 
 ## Other
 
-- **AWS S3:** Archive of Weather Stories (for the Phase 2 story archive)
+- **AWS S3:** Archive of Weather Stories (and the source for the Phase 3 Year in Review)
 - **Telegram Bot API:** Delivers the notifications and shows the stories
 - **NWS Weather Stories:** Where the stories come from (MKX office for the MVP)
 - **AWS CloudWatch Alarms:** Watch the Lambda for errors and missed scheduled runs. A log metric filter counts posted stories, which catches the bot going quiet or reposting in a loop

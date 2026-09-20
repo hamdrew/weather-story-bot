@@ -2,7 +2,7 @@
 
 Date: 2026-09-16. Scope: everything under `agent-os/standards/` as of branch `docs/agent-os-standards`, read against `src/` and `infra/`. These are notes only. No standard or code was changed.
 
-**Status: ideas only.** This came from an informal discussion between Phase 1 and Phase 2. Nothing here changes standards or code until a future spec (likely the Phase 2 multi-office work) picks it up.
+**Status: triaged 2026-09-20 into the roadmap.** This came from an informal discussion between Phase 1 and Phase 2. Nothing here changes standards or code until the spec that owns it is shaped. The ideas landed in roadmap phases **1.2** (plan/apply split, CLI rewrite, hash pin, concurrency guard, ledger and last-seen, `global/principles.md`), **2.0** (environments, `infra/budget`), **2.2** (offices out of env, per-office time zone and lease, DynamoDB keys, `misconfigured`, alarm scaling, test data) and **4** (the daily health digest in place of per-office quiet alarms). This file stays as the detail behind those entries.
 
 **Decided (user's original design intent): one Lambda invocation per office.** A single invocation never handles more than one office.
 
@@ -218,6 +218,9 @@ at (UTC), fingerprint, telegram_message_id?, archive_prefix?, reasons?, schema_v
 
 ## Suggested order
 
+**Superseded 2026-09-20 by `agent-os/product/roadmap.md`,** which interleaves this with the CI/CD and
+environments work and moves recording earlier. Kept for the reasoning.
+
 1. **Now, small:** CLI rewrite (no side effects, mirrors decisions); a reserved-concurrency or lease guard against duplicate invocations; pin the hash encoding with a test.
 2. **Before a second office:** `plan_office()` split; per-office timezone; the "adding an office" checklist; per-office schedules with staggered times; the `misconfigured` outcome decision.
 3. **Before about 50 offices:** config out of `OFFICES_JSON` (hard 4 KB wall); alarm thresholds scaled with N; digest in place of per-office quiet alarms.
@@ -225,7 +228,7 @@ at (UTC), fingerprint, telegram_message_id?, archive_prefix?, reasons?, schema_v
 
 ## Open questions for you
 
-- ~~Do "stories pulled before `endTime`" and "last seen" matter enough to pay for observation writes?~~ **Yes** (2026-09-16): record last seen. Analytics goals and the data they need live in `2026-09-16-year-in-review-ideas.md`, including a per-office daily run record that replaces any log aggregation.
+- ~~Do "stories pulled before `endTime`" and "last seen" matter enough to pay for observation writes?~~ **Yes** (2026-09-16): record last seen. Scheduled in roadmap phase 1.2. Analytics goals and the data they need live in `2026-09-16-year-in-review-ideas.md`, including a per-office daily run record that replaces any log aggregation.
 - Should rejections reach the channel's analytics at all, or only the ops side?
 - Is a staging stack acceptable cost-wise (it's small: a Lambda, a table, a bucket, a schedule that's off by default)?
 - For channel promotion to a wider audience: one bot for all channels, or a bot per region (limits the blast radius of a token leak, but more secrets to rotate)?
