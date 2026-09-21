@@ -94,6 +94,23 @@ archive (S3) + ledger + daily run records (DynamoDB) + external weather data
 - Inferred facts are marked as inferred in the PDF ("our AI reader thought...")
 - Check Bedrock model access in `us-east-2` and prices before speccing (look them up, don't rely on memory)
 
+### Model access in us-east-2, checked 2026-09-20
+
+`aws bedrock list-foundation-models --by-provider anthropic`, all **ACTIVE**:
+
+| Model id | Use | Modalities |
+|---|---|---|
+| `anthropic.claude-haiku-4-5-20251001-v1:0` | labels | TEXT + **IMAGE** in, TEXT out |
+| `anthropic.claude-sonnet-5` | narrative | TEXT + IMAGE in, TEXT out |
+| `anthropic.claude-opus-5` | narrative (stronger) | TEXT + IMAGE in, TEXT out |
+
+- Haiku 4.5 accepts image input, which the labeling tier needs — confirmed, not assumed.
+- `us.` and `global.` inference profiles exist for both Haiku 4.5 and Sonnet 5. Invoke the
+  profile, not the bare model id.
+- Sonnet 4 and Opus 4.1 are **LEGACY** in this region. Don't build on them.
+- **Prices still unverified.** The Price List API (`aws pricing`) only exposes up to Claude 3
+  Haiku/Sonnet for Bedrock, so it can't answer this. Use the Bedrock pricing page at spec time.
+
 ## The PDF infographic
 
 - **Look:** inspired by the Weather Story graphic style (bold headline banner, big numbers, simple icons, map-like office context)

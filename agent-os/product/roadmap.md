@@ -235,13 +235,48 @@ which the S3 archive plus a derived dataset already cover.
   graphics but clearly labeled as unofficial and fan-made, with no NWS or NOAA logos or seal. MKX
   first, designed for N offices.
 - **A derived, rebuildable dataset** built by a script from the archive, the ledger and the daily
-  records, under its own prefix the posting Lambda can't reach. Queried locally — no always-on
-  analytics infrastructure.
+  records, under its own prefix the posting Lambda can't reach.
+  - **"No always-on analytics infrastructure" is about query *engines*** — no Athena, no Glue
+    crawlers, no OpenSearch sitting there costing money. DuckDB reads Parquet and NDJSON straight
+    off S3 and replaces Athena entirely at this size, where Athena's 10 MB per-query minimum and a
+    catalog would be setup cost for nothing. It does **not** mean the build step has to run on a
+    laptop — see the next item.
+  - **Always rebuild from scratch, never incrementally.** At megabytes a year a full rebuild takes
+    seconds and deletes a whole class of bugs: no watermark, no "last exported" state, no partial
+    recovery.
+- **A scheduled export in the cloud, not a local run.** Analytics work should not depend on a
+  laptop, for the same reason Phase 2.1 takes `make deploy` off one. Run it monthly, also
+  invocable by hand.
+  - **The real value is the feedback loop, not the dataset.** Running it while the season is live
+    is how you find out you're capturing the wrong fields *while you can still change them*.
+    Discover a gap in January 2027 and that data is gone — NWS lists only active stories. It also
+    acts as a canary: an export that sees no new ledger events means the writes broke.
+  - **Split the dump from the transform.** The scheduled job only dumps DynamoDB to S3, so it
+    needs nothing but `boto3` and can share the bot's zip, like Phase 2.3's digest Lambda.
+    Parquet conversion and querying happen downstream, where a heavy dependency is free.
+    **DuckDB cannot go in the bot's zip:** it ships `manylinux_2_26/2_28` aarch64 wheels and
+    `make build` targets `manylinux2014`, so adding it would fail the build.
+  - **Lands after Phase 2.1.** Adding a second Lambda before pipeline deploys just means another
+    thing deployed by hand — the same problem in a different coat. It needs its own failure alarm,
+    since the bot's error alarm wants two consecutive 15-minute failures.
 - **Inference runs after the fact, never in the posting Lambda.** A small model labels archived
   stories; a stronger one writes the narrative from the computed facts as its only input. A
   deterministic check fails the build if any number, date, office or title in the generated text
   isn't in the facts. Invented facts in something shared with an NWS office aren't acceptable.
   Inferred facts are labeled as inferred.
+  - **Run it in the cloud, deliberately.** Beyond the Year in Review, this is the part of the
+    project meant to teach managing AI models in the cloud, which is coming up at work. That
+    justifies picking the *more instructive option among appropriate ones* — **Bedrock batch
+    inference** over a loop of on-demand calls (roughly half the price, and the actual skill: S3
+    manifests, job state, service roles), **model evaluation jobs** to choose the labeling model,
+    and **Guardrails** on the narrative, which earns its place anyway since the PDF may reach an
+    NWS office. It does **not** justify fine-tuning, SageMaker, Knowledge Bases, Agents or
+    provisioned throughput — nothing in this data needs them, and they belong in a scratch project
+    rather than grafted onto the weather bot.
+  - `infra/budget`'s rule still holds: inference is batch and capped, each run prints a cost
+    estimate and needs confirmation above a threshold, and labels are cached so nothing is paid
+    for twice. Expect roughly 18M input tokens for a full year at four offices and ~1.3M for
+    Season One — a one-time, cacheable job, not a recurring line item.
 - **2026 is "Season One: September to December."** The bot went live on 2026-09-13 and NWS only
   lists *active* stories — there's no history to backfill. A full-year edition is 2027, which is
   exactly why Phase 1.2 starts recording now.
