@@ -11,8 +11,13 @@ Build stories from NWS-shaped data so tests use the same parsing path as product
 When NWS does something unexpected, add a case to the closest parametrized test and date the comment:
 
 ```python
-# NWS re-issued "High Swim Risk" on 2026-09-15 under a new UUID, updateTime at the epoch.
-{"download": REISSUED_DOWNLOAD, "updateTime": EPOCH, "altText": ""},
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        # NWS re-issued "High Swim Risk" on 2026-09-15 under a new UUID, updateTime at the epoch.
+        {"download": REISSUED_DOWNLOAD, "updateTime": EPOCH, "altText": ""},
+    ],
+)
 ```
 
 - Capture a new file in `tests/fixtures/` only when overrides can't express the quirk
