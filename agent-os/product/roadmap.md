@@ -23,7 +23,10 @@ Fixes from the first days of running the MVP (spec `2026-09-15-1149-story-update
 
 ## Phase 1.2: Decide, Act, and Record
 
-Next up. The refactor that makes the dry run honest, plus the writes that start saving history.
+In progress (spec `2026-09-20-1428-decide-act-and-record`). The refactor that makes the dry run
+honest, plus the writes that start saving history. **Shaping moved the DynamoDB key redesign here
+from Phase 2.2**, since the table holds just 42 items today (measured 2026-09-20) and this phase
+starts writing append-only items that never expire.
 Sources: `agent-os/notes/2026-09-16-standards-review.md` ("Suggested order" #1, "Analytics") and
 `agent-os/notes/2026-09-16-year-in-review-ideas.md` ("Data needed vs captured").
 
@@ -53,14 +56,27 @@ Sources: `agent-os/notes/2026-09-16-standards-review.md` ("Suggested order" #1, 
   committing to it.** Both the scheduler target and the function's async config set
   `maximum_retry_attempts = 0`, so a throttled invocation may simply be dropped rather than
   retried — and a dropped run is invisible to the `missed-runs` alarm, which counts invocations
-  over an hour and wouldn't notice one missing out of four. If throttles aren't retried, then
-  either the next 15-minute run is the recovery and this should say so plainly, or the per-office
-  lease from Phase 2.2 moves up to here. Settle it with evidence while shaping, not from memory.
+  over an hour and wouldn't notice one missing out of four.
+  **Settled while shaping, 2026-09-20: skip reserved concurrency, build the lease here instead.**
+  Reserved concurrency cannot express the requirement: `= 1` gives *global* exclusion, so once
+  per-office invocations arrive one office blocks another, and `= N` allows N concurrent runs with
+  no guarantee they are N *different* offices. There is no value meaning "one run per office", so
+  shipping it now means deleting it plus its standard in Phase 2.2. **The per-office lease moves up
+  from Phase 2.2 into this phase.** Meanwhile nothing is exposed: the 300s timeout is shorter than
+  the 900s cadence, so only Scheduler's rare duplicate delivery can double-post.
+  The throttling evidence still holds and is recorded for future designs. Scheduler
+  invokes Lambda *asynchronously*, so once Lambda returns 202 the schedule's retry policy stops
+  governing. In Lambda's async queue `maximum_retry_attempts` covers *function errors only*;
+  throttles (429) and system errors go back on the queue and retry with exponential backoff for
+  up to 6 hours. A throttled run is delayed, not dropped, `missed-runs` stays honest, and the
+  `missed-runs` stays honest. The account would have allowed it (1000 concurrent, 1000 unreserved);
+  we declined it rather than being blocked. **Reserved concurrency of 0 is an off switch**, not "no
+  limit", and disables async retries entirely.
 - **Record what happened, as data:** The bot keeps the current record per story (overwritten on
   every revision), the raw archive (which never says *when* something was posted), and logs (gone
   after 30 days). So "which story was revised the most", "which were pulled early", "how often did
   NWS send garbage" and "when was the bot blind" are all unanswerable. Three small append-only
-  writes fix that, into the existing table with no migration:
+  writes fix that, onto the new table:
   - **A ledger event per action** — posted, updated, rejected, deleted, delete-failed — with the
     office, story, time, fingerprint, message id and reasons.
   - **Last seen,** updated only when it's at least an hour stale, so a story pulled before its end
@@ -72,16 +88,28 @@ Sources: `agent-os/notes/2026-09-16-standards-review.md` ("Suggested order" #1, 
   These are best effort. A failed write logs a warning and never blocks a post — they are
   deliberately not part of the safety chain.
 
-  **Why no migration now, knowing there will be two.** Today's keys aren't sortable, so these
-  events pile into one partition per office that can't be queried by time, and Phase 2.2 has to
-  rewrite them. That's the deliberate trade: a second migration is the price of capturing history
-  roughly two months sooner, and history not written down when it happens can't be recovered later
-  at any price.
+  **This originally planned to write events under today's keys and let Phase 2.2 rewrite them,**
+  accepting a second migration as the price of capturing history roughly two months sooner —
+  because history not written down when it happens can't be recovered later at any price. Shaping
+  reversed that: the migration is cheaper now than it will ever be again, so it happens here. See
+  the next item.
+- **Redesign the DynamoDB keys now, once** (moved here from Phase 2.2 during shaping). A new
+  table with generic `PK`/`SK` names, sortable sort-key values (`STORY#`, `EVENT#`, `DAY#`) and a
+  `schema_version` on every item. Two things settled it: the table holds 42 items today and never
+  will again — it is growing by about 6 a day — so this migration's cost only rises; and the sort key's *values* are ours to
+  choose even though its attribute is misleadingly named `image_id`, so sortable keys cost nothing
+  extra now. Event items also carry `GSI1PK`/`GSI1SK` from the very first write, because an index
+  added later backfills only items that already have its key attributes — without that, Phase 2.2
+  would need a migration after all.
+  - **No TTL. Records stay permanent.** There is none today, and the Phase 2.2 sketch's TTL
+    proposal is declined for now. Revisit once the S3 archive is the record of last resort.
+  - The old table isn't touched. It's the rollback, and `infra/data-retention` forbids replacing
+    a table that has deletion protection on.
 - **Office and request id on every log line,** set once rather than passed by each caller. Every
   later per-office query and the warning digest depend on it.
 - **Standards:** rewrites `backend/cli`; amends `backend/story-identity`,
   `backend/structured-logging`, `backend/side-effect-order`, `backend/injected-clients`,
-  `testing/handler-tests` and `testing/offline-tests`. Adds a `global/principles.md`: local tools
+  `backend/dynamodb-schema`, `testing/handler-tests` and `testing/offline-tests`. Adds a `global/principles.md`: local tools
   are read-only, decide purely then act, sources of truth vs derived data, and the office is the
   unit of isolation.
 
@@ -157,11 +185,13 @@ Sources: standards review, sections on `env-config`, `dynamodb-schema`, `side-ef
   its office as the event payload. Stagger the schedules so the offices don't all hit NWS at once.
 - **A time zone per office.** Captions and every "year" fact need the office's local calendar; a
   story starting at 7 PM on December 31 lands on January 1 in UTC.
-- **Redesign the DynamoDB keys, once,** migrating current records and the Phase 1.2 events together.
-  Today's keys aren't sortable and the sort key's name is misleading. Design them from the actual
-  access patterns, put a schema version on every item, expire current records and leases but never
-  events, and add an index for "all offices on this day or year".
-- **A lease per office** replaces the single-run limit, and recording a post becomes one atomic
+- **DynamoDB work here is additive — Phase 1.2 already did the key redesign and the migration.**
+  What's left: create the `GSI1` index for "all offices on this day or year" (Phase 1.2 already
+  writes its key attributes, so it backfills on creation). The lease item also already exists. Revisit expiring
+  current records and leases then, if the archive has become the record of last resort. Events
+  never expire either way.
+- **The per-office lease already exists** (moved into Phase 1.2). What remains here is that
+  recording a post becomes one atomic
   write so state and history can't drift apart. This deliberately reverses Phase 1.2's best-effort
   ledger: an atomic write puts the ledger back into the safety chain, so a ledger failure now fails
   the record after Telegram has already accepted the message. That's survivable under "a repost is
