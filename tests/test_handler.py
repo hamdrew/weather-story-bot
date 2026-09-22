@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -31,6 +32,8 @@ REISSUED_DOWNLOAD = "https://api.weather.gov/offices/MKX/weatherstories/download
 EPOCH = "1970-01-01T00:00:00+00:00"
 # Both fixture stories are active: they end at 19:24 and 19:34 on 2026-09-13.
 NOW = datetime(2026, 9, 13, 0, 0, tzinfo=UTC)
+# A real Lambda context always has aws_request_id; lambda_handler reads it for every log line.
+LAMBDA_CONTEXT = SimpleNamespace(aws_request_id="test-request-id")
 
 
 @pytest.fixture
@@ -456,11 +459,26 @@ def test_failing_office_does_not_block_others(services: handler.Services, api: A
     assert summary["MKX"]["posted"] == 2
 
 
+def test_log_lines_carry_their_own_office_and_never_a_stale_one(
+    services: handler.Services, api: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    api.get(GRB_URL).respond(404)
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    run(services, GRB, MKX)
+
+    [failed] = [r for r in caplog.records if r.getMessage() == "Failed to list stories"]
+    assert vars(failed)["office"] == "GRB"
+    posted = [r for r in caplog.records if r.getMessage() == "Story posted"]
+    assert {vars(r)["office"] for r in posted} == {"MKX"}
+
+
 def test_lambda_handler_end_to_end(
     services: handler.Services,
     api: Any,
     mkx_payload: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     boto3.client("ssm").put_parameter(
         Name="/weather-story-bot/telegram-token", Value=TOKEN, Type="SecureString"
@@ -478,19 +496,60 @@ def test_lambda_handler_end_to_end(
     for story in mkx_payload["stories"]:
         story["endTime"] = "2999-01-01T00:00:00+00:00"
     api.get(MKX_URL).respond(json=mkx_payload)
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
 
-    assert handler.lambda_handler({}, None)["MKX"]["posted"] == 2
-    assert handler.lambda_handler({}, None)["MKX"]["skipped"] == 2
+    assert handler.lambda_handler({}, LAMBDA_CONTEXT)["MKX"]["posted"] == 2
+    assert handler.lambda_handler({}, LAMBDA_CONTEXT)["MKX"]["skipped"] == 2
+
+    # aws_request_id comes from the Lambda context, not a caller-supplied extra.
+    complete = [r for r in caplog.records if r.getMessage() == "Run complete"]
+    assert all(vars(r)["aws_request_id"] == "test-request-id" for r in complete)
+    # Run complete spans every office, so it carries no single office's id.
+    assert all("office" not in vars(r) for r in complete)
 
     # Ambiguous NWS data alarms through its own metric filter, not a failed invocation.
     mkx_payload["stories"].append(sibling(mkx_payload, download=REISSUED_DOWNLOAD))
     api.get(MKX_URL).respond(json=mkx_payload)
     api.get(REISSUED_DOWNLOAD).respond(content=b"PNG-sibling")
-    assert handler.lambda_handler({}, None)["MKX"]["rejected"] == 2
+    assert handler.lambda_handler({}, LAMBDA_CONTEXT)["MKX"]["rejected"] == 2
+
+
+def test_aws_request_id_does_not_leak_into_a_later_bare_run(
+    services: handler.Services,
+    api: Any,
+    mkx_payload: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A ContextVar reset, not a leftover attribute: it must not survive past its invocation."""
+    boto3.client("ssm").put_parameter(
+        Name="/weather-story-bot/telegram-token", Value=TOKEN, Type="SecureString"
+    )
+    monkeypatch.setattr(handler, "_services", None)
+    for name, value in {
+        "OFFICES_JSON": json.dumps({"MKX": {"chat_id": MKX.chat_id, "name": MKX.name}}),
+        "STATE_TABLE": TABLE_NAME,
+        "ARCHIVE_BUCKET": BUCKET_NAME,
+        "TELEGRAM_TOKEN_PARAM": "/weather-story-bot/telegram-token",
+        "NWS_USER_AGENT": "tests",
+    }.items():
+        monkeypatch.setenv(name, value)
+    for story in mkx_payload["stories"]:
+        story["endTime"] = "2999-01-01T00:00:00+00:00"
+    api.get(MKX_URL).respond(json=mkx_payload)
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    handler.lambda_handler({}, LAMBDA_CONTEXT)
+    caplog.clear()
+    revise(api, mkx_payload, b"PNG-revised")
+    run(services)
+
+    [posted] = [r for r in caplog.records if r.getMessage() == "Story posted"]
+    assert "aws_request_id" not in vars(posted)
 
     api.get(MKX_URL).respond(503)
     with pytest.raises(handler.ProcessingError):
-        handler.lambda_handler({}, None)
+        handler.lambda_handler({}, LAMBDA_CONTEXT)
 
 
 def test_json_formatter_includes_extra_fields() -> None:

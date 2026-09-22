@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -21,6 +24,54 @@ from weather_story_bot.telegram import TelegramClient, TelegramError, build_capt
 logger = logging.getLogger("weather_story_bot")
 
 _STANDARD_LOG_ATTRS = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
+
+
+_aws_request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "aws_request_id", default=None
+)
+_office: contextvars.ContextVar[str | None] = contextvars.ContextVar("office", default=None)
+
+
+class _RequestContextFilter(logging.Filter):
+    """Adds `office` and `aws_request_id` to every line this logger emits.
+
+    Set once per invocation (`aws_request_id`, via `_invocation_context`, from the Lambda
+    context) and once per office within it (`office`, via `_office_context`), instead of every
+    caller passing them through `extra`. `ContextVar.set`'s token makes each scope's cleanup
+    exact, even on an exception, rather than relying on a plain attribute someone remembers to
+    reset. Attached once, at import time, to the `weather_story_bot` logger itself, so it still
+    applies when tests call `run()` directly without `configure_logging`.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        aws_request_id = _aws_request_id.get()
+        if aws_request_id is not None:
+            record.aws_request_id = aws_request_id
+        office = _office.get()
+        if office is not None:
+            record.office = office
+        return True
+
+
+logger.addFilter(_RequestContextFilter())
+
+
+@contextmanager
+def _invocation_context(aws_request_id: str) -> Generator[None]:
+    token = _aws_request_id.set(aws_request_id)
+    try:
+        yield
+    finally:
+        _aws_request_id.reset(token)
+
+
+@contextmanager
+def _office_context(office_id: str) -> Generator[None]:
+    token = _office.set(office_id)
+    try:
+        yield
+    finally:
+        _office.reset(token)
 
 
 class JsonFormatter(logging.Formatter):
@@ -70,35 +121,33 @@ def run(
     for office in offices:
         counts = {"posted": 0, "updated": 0, "skipped": 0, "rejected": 0, "failed": 0}
         summary[office.office_id] = counts
-        try:
-            stories = services.nws.list_stories(office.office_id)
-        except Exception:
-            logger.exception("Failed to list stories", extra={"office": office.office_id})
-            counts["failed"] += 1
-            continue
-
-        active, expired = select_active(stories, now)
-        counts["skipped"] += len(expired)
-
-        downloaded: list[tuple[Story, bytes]] = []
-        for story in active:
+        with _office_context(office.office_id):
             try:
-                downloaded.append((story, services.nws.download_image(story)))
+                stories = services.nws.list_stories(office.office_id)
             except Exception:
-                logger.exception(
-                    "Failed to download story image",
-                    extra={"office": office.office_id, "title": story.title},
-                )
+                logger.exception("Failed to list stories")
                 counts["failed"] += 1
+                continue
 
-        records: dict[str, PostedRecord] = {}
-        for story, _ in downloaded:
-            key = story_key(story)
-            record = services.store.find_story(office.office_id, key)
-            if record is not None:
-                records[key] = record
-        decisions = decide(office.office_id, downloaded, records, now)
-        _apply_decisions(office, decisions, services, counts)
+            active, expired = select_active(stories, now)
+            counts["skipped"] += len(expired)
+
+            downloaded: list[tuple[Story, bytes]] = []
+            for story in active:
+                try:
+                    downloaded.append((story, services.nws.download_image(story)))
+                except Exception:
+                    logger.exception("Failed to download story image", extra={"title": story.title})
+                    counts["failed"] += 1
+
+            records: dict[str, PostedRecord] = {}
+            for story, _ in downloaded:
+                key = story_key(story)
+                record = services.store.find_story(office.office_id, key)
+                if record is not None:
+                    records[key] = record
+            decisions = decide(office.office_id, downloaded, records, now)
+            _apply_decisions(office, decisions, services, counts)
     return summary
 
 
@@ -112,7 +161,6 @@ def _apply_decisions(
         logger.error(
             "Ambiguous stories from NWS",
             extra={
-                "office": office.office_id,
                 "stories": [
                     {
                         "image_id": decision.story.image_id,
@@ -134,10 +182,7 @@ def _apply_decisions(
         try:
             _apply_post_or_update(office, decision, services)
         except Exception:
-            logger.exception(
-                "Failed to process story",
-                extra={"office": office.office_id, "title": decision.story.title},
-            )
+            logger.exception("Failed to process story", extra={"title": decision.story.title})
             counts["failed"] += 1
             continue
         counts["posted" if decision.outcome is Outcome.POST else "updated"] += 1
@@ -164,7 +209,6 @@ def _apply_post_or_update(office: OfficeConfig, decision: Decision, services: Se
     logger.info(
         "Story posted",
         extra={
-            "office": office.office_id,
             "image_id": story.image_id,
             "status": "new" if decision.outcome is Outcome.POST else "updated",
             "telegram_message_id": message_id,
@@ -185,7 +229,6 @@ def _delete_replaced_message(
         logger.warning(
             "Telegram delete failed, old message kept",
             extra={
-                "office": office.office_id,
                 "image_id": story.image_id,
                 "telegram_message_id": replaced.telegram_message_id,
                 "error": str(exc),
@@ -229,12 +272,13 @@ def _build_services(settings: Settings) -> Services:
 def lambda_handler(event: Any, context: Any) -> dict[str, dict[str, int]]:
     global _services
     configure_logging()
-    settings = Settings.from_env()
-    if _services is None:
-        _services = _build_services(settings)
+    with _invocation_context(context.aws_request_id):
+        settings = Settings.from_env()
+        if _services is None:
+            _services = _build_services(settings)
 
-    summary = run(settings.offices, _services)
-    logger.info("Run complete", extra={"summary": summary})
-    if any(counts["failed"] for counts in summary.values()):
-        raise ProcessingError(f"Some stories failed: {json.dumps(summary)}")
-    return summary
+        summary = run(settings.offices, _services)
+        logger.info("Run complete", extra={"summary": summary})
+        if any(counts["failed"] for counts in summary.values()):
+            raise ProcessingError(f"Some stories failed: {json.dumps(summary)}")
+        return summary
