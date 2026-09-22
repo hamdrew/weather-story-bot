@@ -23,6 +23,24 @@ def test_image_sha256_is_hex_digest() -> None:
     assert image_sha256(b"PNG") == hashlib.sha256(b"PNG").hexdigest()
 
 
+def test_story_key_matches_pinned_digest() -> None:
+    # Pins the frozen encoding in _sha256_json. If this fails, the encoding changed and every
+    # stored story_key is now unreachable — do not "fix" the test, fix the encoding.
+    assert (
+        story_key(make_story())
+        == "b43e93b75361ecc66062f0811c248a01598644855ba8e3e4f62eed6a44d99ea3"
+    )
+
+
+def test_content_fingerprint_matches_pinned_digest() -> None:
+    # Pins the frozen encoding in _sha256_json. If this fails, the encoding changed and every
+    # stored content_fingerprint is now unreachable — do not "fix" the test, fix the encoding.
+    assert (
+        content_fingerprint(make_story(), b"PNG")
+        == "4a120108135cd16c0d6248e9c9f221b9e2fb42bc87f9d376269475c11043764a"
+    )
+
+
 @pytest.mark.parametrize(
     "overrides",
     [

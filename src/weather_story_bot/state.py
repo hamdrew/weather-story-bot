@@ -22,7 +22,13 @@ class Status(StrEnum):
 
 
 def _sha256_json(content: dict[str, str]) -> str:
-    return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
+    # Frozen. This encoding is baked into every stored story_key and content_fingerprint;
+    # changing it (even to json.dumps' own defaults) changes every digest, making stored
+    # records unreachable and reposting every active story. See backend/story-identity.md.
+    encoded = json.dumps(
+        content, sort_keys=True, separators=(", ", ": "), ensure_ascii=True
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def image_sha256(image: bytes) -> str:
