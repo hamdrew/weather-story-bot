@@ -1,5 +1,9 @@
 # Agent OS Standards Index
 
+global:
+  principles:
+    description: Local tools are read-only; decide purely then act; sources of truth vs derived data; the office is the unit of isolation
+
 backend:
   archive-layout:
     description: S3 path layout via archive_prefix(); raw NWS JSON verbatim; never move objects without a migration
