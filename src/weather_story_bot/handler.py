@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import Counter
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -16,14 +14,8 @@ from weather_story_bot.archive import StoryArchive
 from weather_story_bot.config import OfficeConfig, Settings
 from weather_story_bot.models import Story
 from weather_story_bot.nws import NwsClient
-from weather_story_bot.state import (
-    PostedRecord,
-    PostedStore,
-    Status,
-    content_fingerprint,
-    image_sha256,
-    story_key,
-)
+from weather_story_bot.planner import Decision, Outcome, decide, select_active
+from weather_story_bot.state import PostedRecord, PostedStore, content_fingerprint, story_key
 from weather_story_bot.telegram import TelegramClient, TelegramError, build_caption
 
 logger = logging.getLogger("weather_story_bot")
@@ -85,9 +77,8 @@ def run(
             counts["failed"] += 1
             continue
 
-        # Expired stories get no action at all: no download, no checks, no post or delete.
-        active = [story for story in stories if story.end_time > now]
-        counts["skipped"] += len(stories) - len(active)
+        active, expired = select_active(stories, now)
+        counts["skipped"] += len(expired)
 
         downloaded: list[tuple[Story, bytes]] = []
         for story in active:
@@ -100,71 +91,65 @@ def run(
                 )
                 counts["failed"] += 1
 
-        accepted = _reject_ambiguous(office, downloaded)
-        counts["rejected"] += len(downloaded) - len(accepted)
-
-        for story, image in accepted:
-            try:
-                status = _process_story(office, story, image, services)
-            except Exception:
-                logger.exception(
-                    "Failed to process story",
-                    extra={"office": office.office_id, "title": story.title},
-                )
-                counts["failed"] += 1
-                continue
-            counts[{Status.NEW: "posted", Status.UPDATED: "updated"}.get(status, "skipped")] += 1
+        records: dict[str, PostedRecord] = {}
+        for story, _ in downloaded:
+            key = story_key(story)
+            record = services.store.find_story(office.office_id, key)
+            if record is not None:
+                records[key] = record
+        decisions = decide(office.office_id, downloaded, records, now)
+        _apply_decisions(office, decisions, services, counts)
     return summary
 
 
-_AMBIGUITY_CHECKS: tuple[tuple[str, Callable[[Story, bytes], str]], ...] = (
-    ("duplicate_image_id", lambda story, _: story.image_id),
-    ("duplicate_title_and_start", lambda story, _: story_key(story)),
-    ("duplicate_image", lambda _, image: image_sha256(image)),
-)
-
-
-def _reject_ambiguous(
-    office: OfficeConfig, downloaded: list[tuple[Story, bytes]]
-) -> list[tuple[Story, bytes]]:
-    """Drop every story sharing an image ID, title and start time, or image with another.
-
-    NWS data is untrusted: when listed stories collide, there's no telling which is right.
-    The `nws-ambiguous` alarm's metric filter matches the exact ERROR message.
-    """
-    reasons: dict[int, list[str]] = {}
-    for reason, key in _AMBIGUITY_CHECKS:
-        values = [key(story, image) for story, image in downloaded]
-        occurrences = Counter(values)
-        for index, value in enumerate(values):
-            if occurrences[value] > 1:
-                reasons.setdefault(index, []).append(reason)
-    if reasons:
+def _apply_decisions(
+    office: OfficeConfig, decisions: list[Decision], services: Services, counts: dict[str, int]
+) -> None:
+    """Log rejections once per office, then act on every remaining decision in order."""
+    rejected = [d for d in decisions if d.outcome is Outcome.REJECTED]
+    if rejected:
+        # The `nws-ambiguous` alarm's metric filter matches this exact ERROR message.
         logger.error(
             "Ambiguous stories from NWS",
             extra={
                 "office": office.office_id,
                 "stories": [
                     {
-                        "image_id": downloaded[index][0].image_id,
-                        "title": downloaded[index][0].title,
-                        "reasons": story_reasons,
+                        "image_id": decision.story.image_id,
+                        "title": decision.story.title,
+                        "reasons": list(decision.reasons),
                     }
-                    for index, story_reasons in reasons.items()
+                    for decision in rejected
                 ],
             },
         )
-    return [item for index, item in enumerate(downloaded) if index not in reasons]
+    counts["rejected"] += len(rejected)
+
+    for decision in decisions:
+        if decision.outcome is Outcome.REJECTED:
+            continue
+        if decision.outcome is Outcome.UNCHANGED:
+            counts["skipped"] += 1
+            continue
+        try:
+            _apply_post_or_update(office, decision, services)
+        except Exception:
+            logger.exception(
+                "Failed to process story",
+                extra={"office": office.office_id, "title": decision.story.title},
+            )
+            counts["failed"] += 1
+            continue
+        counts["posted" if decision.outcome is Outcome.POST else "updated"] += 1
 
 
-def _process_story(office: OfficeConfig, story: Story, image: bytes, services: Services) -> Status:
-    """Post a new story, repost a changed one and delete its old message, or skip it."""
+def _apply_post_or_update(office: OfficeConfig, decision: Decision, services: Services) -> None:
+    """Post a new story or repost a changed one, then delete the message it replaces."""
+    story, image = decision.story, decision.image
+    if image is None:
+        raise AssertionError("unreachable")  # post/update decisions always carry their image
+
     fingerprint = content_fingerprint(story, image)
-    current = services.store.find_story(office.office_id, story_key(story))
-    if current is not None and current.fingerprint == fingerprint:
-        return Status.UNCHANGED
-
-    status = Status.NEW if current is None else Status.UPDATED
     prefix = services.archive.save(story, image, fingerprint)
     message_id = post_story(
         services.telegram,
@@ -172,7 +157,7 @@ def _process_story(office: OfficeConfig, story: Story, image: bytes, services: S
         office.office_id,
         story,
         image,
-        updated=status is Status.UPDATED,
+        updated=decision.outcome is Outcome.UPDATE,
     )
     # Recorded only after Telegram accepts it: a failure here may cause a repost, never a miss.
     services.store.record_posted(story, message_id, prefix, fingerprint)
@@ -181,14 +166,13 @@ def _process_story(office: OfficeConfig, story: Story, image: bytes, services: S
         extra={
             "office": office.office_id,
             "image_id": story.image_id,
-            "status": str(status),
+            "status": "new" if decision.outcome is Outcome.POST else "updated",
             "telegram_message_id": message_id,
             "archive_prefix": prefix,
         },
     )
-    if current is not None:
-        _delete_replaced_message(services.telegram, office, story, current)
-    return status
+    if decision.record is not None:
+        _delete_replaced_message(services.telegram, office, story, decision.record)
 
 
 def _delete_replaced_message(
