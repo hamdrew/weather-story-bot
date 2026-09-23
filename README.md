@@ -63,7 +63,7 @@ make coverage # tests with a coverage report (terminal + htmlcov/index.html)
 make lint     # ruff + terraform fmt
 make format   # apply ruff/terraform formatting
 
-# Print the captions that would be posted for live stories (no AWS, no Telegram):
+# Print each live story's decision beside its caption (read-only: no AWS, no Telegram):
 NWS_USER_AGENT="weather-story-bot (you@example.com)" \
   uv run python -m weather_story_bot --dry-run --office MKX
 ```
@@ -77,18 +77,6 @@ uv run python -m weather_story_bot --dry-run --office MKX
 ```
 
 Variables already set in your shell take precedence over `.env`.
-
-To see how the posts actually render, add `--send-telegram`. It downloads each story image and
-posts it to a test channel through the same `post_story` code the Lambda uses. It doesn't touch
-DynamoDB or S3, so it posts every active story on each run. Set these in `.env` or your shell,
-and add the bot to the channel as an admin that can post:
-
-```sh
-TELEGRAM_BOT_TOKEN="123456:ABC-your-bot-token"
-TELEGRAM_CHAT_ID="-1001234567890"   # or "@your_test_channel"
-
-uv run python -m weather_story_bot --dry-run --office MKX --send-telegram
-```
 
 ## Deploy
 

@@ -8,7 +8,7 @@ backend:
   archive-layout:
     description: S3 path layout via archive_prefix(); raw NWS JSON verbatim; never move objects without a migration
   cli:
-    description: Local CLI requires --dry-run, posts only with --send-telegram + test creds, never uses AWS; exit codes 0/1/2
+    description: Local CLI requires --dry-run, is read-only (no Telegram, no AWS), previews planner decisions; exit codes 0/1/2
   client-errors:
     description: One public error type per client; handler.run is the only catch-all boundary
   dynamodb-schema:
