@@ -94,8 +94,8 @@ uv run python -m weather_story_bot --dry-run --office MKX --send-telegram
 
 ```sh
 make build    # vendors deps for python3.13/arm64 into build/lambda.zip
-make plan     # optional: review changes
-make deploy   # terraform apply
+make plan     # review changes; saves them to infra/deploy.tfplan
+make deploy   # applies exactly that saved plan, then deletes it
 ```
 
 Smoke test:
@@ -149,7 +149,7 @@ Each alarm email includes the same hints and a link to the log group.
 
 ### Tuning thresholds
 
-The starting values are guesses until there's real posting data. Override them in `infra/terraform.tfvars` and run `make deploy`:
+The starting values are guesses until there's real posting data. Override them in `infra/terraform.tfvars` and run `make plan && make deploy`:
 
 ```hcl
 monthly_budget_usd     = 5  # USD per month, whole account
@@ -251,4 +251,4 @@ aws s3api list-object-versions --bucket "$BUCKET" --prefix stories/MKX/2026/09/1
      GRB = { chat_id = "-100…", name = "Green Bay" }
    }
    ```
-3. Run `make deploy`. On its first run, the Lambda posts all of the new office's active stories.
+3. Run `make plan`, review it, then `make deploy`. On its first run, the Lambda posts all of the new office's active stories.

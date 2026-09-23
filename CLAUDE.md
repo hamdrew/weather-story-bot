@@ -7,7 +7,7 @@ Python 3.13 Lambda (arm64) that posts NWS Weather Stories to Telegram. Infra is 
 - `make coverage` - opt-in coverage; keep `--cov` out of pytest addopts (it breaks debugger breakpoints)
 - `make lint` / `make format` - ruff check + ruff format + `terraform fmt`; `lint` also runs `ty check` (fix type errors rather than adding `# ty: ignore`)
 - `make build` - vendors deps for aarch64-manylinux2014 / py3.13 (binary wheels only) into `build/lambda.zip`
-- `make plan` / `make deploy` - terraform plan/apply in `infra/`; ask before running `deploy`
+- `make plan` / `make deploy` - `plan` saves `infra/deploy.tfplan`; `deploy` applies exactly that file (no prompt) and deletes it, failing if there's none; ask before running `deploy`
 - `uv run weather-story-bot --dry-run [--office MKX]` - live NWS fetch, prints each story's decision (`new-or-updated (state not read)` / `expired` / `rejected`) beside its caption; `--dry-run` is required, read-only, never posts
 
 ## Standards
