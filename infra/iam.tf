@@ -69,10 +69,13 @@ resource "aws_iam_role" "scheduler" {
   assume_role_policy = data.aws_iam_policy_document.scheduler_assume.json
 }
 
+# Built from local.name rather than aws_lambda_function.bot.arn: a reference to the function
+# defers this data source to apply time on every code deploy, making the plan show the policy
+# as "known after apply" even though it never changes.
 data "aws_iam_policy_document" "scheduler" {
   statement {
     actions   = ["lambda:InvokeFunction"]
-    resources = [aws_lambda_function.bot.arn]
+    resources = ["arn:aws:lambda:${var.region}:${data.aws_caller_identity.current.account_id}:function:${local.name}"]
   }
 }
 
