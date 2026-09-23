@@ -12,5 +12,5 @@ except httpx.TransportError as exc:
 - Report the method name and exception type, never `str(exc)`, `repr(exc)` or the URL
 - Keep `httpx` and `httpcore` loggers at WARNING (they log full URLs at INFO)
 - Tests assert `TOKEN not in str(err)` and `err.__cause__ is None`
-- In Lambda the token comes only from SSM at runtime, never from env vars or Terraform (the local CLI reads `TELEGRAM_BOT_TOKEN` from env/`.env`)
+- The token comes only from SSM at runtime, never from env vars or Terraform. The local CLI never reads it (`backend/cli`)
 - Chat IDs and NWS URLs aren't secret; logging them is fine

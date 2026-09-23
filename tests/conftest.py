@@ -22,12 +22,14 @@ BUCKET_NAME = "weather-story-bot-archive-test"
 
 @pytest.fixture(autouse=True)
 def aws_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fake credentials so boto3 can never reach a real AWS account."""
+    """Fake AWS credentials, and no Telegram creds, so a dev's real ones can never be used."""
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
     monkeypatch.setenv("AWS_SESSION_TOKEN", "testing")
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-2")
     monkeypatch.delenv("AWS_PROFILE", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
 
 
 @pytest.fixture

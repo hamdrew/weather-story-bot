@@ -11,20 +11,7 @@
             "module": "weather_story_bot",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            // A string (not an array) so an empty pick adds no argument instead of "".
-            "args": "--dry-run ${input:sendTelegram}"
-        }
-    ],
-    "inputs": [
-        {
-            "id": "sendTelegram",
-            "type": "pickString",
-            "description": "Also post the stories to $TELEGRAM_CHAT_ID (set in .env)?",
-            "options": [
-                { "label": "No — print captions only", "value": "" },
-                { "label": "Yes — send to Telegram (--send-telegram)", "value": "--send-telegram" }
-            ],
-            "default": ""
+            "args": ["--dry-run"]
         }
     ]
 }

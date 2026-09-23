@@ -5,7 +5,7 @@ Log a fixed message and put the data in `extra`. `JsonFormatter` turns each `ext
 ```python
 logger.warning(
     "Telegram delete failed, old message kept",
-    extra={"office": office.office_id, "telegram_message_id": replaced.telegram_message_id},
+    extra={"telegram_message_id": replaced.telegram_message_id},
 )
 ```
 
@@ -15,6 +15,18 @@ logger.warning(
 - Put errors in as `str(exc)` or `repr(exc)`, never a URL containing the token (`backend/secrets-in-errors`)
 - Loggers: `logging.getLogger(__name__)` in modules. `handler` uses `"weather_story_bot"`, the parent, and tests capture that logger
 - `configure_logging` keeps `httpx` and `httpcore` at WARNING because they log request URLs
+
+## `office` and `aws_request_id`
+
+Every line `handler.py` logs gets `office` and `aws_request_id` from `handler._RequestContextFilter`, a `logging.Filter` attached once, at import time, to the `weather_story_bot` logger — not passed by each caller. Don't add `"office"` to a call's `extra` in `handler.py`; the filter already supplies it.
+
+- Backed by two module-level `contextvars.ContextVar`s (`_aws_request_id`, `_office`), not plain mutable attributes. `ContextVar.set` returns a token; `_invocation_context` and `_office_context` `.reset(token)` it in a `finally`, so cleanup is exact even on an exception — a plain attribute that someone forgets to clear back to `None` leaks into whatever logs next, which is exactly how this leaked once during review before the `ContextVar` swap
+- `_invocation_context`, entered once per invocation in `lambda_handler` from `context.aws_request_id`, sets `aws_request_id` for everything inside it — including a later, unrelated `run()` call must **not** still see it once that `with` block has exited
+- `_office_context` sets `office` once per office, wrapped around each office's iteration of `run`'s loop, reset after — so `"Run complete"`, which spans every office, carries no office at all
+- Being attached to the `weather_story_bot` *logger* rather than a handler means it fires even when a test calls `run()` directly, without `configure_logging()` — `caplog` still sees `office` on every record
+- It's logger-scoped, not handler-hierarchy-scoped: it only tags records logged directly through `logging.getLogger("weather_story_bot")` (`handler.py`'s own logger), not through a child logger like `nws.py`'s or `telegram.py`'s `logging.getLogger(__name__)`. A module whose lines need `office` too would need the filter attached to its own logger, or the call to pass it explicitly
+- A new caller-supplied field always still goes through `extra` as usual; only `office`/`aws_request_id` are filter-supplied
+- Treat `aws_request_id` as unique but not random. Scheduled invocations get structured IDs: hex digits 3–10 are the scheduled time (seconds, offset by `0x60000000`), and the prefix and tail stay fixed until the schedule is re-activated, e.g. `e16ab440-4453-4ddb-b52a-f9af386f1184`. Code deploys don't change them. Only a direct `aws lambda invoke` gets a random UUID. That structure is observed behaviour (936 invocations, 2026-09-13 to 09-23, no duplicates), not documented. Fine as a correlation key; never sample or shard on its leading characters
 
 | Level | Use when |
 |---|---|

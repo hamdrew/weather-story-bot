@@ -33,11 +33,14 @@ build: clean
 	cd $(PACKAGE_DIR) && zip -qr ../lambda.zip .
 	@echo "Built $(ZIP)"
 
+# Save the plan so deploy applies exactly what was reviewed. Terraform refuses a plan that has
+# gone stale (state changed since it was made), and deploy fails if there is no plan to apply.
 plan:
-	terraform -chdir=infra plan
+	terraform -chdir=infra plan -out=deploy.tfplan
 
 deploy:
-	terraform -chdir=infra apply
+	terraform -chdir=infra apply deploy.tfplan
+	rm infra/deploy.tfplan
 
 # Estimated monthly cost of infra/ using infracost.yml and infra/infracost-usage.yml (no AWS credentials).
 # Infracost v2 replaced `breakdown --usage-file` with `scan` + infracost.yml. Its tables and summary round

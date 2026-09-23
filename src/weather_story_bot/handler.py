@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
-from collections import Counter
-from collections.abc import Callable
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -16,19 +17,61 @@ from weather_story_bot.archive import StoryArchive
 from weather_story_bot.config import OfficeConfig, Settings
 from weather_story_bot.models import Story
 from weather_story_bot.nws import NwsClient
-from weather_story_bot.state import (
-    PostedRecord,
-    PostedStore,
-    Status,
-    content_fingerprint,
-    image_sha256,
-    story_key,
-)
+from weather_story_bot.planner import Decision, Outcome, decide, select_active
+from weather_story_bot.state import PostedRecord, PostedStore, content_fingerprint, story_key
 from weather_story_bot.telegram import TelegramClient, TelegramError, build_caption
 
 logger = logging.getLogger("weather_story_bot")
 
 _STANDARD_LOG_ATTRS = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
+
+
+_aws_request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "aws_request_id", default=None
+)
+_office: contextvars.ContextVar[str | None] = contextvars.ContextVar("office", default=None)
+
+
+class _RequestContextFilter(logging.Filter):
+    """Adds `office` and `aws_request_id` to every line this logger emits.
+
+    Set once per invocation (`aws_request_id`, via `_invocation_context`, from the Lambda
+    context) and once per office within it (`office`, via `_office_context`), instead of every
+    caller passing them through `extra`. `ContextVar.set`'s token makes each scope's cleanup
+    exact, even on an exception, rather than relying on a plain attribute someone remembers to
+    reset. Attached once, at import time, to the `weather_story_bot` logger itself, so it still
+    applies when tests call `run()` directly without `configure_logging`.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        aws_request_id = _aws_request_id.get()
+        if aws_request_id is not None:
+            record.aws_request_id = aws_request_id
+        office = _office.get()
+        if office is not None:
+            record.office = office
+        return True
+
+
+logger.addFilter(_RequestContextFilter())
+
+
+@contextmanager
+def _invocation_context(aws_request_id: str) -> Generator[None]:
+    token = _aws_request_id.set(aws_request_id)
+    try:
+        yield
+    finally:
+        _aws_request_id.reset(token)
+
+
+@contextmanager
+def _office_context(office_id: str) -> Generator[None]:
+    token = _office.set(office_id)
+    try:
+        yield
+    finally:
+        _office.reset(token)
 
 
 class JsonFormatter(logging.Formatter):
@@ -78,93 +121,80 @@ def run(
     for office in offices:
         counts = {"posted": 0, "updated": 0, "skipped": 0, "rejected": 0, "failed": 0}
         summary[office.office_id] = counts
-        try:
-            stories = services.nws.list_stories(office.office_id)
-        except Exception:
-            logger.exception("Failed to list stories", extra={"office": office.office_id})
-            counts["failed"] += 1
-            continue
-
-        # Expired stories get no action at all: no download, no checks, no post or delete.
-        active = [story for story in stories if story.end_time > now]
-        counts["skipped"] += len(stories) - len(active)
-
-        downloaded: list[tuple[Story, bytes]] = []
-        for story in active:
+        with _office_context(office.office_id):
             try:
-                downloaded.append((story, services.nws.download_image(story)))
+                stories = services.nws.list_stories(office.office_id)
             except Exception:
-                logger.exception(
-                    "Failed to download story image",
-                    extra={"office": office.office_id, "title": story.title},
-                )
-                counts["failed"] += 1
-
-        accepted = _reject_ambiguous(office, downloaded)
-        counts["rejected"] += len(downloaded) - len(accepted)
-
-        for story, image in accepted:
-            try:
-                status = _process_story(office, story, image, services)
-            except Exception:
-                logger.exception(
-                    "Failed to process story",
-                    extra={"office": office.office_id, "title": story.title},
-                )
+                logger.exception("Failed to list stories")
                 counts["failed"] += 1
                 continue
-            counts[{Status.NEW: "posted", Status.UPDATED: "updated"}.get(status, "skipped")] += 1
+
+            active, expired = select_active(stories, now)
+            counts["skipped"] += len(expired)
+
+            downloaded: list[tuple[Story, bytes]] = []
+            for story in active:
+                try:
+                    downloaded.append((story, services.nws.download_image(story)))
+                except Exception:
+                    logger.exception("Failed to download story image", extra={"title": story.title})
+                    counts["failed"] += 1
+
+            records: dict[str, PostedRecord] = {}
+            for story, _ in downloaded:
+                key = story_key(story)
+                record = services.store.find_story(office.office_id, key)
+                if record is not None:
+                    records[key] = record
+            decisions = decide(office.office_id, downloaded, records, now)
+            _apply_decisions(office, decisions, services, counts)
     return summary
 
 
-_AMBIGUITY_CHECKS: tuple[tuple[str, Callable[[Story, bytes], str]], ...] = (
-    ("duplicate_image_id", lambda story, _: story.image_id),
-    ("duplicate_title_and_start", lambda story, _: story_key(story)),
-    ("duplicate_image", lambda _, image: image_sha256(image)),
-)
-
-
-def _reject_ambiguous(
-    office: OfficeConfig, downloaded: list[tuple[Story, bytes]]
-) -> list[tuple[Story, bytes]]:
-    """Drop every story sharing an image ID, title and start time, or image with another.
-
-    NWS data is untrusted: when listed stories collide, there's no telling which is right.
-    The `nws-ambiguous` alarm's metric filter matches the exact ERROR message.
-    """
-    reasons: dict[int, list[str]] = {}
-    for reason, key in _AMBIGUITY_CHECKS:
-        values = [key(story, image) for story, image in downloaded]
-        occurrences = Counter(values)
-        for index, value in enumerate(values):
-            if occurrences[value] > 1:
-                reasons.setdefault(index, []).append(reason)
-    if reasons:
+def _apply_decisions(
+    office: OfficeConfig, decisions: list[Decision], services: Services, counts: dict[str, int]
+) -> None:
+    """Log rejections once per office, then act on every remaining decision in order."""
+    rejected = [d for d in decisions if d.outcome is Outcome.REJECTED]
+    if rejected:
+        # The `nws-ambiguous` alarm's metric filter matches this exact ERROR message.
         logger.error(
             "Ambiguous stories from NWS",
             extra={
-                "office": office.office_id,
                 "stories": [
                     {
-                        "image_id": downloaded[index][0].image_id,
-                        "title": downloaded[index][0].title,
-                        "reasons": story_reasons,
+                        "image_id": decision.story.image_id,
+                        "title": decision.story.title,
+                        "reasons": list(decision.reasons),
                     }
-                    for index, story_reasons in reasons.items()
+                    for decision in rejected
                 ],
             },
         )
-    return [item for index, item in enumerate(downloaded) if index not in reasons]
+    counts["rejected"] += len(rejected)
+
+    for decision in decisions:
+        if decision.outcome is Outcome.REJECTED:
+            continue
+        if decision.outcome is Outcome.UNCHANGED:
+            counts["skipped"] += 1
+            continue
+        try:
+            _apply_post_or_update(office, decision, services)
+        except Exception:
+            logger.exception("Failed to process story", extra={"title": decision.story.title})
+            counts["failed"] += 1
+            continue
+        counts["posted" if decision.outcome is Outcome.POST else "updated"] += 1
 
 
-def _process_story(office: OfficeConfig, story: Story, image: bytes, services: Services) -> Status:
-    """Post a new story, repost a changed one and delete its old message, or skip it."""
+def _apply_post_or_update(office: OfficeConfig, decision: Decision, services: Services) -> None:
+    """Post a new story or repost a changed one, then delete the message it replaces."""
+    story, image = decision.story, decision.image
+    if image is None:
+        raise AssertionError("unreachable")  # post/update decisions always carry their image
+
     fingerprint = content_fingerprint(story, image)
-    current = services.store.find_story(office.office_id, story_key(story))
-    if current is not None and current.fingerprint == fingerprint:
-        return Status.UNCHANGED
-
-    status = Status.NEW if current is None else Status.UPDATED
     prefix = services.archive.save(story, image, fingerprint)
     message_id = post_story(
         services.telegram,
@@ -172,23 +202,21 @@ def _process_story(office: OfficeConfig, story: Story, image: bytes, services: S
         office.office_id,
         story,
         image,
-        updated=status is Status.UPDATED,
+        updated=decision.outcome is Outcome.UPDATE,
     )
     # Recorded only after Telegram accepts it: a failure here may cause a repost, never a miss.
     services.store.record_posted(story, message_id, prefix, fingerprint)
     logger.info(
         "Story posted",
         extra={
-            "office": office.office_id,
             "image_id": story.image_id,
-            "status": str(status),
+            "status": "new" if decision.outcome is Outcome.POST else "updated",
             "telegram_message_id": message_id,
             "archive_prefix": prefix,
         },
     )
-    if current is not None:
-        _delete_replaced_message(services.telegram, office, story, current)
-    return status
+    if decision.record is not None:
+        _delete_replaced_message(services.telegram, office, story, decision.record)
 
 
 def _delete_replaced_message(
@@ -201,7 +229,6 @@ def _delete_replaced_message(
         logger.warning(
             "Telegram delete failed, old message kept",
             extra={
-                "office": office.office_id,
                 "image_id": story.image_id,
                 "telegram_message_id": replaced.telegram_message_id,
                 "error": str(exc),
@@ -245,12 +272,13 @@ def _build_services(settings: Settings) -> Services:
 def lambda_handler(event: Any, context: Any) -> dict[str, dict[str, int]]:
     global _services
     configure_logging()
-    settings = Settings.from_env()
-    if _services is None:
-        _services = _build_services(settings)
+    with _invocation_context(context.aws_request_id):
+        settings = Settings.from_env()
+        if _services is None:
+            _services = _build_services(settings)
 
-    summary = run(settings.offices, _services)
-    logger.info("Run complete", extra={"summary": summary})
-    if any(counts["failed"] for counts in summary.values()):
-        raise ProcessingError(f"Some stories failed: {json.dumps(summary)}")
-    return summary
+        summary = run(settings.offices, _services)
+        logger.info("Run complete", extra={"summary": summary})
+        if any(counts["failed"] for counts in summary.values()):
+            raise ProcessingError(f"Some stories failed: {json.dumps(summary)}")
+        return summary

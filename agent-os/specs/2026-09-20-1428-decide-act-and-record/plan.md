@@ -114,7 +114,10 @@ Lands first — Stage 3 migrates data keyed by these hashes, so they must be fro
 moves.
 
 - Freeze the encoding explicitly in `_sha256_json`: `json.dumps(..., sort_keys=True,
-  separators=(",", ":"), ensure_ascii=True)`, with a comment saying why it can never change.
+  separators=(", ", ": "), ensure_ascii=True)` — `json.dumps`' own default separators, spelled
+  out rather than left implicit, so every currently-stored digest still matches. **Do not**
+  switch to compact separators (`(",", ":")`); that changes every digest and reposts every
+  active story, with a comment saying why it can never change.
 - Test pinning **known literal digests** for both `story_key` and `content_fingerprint` against
   a fixed story and image.
 - Amend `backend/story-identity.md`: the frozen encoding, the pin test, and that global identity

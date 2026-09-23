@@ -6,19 +6,12 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from weather_story_bot.models import Story
 
 if TYPE_CHECKING:
     from types_boto3_dynamodb import DynamoDBClient
-
-
-class Status(StrEnum):
-    NEW = "new"
-    UPDATED = "updated"
-    UNCHANGED = "unchanged"
 
 
 def _sha256_json(content: dict[str, str]) -> str:

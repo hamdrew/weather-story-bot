@@ -1,5 +1,9 @@
 # Handler Tests
 
+Deciding and acting are tested separately, matching `planner.py` and `handler.py`.
+
+`tests/test_planner.py` covers `select_active` and `decide`: table-driven, no moto and no respx — `make_story(...)` listings, `PostedRecord` records and a fixed `now` in, `Decision`s out. It proves outcomes (`post`/`update`/`unchanged`/`expired`/`rejected`) and ambiguity reasons, never side effects.
+
 `tests/test_handler.py` runs the real `NwsClient`, `PostedStore`, `StoryArchive` and `TelegramClient` over respx + moto. Don't stub `Services`. Ordering bugs (archive -> post -> record -> delete, see `backend/side-effect-order`), key or fingerprint mismatches and wire-shape bugs only show up when the real pieces run together.
 
 - Use the `services` and `api` fixtures. `api` mocks NWS and Telegram, and message ids count up from 100
