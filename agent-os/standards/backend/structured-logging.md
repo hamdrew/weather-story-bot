@@ -26,6 +26,7 @@ Every line `handler.py` logs gets `office` and `aws_request_id` from `handler._R
 - Being attached to the `weather_story_bot` *logger* rather than a handler means it fires even when a test calls `run()` directly, without `configure_logging()` — `caplog` still sees `office` on every record
 - It's logger-scoped, not handler-hierarchy-scoped: it only tags records logged directly through `logging.getLogger("weather_story_bot")` (`handler.py`'s own logger), not through a child logger like `nws.py`'s or `telegram.py`'s `logging.getLogger(__name__)`. A module whose lines need `office` too would need the filter attached to its own logger, or the call to pass it explicitly
 - A new caller-supplied field always still goes through `extra` as usual; only `office`/`aws_request_id` are filter-supplied
+- Treat `aws_request_id` as unique but not random. Scheduled invocations get structured IDs: hex digits 3–10 are the scheduled time (seconds, offset by `0x60000000`), and the prefix and tail stay fixed until the schedule is re-activated, e.g. `e16ab440-4453-4ddb-b52a-f9af386f1184`. Code deploys don't change them. Only a direct `aws lambda invoke` gets a random UUID. That structure is observed behaviour (936 invocations, 2026-09-13 to 09-23, no duplicates), not documented. Fine as a correlation key; never sample or shard on its leading characters
 
 | Level | Use when |
 |---|---|
