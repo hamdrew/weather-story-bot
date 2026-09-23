@@ -47,6 +47,11 @@ class Settings:
         )
 
 
+def is_valid_office_id(value: str) -> bool:
+    """A real NWS office id: exactly three uppercase letters, e.g. `MKX`."""
+    return bool(_OFFICE_ID.match(value))
+
+
 def parse_offices(raw: str) -> tuple[OfficeConfig, ...]:
     """Parse `{"MKX": {"chat_id": "-100…", "name": "Milwaukee/Sullivan"}, ...}`."""
     try:
@@ -58,7 +63,7 @@ def parse_offices(raw: str) -> tuple[OfficeConfig, ...]:
 
     offices = []
     for office_id, entry in data.items():
-        if not _OFFICE_ID.match(office_id):
+        if not is_valid_office_id(office_id):
             raise ConfigError(f"Invalid office id {office_id!r}: expected e.g. 'MKX'")
         if not isinstance(entry, dict) or not str(entry.get("chat_id", "")).strip():
             raise ConfigError(f"Office {office_id} needs a chat_id")

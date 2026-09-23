@@ -513,6 +513,10 @@ def test_lambda_handler_end_to_end(
     api.get(REISSUED_DOWNLOAD).respond(content=b"PNG-sibling")
     assert handler.lambda_handler({}, LAMBDA_CONTEXT)["MKX"]["rejected"] == 2
 
+    api.get(MKX_URL).respond(503)
+    with pytest.raises(handler.ProcessingError):
+        handler.lambda_handler({}, LAMBDA_CONTEXT)
+
 
 def test_aws_request_id_does_not_leak_into_a_later_bare_run(
     services: handler.Services,
@@ -546,10 +550,6 @@ def test_aws_request_id_does_not_leak_into_a_later_bare_run(
 
     [posted] = [r for r in caplog.records if r.getMessage() == "Story posted"]
     assert "aws_request_id" not in vars(posted)
-
-    api.get(MKX_URL).respond(503)
-    with pytest.raises(handler.ProcessingError):
-        handler.lambda_handler({}, LAMBDA_CONTEXT)
 
 
 def test_json_formatter_includes_extra_fields() -> None:

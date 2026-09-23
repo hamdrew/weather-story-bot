@@ -3,8 +3,8 @@
 Tests never touch real NWS, Telegram or AWS. The risk is a real send: a post to the live channel, a write to the real account (via AWS_PROFILE / `aws login`) or use of a dev's `.env` token.
 
 - HTTP: `respx`. AWS: `moto` via the `aws`/`dynamodb`/`s3` fixtures
-- The autouse `aws_env` fixture sets fake creds and unsets `AWS_PROFILE`. Don't bypass it
-- CLI tests stub `load_dotenv` and clear `TELEGRAM_*` env vars
+- The autouse `aws_env` fixture (in `tests/conftest.py`, applies to every test in every file) sets fake AWS creds, unsets `AWS_PROFILE`, and clears `TELEGRAM_*` — so a dev's real bot token can never reach a test, CLI or otherwise. Don't bypass it
+- CLI tests additionally stub `load_dotenv`, so a dev's real `.env` is never read
 - Prove nothing was sent with an empty router:
 
 ```python
