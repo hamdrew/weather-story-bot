@@ -25,6 +25,48 @@ resource "aws_dynamodb_table" "posted" {
   }
 }
 
+# Replaces aws_dynamodb_table.posted (see backend/dynamodb-schema). posted stays untouched as the
+# rollback until the new keys have soaked, then goes away deliberately.
+# Items under PK = OFFICE#<id>, each carrying schema_version:
+#   STORY#<start_utc_iso>#<story_key>                current story
+#   EVENT#<start_utc_iso>#<story_key>#<at_utc_iso>   ledger event (append-only)
+#   DAY#<YYYY-MM-DD>                                 daily run record (UTC)
+#   LEASE                                            office lease
+resource "aws_dynamodb_table" "state" {
+  name         = "${local.name}-state"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "PK"
+  range_key    = "SK"
+
+  attribute {
+    name = "PK"
+    type = "S"
+  }
+
+  attribute {
+    name = "SK"
+    type = "S"
+  }
+
+  # No secondary indexes: keys serve the bot's own access patterns, and analytics reads a native
+  # export to S3 instead (backend/dynamodb-schema). Never add an LSI: it can only be created with
+  # the table and caps each office partition at 10 GB. A GSI can be added later and backfills from
+  # ordinary attributes such as event_at.
+
+  # No ttl block, on purpose: records are permanent and the ledger is a source of truth. Don't
+  # add a TTL. The lease expires through a conditional write on its own expires_at attribute.
+
+  # Blocks DeleteTable, including terraform destroy or a key change that forces replacement.
+  # To really remove the table, apply with this set to false first.
+  deletion_protection_enabled = true
+
+  # Billed on table size, not window length, so keep the full window. Restores go to a new table.
+  point_in_time_recovery {
+    enabled                 = true
+    recovery_period_in_days = 35
+  }
+}
+
 resource "aws_s3_bucket" "archive" {
   bucket = "${local.name}-archive-${data.aws_caller_identity.current.account_id}"
 }

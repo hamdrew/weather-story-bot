@@ -53,8 +53,10 @@
   and is never an analytics source.
 - **infra/data-retention** — The old table keeps deletion protection and PITR and is **not**
   replaced; it is the rollback. `make plan` must show zero replacements.
-- **infra/iam** — Exact actions on the narrowest ARNs. The role gains `dynamodb:UpdateItem` on
-  the new table only, and no `Scan`.
+- **infra/iam** (amended in Task 11) — Exact actions on the narrowest ARNs, each added with the code
+  that calls it. The role gains `GetItem`/`PutItem` (Task 9), `UpdateItem` (Task 10) and
+  `DeleteItem` (Task 11, for the lease) on the new table only, and no `Scan`. The "No `Delete*`"
+  rule is narrowed to allow exact item-level `DeleteItem`.
 - **infra/alarms** — Alarm descriptions are runbooks. Any runbook text naming a renamed log line
   changes in the same commit.
 

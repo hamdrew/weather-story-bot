@@ -213,11 +213,13 @@ touched; it is the rollback, and `infra/data-retention` forbids replacing it.
   the Phase 2.2 sketch proposes one and someone will otherwise "restore" it. The lease expires by
   conditional write against an ordinary `expires_at` attribute, not by TTL.
 - `deletion_protection_enabled = true` and 35-day PITR, same as today.
-- **Event items will carry `GSI1PK`/`GSI1SK`** (`YEAR#<yyyy>` / `<at_utc_iso>#OFFICE#<id>`) when
-  Stage 4 writes them. A GSI added in Phase 2.2 backfills only items that already carry its key
-  attributes — without this, 2.2 would need a migration after all.
-- `infra/iam.tf`: grant `GetItem`/`PutItem`/`UpdateItem`/`DeleteItem` on the **new** table's ARN,
-  keeping the old grants until Stage 3. Amend `infra/iam.md` if the pattern changes.
+- **No secondary indexes, and no index attributes written in advance** (decided 2026-09-23,
+  replacing the earlier `GSI1PK`/`GSI1SK` plan). Analytics reads a native export to S3, not the
+  table. A GSI can be added later and backfills from ordinary attributes such as `event_at`; an
+  LSI cannot, so the table never gets one.
+- **No IAM change in this task.** `infra/iam` adds each permission in the same change as the code
+  that calls it (decided 2026-09-23): `GetItem`/`PutItem` land in Task 9, `UpdateItem` in Task 10,
+  `DeleteItem` in Task 11.
 - Amend `backend/dynamodb-schema.md` to describe the new keys as current.
 
 ### 🚦 Deploy gate 2
@@ -248,7 +250,13 @@ growing ~6/day — assert the count looks sane before writing.
 
 ## Task 9: Flip `STATE_TABLE` (`infra/lambda.tf`)
 
-One line: point `STATE_TABLE` at the new table. Drop the old table's IAM grants.
+Not one line: `state.py` hard-codes the MVP keys (`office_id` / `image_id = story#<story_key>`),
+so pointing `STATE_TABLE` at a `PK`/`SK` table alone fails every `GetItem` and silences the bot.
+
+- `state.py`: read and write `PK = OFFICE#<id>`, `SK = STORY#<start_utc_iso>#<story_key>`, with
+  `schema_version`, matching what Task 8 writes. Moto tests against the new key schema.
+- `infra/lambda.tf`: point `STATE_TABLE` at the new table.
+- `infra/iam.tf`: grant `GetItem`/`PutItem` on the new table's ARN and drop the old table's grants.
 
 ### 🚦 Deploy gate 3 — the pause
 
@@ -276,8 +284,7 @@ Three best-effort, append-only writes. **None are in the safety chain** — each
 WARNING and never blocks a post.
 
 - `record_event(...)` — one immutable item per action: `posted`, `updated`, `rejected`,
-  `deleted`, `delete_failed`, with office, story, time, fingerprint, message id and reasons, plus
-  `GSI1PK`/`GSI1SK`.
+  `deleted`, `delete_failed`, with office, story, `event_at`, fingerprint, message id and reasons.
 - `touch_last_seen(...)` — `UpdateItem` on the current-story item, **only when `last_seen_at` is
   at least an hour stale**, so a story pulled before its `endTime` is visible.
 - `record_run(...)` — one `UpdateItem` with `ADD` per run: `runs`, `nws_failures`,
@@ -285,6 +292,8 @@ WARNING and never blocks a post.
   list failed. Outages read back as runs of consecutive set bits.
 
 A separate module from `state.py` on purpose: `state.py` is the safety chain, `history.py` is not.
+
+`infra/iam.tf`: add `UpdateItem` on the new table's ARN.
 
 ## Task 11: The office lease (`state.py`)
 
@@ -302,6 +311,8 @@ lives in `state.py`.
   releases; a crashed run's lease expires; a throttled `PutItem` (monkeypatched per
   `testing/offline-tests`) counts as `failed`.
 - Amend `backend/run-outcomes.md` for the two new cases.
+- `infra/iam.tf`: add `DeleteItem` on the new table's ARN. Amend `infra/iam.md`, whose "No
+  `Delete*`" rule then needs to allow exact item-level `DeleteItem` for the lease.
 
 ## Task 12: Wire the lease and history into the apply step
 

@@ -30,7 +30,7 @@ that was going to arrive in Phase 2.2.
   - The cost of this migration only ever rises. Measured 2026-09-20: **42 items, 21,736 bytes**,
     all `story#` items in MKX — about 6 new a day since launch on 2026-09-13. By Phase 2.2 that
     is a few thousand items plus three months of ledger events, which never expire.
-  - Phase 2.2's remaining DynamoDB work becomes **additive** — GSI, lease — with no migration.
+  - Phase 2.2's remaining DynamoDB work becomes **additive**, with no migration.
   - The old table is not touched. It is the rollback, and `infra/data-retention` forbids
     replacing a table with deletion protection on.
 - **No TTL. DynamoDB records are permanent.** Confirmed during shaping that none exists today:
@@ -89,9 +89,11 @@ that was going to arrive in Phase 2.2.
   `image_id` is misleadingly named, but its values are ours to choose, and
   `EVENT#<start>#<story_key>#<at>` under `PK=MKX` is range-queryable today. This is what made
   the full key redesign worth pulling forward rather than settling for a rename.
-- **Event items must carry `GSI1PK`/`GSI1SK` from the first write.** A GSI added in Phase 2.2
-  backfills only items that already have its key attributes. Without writing them now, Phase 2.2
-  would need a migration after all — defeating the point of doing this early.
+- ~~**Event items must carry `GSI1PK`/`GSI1SK` from the first write.**~~ Reversed 2026-09-23:
+  DynamoDB is the wrong analytics engine, and Phase 3 already reads a dump in S3, so nothing would
+  query `GSI1`. A GSI can also key on ordinary attributes events carry anyway (`PK`, `event_at`),
+  so a future index backfills without special attributes. The only index that must be decided
+  at creation is an LSI, and the table gets none.
 - **The planner must not log.** The `Ambiguous stories from NWS` ERROR line feeds the
   `nws-ambiguous` metric filter, so it stays in the handler, emitted from the planner's returned
   rejections. A pure function that logs is not pure, and the CLI must not fire alarms.
