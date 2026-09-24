@@ -7,7 +7,13 @@ import pytest
 from tests.conftest import make_story
 from weather_story_bot.models import Story
 from weather_story_bot.planner import Decision, Outcome, decide, select_active
-from weather_story_bot.state import PostedRecord, content_fingerprint, story_key
+from weather_story_bot.state import (
+    PostedRecord,
+    content_fingerprint,
+    description_sha256,
+    image_sha256,
+    story_key,
+)
 
 NOW = datetime(2026, 9, 13, 0, 0, tzinfo=UTC)
 REISSUED_DOWNLOAD = "https://api.weather.gov/offices/MKX/weatherstories/download/bbbb-2222"
@@ -15,10 +21,12 @@ REISSUED_DOWNLOAD = "https://api.weather.gov/offices/MKX/weatherstories/download
 
 def record_for(story: Story, image: bytes = b"PNG") -> PostedRecord:
     return PostedRecord(
-        image_id="old-image-id",
+        image_id=story.image_id,
         telegram_message_id=101,
         archive_prefix="MKX/old-prefix",
         fingerprint=content_fingerprint(story, image),
+        image_sha256=image_sha256(image),
+        description_sha256=description_sha256(story),
     )
 
 
@@ -66,7 +74,50 @@ def test_decide_changed_fingerprint_is_an_update() -> None:
 
     [decision] = decide("MKX", [(story, b"PNG-new")], {story_key(story): record}, NOW)
 
-    assert decision == Decision(story, Outcome.UPDATE, b"PNG-new", record=record)
+    assert decision == Decision(
+        story, Outcome.UPDATE, b"PNG-new", record=record, changes=("image",)
+    )
+
+
+@pytest.mark.parametrize(
+    ("image", "overrides", "changes"),
+    [
+        (b"PNG", {"description": "Storm timing has shifted."}, ("description",)),
+        (b"PNG-new", {"description": "Storm timing has shifted."}, ("image", "description")),
+        # "Cool Into This Weekend" on 2026-09-24: new UUID, new image and a trimmed description.
+        (
+            b"PNG-new",
+            {"download": REISSUED_DOWNLOAD, "description": "Storm timing has shifted."},
+            ("image_id", "image", "description"),
+        ),
+    ],
+)
+def test_decide_update_names_what_changed(
+    image: bytes, overrides: dict[str, object], changes: tuple[str, ...]
+) -> None:
+    posted = make_story()
+    revised = make_story(**overrides)
+    record = record_for(posted)
+
+    [decision] = decide("MKX", [(revised, image)], {story_key(revised): record}, NOW)
+
+    assert decision.outcome is Outcome.UPDATE
+    assert decision.changes == changes
+
+
+def test_decide_update_from_a_record_without_content_hashes_says_content() -> None:
+    # Records written before 2026-09-24 keep only the combined fingerprint.
+    story = make_story(download=REISSUED_DOWNLOAD)
+    record = PostedRecord(
+        image_id="old-image-id",
+        telegram_message_id=101,
+        archive_prefix="MKX/old-prefix",
+        fingerprint="fp-old",
+    )
+
+    [decision] = decide("MKX", [(story, b"PNG")], {story_key(story): record}, NOW)
+
+    assert decision.changes == ("image_id", "content")
 
 
 def test_decide_ignores_records_for_other_stories() -> None:

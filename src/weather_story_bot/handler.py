@@ -18,7 +18,13 @@ from weather_story_bot.config import OfficeConfig, Settings
 from weather_story_bot.models import Story
 from weather_story_bot.nws import NwsClient
 from weather_story_bot.planner import Decision, Outcome, decide, select_active
-from weather_story_bot.state import PostedRecord, PostedStore, content_fingerprint, story_key
+from weather_story_bot.state import (
+    PostedRecord,
+    PostedStore,
+    content_fingerprint,
+    image_sha256,
+    story_key,
+)
 from weather_story_bot.telegram import TelegramClient, TelegramError, build_caption
 
 logger = logging.getLogger("weather_story_bot")
@@ -205,18 +211,27 @@ def _apply_post_or_update(office: OfficeConfig, decision: Decision, services: Se
         updated=decision.outcome is Outcome.UPDATE,
     )
     # Recorded only after Telegram accepts it: a failure here may cause a repost, never a miss.
-    services.store.record_posted(story, message_id, prefix, fingerprint)
-    logger.info(
-        "Story posted",
-        extra={
-            "image_id": story.image_id,
-            "status": "new" if decision.outcome is Outcome.POST else "updated",
-            "telegram_message_id": message_id,
-            "archive_prefix": prefix,
-        },
+    services.store.record_posted(
+        story, message_id, prefix, fingerprint, image_sha256=image_sha256(image)
     )
-    if decision.record is not None:
-        _delete_replaced_message(services.telegram, office, story, decision.record)
+    extra: dict[str, Any] = {
+        "image_id": story.image_id,
+        "status": "new" if decision.outcome is Outcome.POST else "updated",
+        "telegram_message_id": message_id,
+        "archive_prefix": prefix,
+        "fingerprint": fingerprint,
+    }
+    replaced = decision.record
+    if replaced is not None:
+        extra |= {
+            "changes": list(decision.changes),
+            "previous_image_id": replaced.image_id,
+            "previous_fingerprint": replaced.fingerprint,
+            "previous_archive_prefix": replaced.archive_prefix,
+        }
+    logger.info("Story posted", extra=extra)
+    if replaced is not None:
+        _delete_replaced_message(services.telegram, office, story, replaced)
 
 
 def _delete_replaced_message(

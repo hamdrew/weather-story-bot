@@ -13,9 +13,10 @@
   decision; without DynamoDB it says `new-or-updated (state not read)` rather than guessing.
   Exit codes: 0 success or no active stories, 1 NWS list or download failed, 2 usage.
 - **backend/story-identity** (amended) — The hash encoding is frozen explicitly
-  (`sort_keys=True, separators=(",", ":"), ensure_ascii=True`) and pinned by a test asserting
-  known literal digests. Global identity is `(office_id, story_key)`; `story_key` alone is not
-  unique across offices.
+  (`sort_keys=True, separators=(", ", ": "), ensure_ascii=True`, `json.dumps`' own defaults, never
+  the compact `(",", ":")`) and pinned by a test asserting known literal digests. Global identity
+  is `(office_id, story_key)`; `story_key` alone is not unique across offices. Task 7b adds the
+  stored `image_sha256`/`description_sha256`, which explain an update and never decide one.
 - **backend/side-effect-order** (amended) — Gains **step 0: take the office lease**, in the safety
   chain. The rest of the order is unchanged. The three history writes are **best effort and
   outside the chain**: each failure logs a WARNING, never blocks a post and never counts as

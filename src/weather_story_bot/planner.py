@@ -13,7 +13,13 @@ from datetime import datetime
 from enum import StrEnum
 
 from weather_story_bot.models import Story
-from weather_story_bot.state import PostedRecord, content_fingerprint, image_sha256, story_key
+from weather_story_bot.state import (
+    PostedRecord,
+    content_fingerprint,
+    description_sha256,
+    image_sha256,
+    story_key,
+)
 
 
 class Outcome(StrEnum):
@@ -26,13 +32,18 @@ class Outcome(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Decision:
-    """What to do with one story, and why."""
+    """What to do with one story, and why.
+
+    `changes` is set on `update` only: which of `image_id`, `image` and `description` differ from
+    the posted revision, or `content` when the record predates the fingerprint's stored parts.
+    """
 
     story: Story
     outcome: Outcome
     image: bytes | None = None
     reasons: tuple[str, ...] = ()
     record: PostedRecord | None = None
+    changes: tuple[str, ...] = ()
 
 
 def select_active(stories: list[Story], now: datetime) -> tuple[list[Story], list[Decision]]:
@@ -76,10 +87,33 @@ def decide(
         fingerprint = content_fingerprint(story, image)
         if current is not None and current.fingerprint == fingerprint:
             decisions.append(Decision(story, Outcome.UNCHANGED, image, record=current))
+        elif current is None:
+            decisions.append(Decision(story, Outcome.POST, image))
         else:
-            outcome = Outcome.POST if current is None else Outcome.UPDATE
-            decisions.append(Decision(story, outcome, image, record=current))
+            changes = _changes(story, image, current)
+            decisions.append(
+                Decision(story, Outcome.UPDATE, image, record=current, changes=changes)
+            )
     return decisions
+
+
+def _changes(story: Story, image: bytes, posted: PostedRecord) -> tuple[str, ...]:
+    """Name what differs from the posted revision, for an update's log line.
+
+    A new `image_id` alone never causes an update (the fingerprint ignores it), but it is worth
+    knowing when it comes with one.
+    """
+    changes: list[str] = []
+    if story.image_id != posted.image_id:
+        changes.append("image_id")
+    if posted.image_sha256 is None or posted.description_sha256 is None:
+        changes.append("content")
+        return tuple(changes)
+    if image_sha256(image) != posted.image_sha256:
+        changes.append("image")
+    if description_sha256(story) != posted.description_sha256:
+        changes.append("description")
+    return tuple(changes)
 
 
 def _find_ambiguous(downloaded: list[tuple[Story, bytes]]) -> dict[int, list[str]]:

@@ -133,8 +133,8 @@ Two steps, because expired stories must never be downloaded:
    `post` / `update` / `unchanged` call over `(Story, image)` pairs plus the stored records.
 
 `Decision` is a frozen dataclass: the story, an outcome (`post`, `update`, `unchanged`,
-`expired`, `rejected`), `reasons` for rejections, and the current `PostedRecord` when there is
-one. Move `_AMBIGUITY_CHECKS` and `_reject_ambiguous` here unchanged in behaviour.
+`expired`, `rejected`), `reasons` for rejections, the current `PostedRecord` when there is
+one, and (on `update` only, added in Task 7b) `changes`. Move `_AMBIGUITY_CHECKS` and `_reject_ambiguous` here unchanged in behaviour.
 
 **The planner is pure: no logging, no I/O, no clock of its own.** It returns data; the handler
 logs. Tests are table-driven with no moto — listing + records + `now` in, decisions out. Amend
@@ -231,6 +231,31 @@ touched; it is the rollback, and `infra/data-retention` forbids replacing it.
 - **Watch:** one clean run, unchanged behaviour. Confirm the new table exists and is empty.
 - **Rollback:** the table is unused; nothing to undo.
 
+## Task 7b: Name what an update changed (added 2026-09-24)
+
+Came out of reviewing the 2026-09-24 17:10 CDT "Updated" post: the logs said *that* the story
+changed, not *what*. That post changed everything (a new image UUID, new image bytes and a
+trimmed description), but nothing in the logs said so.
+
+- `state.py`: the record also stores the fingerprint's two inputs, `image_sha256` and
+  `description_sha256`. `content_fingerprint` still makes every decision; these only explain one.
+  `record_posted` takes `image_sha256` as an optional keyword so `scripts/migrate_story_keys.py`
+  still runs.
+- `planner.py`: `Decision.changes` on `update`: `image_id`, `image`, `description`, or `content`
+  when the record predates the stored parts. Pure and table-tested.
+- `handler.py`: `Story posted` gains `fingerprint` on every post and, on updates, `changes`,
+  `previous_image_id`, `previous_fingerprint` and `previous_archive_prefix`. The message text is
+  unchanged, so no metric filter or runbook moves.
+- Amend `backend/story-identity.md`. Tasks 8 and 9 carry the two attributes to the new table.
+
+### 🚦 Deploy gate 2b
+
+`make build && make deploy`. No infra change; `PutItem` on the old table is already granted.
+
+- **Watch:** the next update logs `changes: ["content"]` (plus `image_id` if the UUID moved),
+  since every live record predates the parts. The one after that names `image` or `description`.
+- **Rollback:** redeploy the previous zip. The extra attributes are ignored by the old code.
+
 ---
 
 # Stage 3 — Migrate and flip
@@ -245,7 +270,9 @@ any write if the data looks wrong, `--delete-old` as a separate later step, moto
 
 Copies each `story#<story_key>` item from the old table to `STORY#<start>#<story_key>` on the new
 one, preserving `telegram_message_id`, `posted_at`, `fingerprint` and `archive_prefix` so live
-stories are skipped after the flip rather than reposted. Adds `schema_version`. Expect 42 items,
+stories are skipped after the flip rather than reposted. Also copy `image_sha256` and
+`description_sha256` when present (added 2026-09-24 so `Story posted` can name what an update
+changed); an item without them still migrates. Adds `schema_version`. Expect 42 items,
 growing ~6/day — assert the count looks sane before writing.
 
 ## Task 9: Flip `STATE_TABLE` (`infra/lambda.tf`)
@@ -255,6 +282,7 @@ so pointing `STATE_TABLE` at a `PK`/`SK` table alone fails every `GetItem` and s
 
 - `state.py`: read and write `PK = OFFICE#<id>`, `SK = STORY#<start_utc_iso>#<story_key>`, with
   `schema_version`, matching what Task 8 writes. Moto tests against the new key schema.
+  Keep writing and reading `image_sha256` and `description_sha256`.
 - `infra/lambda.tf`: point `STATE_TABLE` at the new table.
 - `infra/iam.tf`: grant `GetItem`/`PutItem` on the new table's ARN and drop the old table's grants.
 
@@ -285,6 +313,9 @@ WARNING and never blocks a post.
 
 - `record_event(...)` — one immutable item per action: `posted`, `updated`, `rejected`,
   `deleted`, `delete_failed`, with office, story, `event_at`, fingerprint, message id and reasons.
+  Events record only the revision they are about: no `previous_*` fields and no `changes`
+  (decided 2026-09-24). What an update changed is derived at analysis time from consecutive
+  events for the same story, not stored in the ledger.
 - `touch_last_seen(...)` — `UpdateItem` on the current-story item, **only when `last_seen_at` is
   at least an hour stale**, so a story pulled before its `endTime` is visible.
 - `record_run(...)` — one `UpdateItem` with `ADD` per run: `runs`, `nws_failures`,

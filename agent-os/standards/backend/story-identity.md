@@ -24,4 +24,5 @@ its expected value edited, the encoding changed and something is wrong.
 - If `build_caption` starts showing a different `Story` field, update `content_fingerprint` in the same commit. Fixed text (link wording, the "Updated" prefix) and `office_id` stay out, since adding them would repost every active story
 - Compare instants, not strings: `start_time.astimezone(UTC)`
 - When NWS edits a title or start time, that's a new story. It posts again and the old message stays. This is on purpose: title + start is the only stable identity NWS gives, and a repost is OK where a missed story is not
+- The record also stores the fingerprint's two parts, `image_sha256` and `description_sha256`, only so an update's `Story posted` line can say what changed (`changes`: `image_id`, `image`, `description`, or `content` for records from before 2026-09-24). They never decide anything; `content_fingerprint` does
 - Changing either hash's inputs changes stored values. A fingerprint change reposts every active story as "Updated" on the next run. A `story_key` change needs a migration (see `backend/dynamodb-schema`)

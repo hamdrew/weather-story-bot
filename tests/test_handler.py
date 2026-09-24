@@ -412,6 +412,52 @@ def test_one_log_line_per_recorded_post(
     assert statuses() == []
 
 
+def test_updated_story_logs_what_changed(
+    services: handler.Services,
+    api: Any,
+    mkx_payload: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    run(services)
+    before = posted_record(services, mkx_payload["stories"][1])
+    old_image_id = before.image_id
+    story = revise(
+        api,
+        mkx_payload,
+        b"PNG-revised",
+        download=REISSUED_DOWNLOAD,
+        description="Storm timing has shifted.",
+    )
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    run(services)
+
+    [rec] = [r for r in caplog.records if r.getMessage() == "Story posted"]
+    after = posted_record(services, story)
+    fields = vars(rec)
+    assert fields["status"] == "updated"
+    assert fields["changes"] == ["image_id", "image", "description"]
+    assert fields["image_id"] == Story.from_api(story).image_id != old_image_id
+    assert fields["previous_image_id"] == old_image_id
+    assert fields["fingerprint"] == after.fingerprint
+    assert fields["previous_fingerprint"] == before.fingerprint
+    assert fields["archive_prefix"] == after.archive_prefix
+    assert fields["previous_archive_prefix"] == before.archive_prefix
+
+
+def test_new_story_log_has_no_previous_fields(
+    services: handler.Services, api: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    run(services)
+
+    posted = [vars(r) for r in caplog.records if r.getMessage() == "Story posted"]
+    assert len(posted) == 2
+    assert all("fingerprint" in fields for fields in posted)
+    assert not any(k.startswith("previous_") or k == "changes" for f in posted for k in f)
+
+
 def test_post_is_counted_even_when_recording_fails(
     services: handler.Services,
     api: Any,

@@ -100,6 +100,12 @@ that was going to arrive in Phase 2.2.
 - **`plan` is two steps, not one.** Ambiguity rejection needs image bytes, but expired stories
   must never be downloaded. So: `select_active` (pure, no images) → caller downloads →
   `decide` (pure, over `(Story, image)` pairs).
+- **Updates should say what changed** (added 2026-09-24, Task 7b). The record keeps the
+  fingerprint's two inputs beside `fingerprint`. This is not a derived field on a source of
+  truth (`global/principles`): the current-story item is dedupe state, which already holds the
+  derived `fingerprint`, and these are that fingerprint's inputs. It isn't the ledger or the
+  archive. They are hashes, not the description text, so NWS content is never duplicated
+  outside the archive.
 - **The Lambda role needs `dynamodb:UpdateItem`.** It has only `GetItem` and `PutItem` today
   (`infra/iam.tf:26-29`), and both last-seen and the daily record's `ADD` need `UpdateItem`.
 
