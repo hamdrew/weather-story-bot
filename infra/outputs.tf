@@ -2,7 +2,7 @@ output "function_name" {
   value = aws_lambda_function.bot.function_name
 }
 
-output "table_name" {
+output "mvp_table_name" {
   value = aws_dynamodb_table.posted.name
 }
 

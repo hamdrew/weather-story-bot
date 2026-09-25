@@ -24,9 +24,10 @@ One table, generic key names, every item under its office's partition:
 - **No TTL.** Records are permanent and the ledger is a source of truth (`global/principles`). The lease expires through a conditional write on an ordinary `expires_at` attribute, not TTL
 - Use the low-level client with typed attributes (`{"S": ...}`) and `ConsistentRead=True` on dedupe lookups
 
-Until Phase 1.2's Stage 3 flips `STATE_TABLE`, the Lambda still reads and writes the MVP table
-`aws_dynamodb_table.posted` (`office_id` / `image_id = story#<story_key>`). That table is left
-untouched as the rollback and is removed deliberately after the new keys have soaked.
+The MVP table `aws_dynamodb_table.posted` (`office_id` / `image_id = story#<story_key>`) was
+copied here by `scripts/migrate_table_keys.py` in Phase 1.2's Stage 3. The Lambda no longer reads
+or writes it. It stays untouched as the rollback and is removed deliberately after the new keys
+have soaked.
 
 ## Migrations
 

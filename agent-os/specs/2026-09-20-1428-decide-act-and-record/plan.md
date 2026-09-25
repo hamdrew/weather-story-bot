@@ -283,6 +283,12 @@ so pointing `STATE_TABLE` at a `PK`/`SK` table alone fails every `GetItem` and s
 - `state.py`: read and write `PK = OFFICE#<id>`, `SK = STORY#<start_utc_iso>#<story_key>`, with
   `schema_version`, matching what Task 8 writes. Moto tests against the new key schema.
   Keep writing and reading `image_sha256` and `description_sha256`.
+- `find_story` takes the `Story` (the sort key needs its start time) and builds the key the same
+  way `record_posted` does, from `story.office_id`. Before, the lookup used the configured office
+  and the write used NWS's `officeId`, so a mismatch would have reposted every run. Both now also
+  write `office_id` and `story_key` as plain attributes, matching what Task 8 migrates.
+- `scripts/migrate_story_keys.py` writes its MVP-shape items itself instead of through
+  `PostedStore`, so it stays runnable. `image_sha256` becomes required on `record_posted`.
 - `infra/lambda.tf`: point `STATE_TABLE` at the new table.
 - `infra/iam.tf`: grant `GetItem`/`PutItem` on the new table's ARN and drop the old table's grants.
 

@@ -16,8 +16,8 @@ if TYPE_CHECKING:
     from types_boto3_s3 import S3Client
 
 FIXTURES = Path(__file__).parent / "fixtures"
-TABLE_NAME = "weather-story-bot-posted"
-STATE_TABLE_NAME = "weather-story-bot-state"
+TABLE_NAME = "weather-story-bot-state"
+MVP_TABLE_NAME = "weather-story-bot-posted"
 BUCKET_NAME = "weather-story-bot-archive-test"
 
 
@@ -68,38 +68,32 @@ def aws() -> Iterator[None]:
 
 @pytest.fixture
 def dynamodb(aws: None) -> DynamoDBClient:
+    """The state table the Lambda uses (PK/SK keys, backend/dynamodb-schema)."""
     client = boto3.client("dynamodb")
-    client.create_table(
-        TableName=TABLE_NAME,
-        KeySchema=[
-            {"AttributeName": "office_id", "KeyType": "HASH"},
-            {"AttributeName": "image_id", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "office_id", "AttributeType": "S"},
-            {"AttributeName": "image_id", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
+    _create_table(client, TABLE_NAME, "PK", "SK")
     return client
 
 
 @pytest.fixture
-def state_table(dynamodb: DynamoDBClient) -> DynamoDBClient:
-    """The state table (PK/SK keys, backend/dynamodb-schema) beside the MVP table."""
-    dynamodb.create_table(
-        TableName=STATE_TABLE_NAME,
+def mvp_table(dynamodb: DynamoDBClient) -> DynamoDBClient:
+    """The MVP table (`office_id` / `image_id`), which only the migration scripts use."""
+    _create_table(dynamodb, MVP_TABLE_NAME, "office_id", "image_id")
+    return dynamodb
+
+
+def _create_table(client: DynamoDBClient, name: str, hash_key: str, range_key: str) -> None:
+    client.create_table(
+        TableName=name,
         KeySchema=[
-            {"AttributeName": "PK", "KeyType": "HASH"},
-            {"AttributeName": "SK", "KeyType": "RANGE"},
+            {"AttributeName": hash_key, "KeyType": "HASH"},
+            {"AttributeName": range_key, "KeyType": "RANGE"},
         ],
         AttributeDefinitions=[
-            {"AttributeName": "PK", "AttributeType": "S"},
-            {"AttributeName": "SK", "AttributeType": "S"},
+            {"AttributeName": hash_key, "AttributeType": "S"},
+            {"AttributeName": range_key, "AttributeType": "S"},
         ],
         BillingMode="PAY_PER_REQUEST",
     )
-    return dynamodb
 
 
 @pytest.fixture

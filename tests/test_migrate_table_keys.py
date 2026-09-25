@@ -5,8 +5,9 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from scripts.migrate_table_keys import MigrationError, Plan, migrate
-from tests.conftest import STATE_TABLE_NAME, TABLE_NAME, make_story
-from weather_story_bot.state import PostedStore, story_key
+from tests.conftest import MVP_TABLE_NAME, TABLE_NAME, make_story
+from weather_story_bot.models import Story
+from weather_story_bot.state import PostedRecord, PostedStore, description_sha256, story_key
 
 if TYPE_CHECKING:
     from types_boto3_dynamodb import DynamoDBClient
@@ -22,22 +23,49 @@ STORMS_SK = f"STORY#2026-09-12T19:24:00+00:00#{story_key(STORMS)}"
 HEAT_SK = f"STORY#2026-09-12T19:24:00+00:00#{story_key(HEAT)}"
 
 
-@pytest.fixture
-def seeded(state_table: DynamoDBClient) -> None:
-    """Two story# records as the Lambda writes them; one predates the stored image hash."""
-    store = PostedStore(state_table, TABLE_NAME)
-    store.record_posted(
-        STORMS, 9, "stories/MKX/storms/fp-storms", "fp-storms", image_sha256="img-storms"
+def put_mvp_record(
+    dynamodb: DynamoDBClient, story: Story, message_id: int, fingerprint: str, **extra: str
+) -> None:
+    """A `story#` item as the Lambda wrote it to the MVP table."""
+    dynamodb.put_item(
+        TableName=MVP_TABLE_NAME,
+        Item={
+            "office_id": {"S": story.office_id},
+            "image_id": {"S": f"story#{story_key(story)}"},
+            "posted_image_id": {"S": story.image_id},
+            "title": {"S": story.title},
+            "start_time": {"S": story.start_time.isoformat()},
+            "end_time": {"S": story.end_time.isoformat()},
+            "update_time": {"S": story.update_time.isoformat()},
+            "posted_at": {"S": "2026-09-12T20:00:00+00:00"},
+            "telegram_message_id": {"N": str(message_id)},
+            "archive_prefix": {"S": f"stories/MKX/{fingerprint}"},
+            "fingerprint": {"S": fingerprint},
+            **{name: {"S": value} for name, value in extra.items()},
+        },
     )
-    store.record_posted(HEAT, 11, "stories/MKX/heat/fp-heat", "fp-heat")
+
+
+@pytest.fixture
+def seeded(mvp_table: DynamoDBClient) -> None:
+    """Two story# records; one predates the stored content hashes."""
+    put_mvp_record(
+        mvp_table,
+        STORMS,
+        9,
+        "fp-storms",
+        image_sha256="img-storms",
+        description_sha256=description_sha256(STORMS),
+    )
+    put_mvp_record(mvp_table, HEAT, 11, "fp-heat")
 
 
 def run(dynamodb: DynamoDBClient, **flags: bool) -> tuple[list[str], Plan]:
     lines: list[str] = []
     plan = migrate(
         dynamodb,
+        MVP_TABLE_NAME,
         TABLE_NAME,
-        STATE_TABLE_NAME,
         apply=flags.get("apply", False),
         delete_old=flags.get("delete_old", False),
         out=lines.append,
@@ -50,22 +78,22 @@ def items(dynamodb: DynamoDBClient, table: str) -> list[dict[str, Any]]:
 
 
 def snapshot(dynamodb: DynamoDBClient) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    return items(dynamodb, TABLE_NAME), items(dynamodb, STATE_TABLE_NAME)
+    return items(dynamodb, MVP_TABLE_NAME), items(dynamodb, TABLE_NAME)
 
 
 def new_item(dynamodb: DynamoDBClient, sk: str) -> dict[str, Any]:
     return dynamodb.get_item(
-        TableName=STATE_TABLE_NAME, Key={"PK": {"S": "OFFICE#MKX"}, "SK": {"S": sk}}
+        TableName=TABLE_NAME, Key={"PK": {"S": "OFFICE#MKX"}, "SK": {"S": sk}}
     )["Item"]
 
 
 @pytest.mark.usefixtures("seeded")
-def test_dry_run_plans_every_copy_and_changes_nothing(state_table: DynamoDBClient) -> None:
-    before = snapshot(state_table)
+def test_dry_run_plans_every_copy_and_changes_nothing(mvp_table: DynamoDBClient) -> None:
+    before = snapshot(mvp_table)
 
-    lines, plan = run(state_table)
+    lines, plan = run(mvp_table)
 
-    assert snapshot(state_table) == before
+    assert snapshot(mvp_table) == before
     assert len(plan.copies) == 2
     output = "\n".join(lines)
     assert "2 story# items: 2 to copy, 0 already in weather-story-bot-state" in output
@@ -73,12 +101,12 @@ def test_dry_run_plans_every_copy_and_changes_nothing(state_table: DynamoDBClien
 
 
 @pytest.mark.usefixtures("seeded")
-def test_apply_copies_each_record_under_the_new_keys(state_table: DynamoDBClient) -> None:
-    old = {item["image_id"]["S"]: item for item in items(state_table, TABLE_NAME)}
+def test_apply_copies_each_record_under_the_new_keys(mvp_table: DynamoDBClient) -> None:
+    old = {item["image_id"]["S"]: item for item in items(mvp_table, MVP_TABLE_NAME)}
 
-    run(state_table, apply=True)
+    run(mvp_table, apply=True)
 
-    storms = new_item(state_table, STORMS_SK)
+    storms = new_item(mvp_table, STORMS_SK)
     # Everything the Lambda reads comes across verbatim, so the live story is skipped, not
     # reposted, after the flip.
     expected = {k: v for k, v in old[f"story#{story_key(STORMS)}"].items() if k != "image_id"}
@@ -91,72 +119,105 @@ def test_apply_copies_each_record_under_the_new_keys(state_table: DynamoDBClient
     }
     assert storms["telegram_message_id"] == {"N": "9"}
     assert storms["image_sha256"] == {"S": "img-storms"}
-    heat = new_item(state_table, HEAT_SK)
+    heat = new_item(mvp_table, HEAT_SK)
     assert heat["fingerprint"] == {"S": "fp-heat"}
     assert heat["start_time"] == {"S": "2026-09-12T14:24:00-05:00"}
     assert "image_sha256" not in heat
-    assert len(items(state_table, STATE_TABLE_NAME)) == 2
-    assert len(items(state_table, TABLE_NAME)) == 2
+    assert len(items(mvp_table, TABLE_NAME)) == 2
+    assert len(items(mvp_table, MVP_TABLE_NAME)) == 2
 
 
 @pytest.mark.usefixtures("seeded")
-def test_rerun_keeps_records_already_in_the_new_table(state_table: DynamoDBClient) -> None:
-    run(state_table, apply=True)
+def test_the_lambda_finds_every_migrated_record(mvp_table: DynamoDBClient) -> None:
+    run(mvp_table, apply=True)
+
+    store = PostedStore(mvp_table, TABLE_NAME)
+    # Found, with the same message and fingerprint, so the first run after the flip skips both
+    # live stories instead of reposting them.
+    assert store.find_story(STORMS) == PostedRecord(
+        image_id=STORMS.image_id,
+        telegram_message_id=9,
+        archive_prefix="stories/MKX/fp-storms",
+        fingerprint="fp-storms",
+        image_sha256="img-storms",
+        description_sha256=description_sha256(STORMS),
+    )
+    heat = store.find_story(HEAT)
+    assert heat is not None
+    assert (heat.telegram_message_id, heat.fingerprint, heat.image_sha256) == (11, "fp-heat", None)
+
+
+@pytest.mark.usefixtures("seeded")
+def test_migrated_items_match_what_the_lambda_writes(mvp_table: DynamoDBClient) -> None:
+    run(mvp_table, apply=True)
+    migrated = new_item(mvp_table, STORMS_SK)
+
+    PostedStore(mvp_table, TABLE_NAME).record_posted(
+        STORMS, 9, "stories/MKX/fp-storms", "fp-storms", image_sha256="img-storms"
+    )
+
+    # Same attributes either way, so an S3 export sees one shape, not two.
+    assert set(new_item(mvp_table, STORMS_SK)) == set(migrated)
+
+
+@pytest.mark.usefixtures("seeded")
+def test_rerun_keeps_records_already_in_the_new_table(mvp_table: DynamoDBClient) -> None:
+    run(mvp_table, apply=True)
     # After the flip the Lambda updates the new table; the old table is stale.
-    state_table.update_item(
-        TableName=STATE_TABLE_NAME,
+    mvp_table.update_item(
+        TableName=TABLE_NAME,
         Key={"PK": {"S": "OFFICE#MKX"}, "SK": {"S": STORMS_SK}},
         UpdateExpression="SET telegram_message_id = :id",
         ExpressionAttributeValues={":id": {"N": "99"}},
     )
-    before = snapshot(state_table)
+    before = snapshot(mvp_table)
 
-    lines, _ = run(state_table, apply=True)
+    lines, _ = run(mvp_table, apply=True)
 
-    assert snapshot(state_table) == before
-    assert new_item(state_table, STORMS_SK)["telegram_message_id"] == {"N": "99"}
+    assert snapshot(mvp_table) == before
+    assert new_item(mvp_table, STORMS_SK)["telegram_message_id"] == {"N": "99"}
     assert "2 story# items: 0 to copy, 2 already in weather-story-bot-state" in "\n".join(lines)
 
 
 @pytest.mark.usefixtures("seeded")
-def test_delete_old_removes_only_items_already_copied(state_table: DynamoDBClient) -> None:
-    state_table.put_item(
-        TableName=STATE_TABLE_NAME,
+def test_delete_old_removes_only_items_already_copied(mvp_table: DynamoDBClient) -> None:
+    mvp_table.put_item(
+        TableName=TABLE_NAME,
         Item={"PK": {"S": "OFFICE#MKX"}, "SK": {"S": STORMS_SK}, "schema_version": {"N": "1"}},
     )
 
-    lines, _ = run(state_table, apply=True, delete_old=True)
+    lines, _ = run(mvp_table, apply=True, delete_old=True)
 
     # HEAT is copied by this run but only deleted by the next, once its copy was seen.
-    remaining = {item["image_id"]["S"] for item in items(state_table, TABLE_NAME)}
+    remaining = {item["image_id"]["S"] for item in items(mvp_table, MVP_TABLE_NAME)}
     assert remaining == {f"story#{story_key(HEAT)}"}
     assert "1 items not copied yet are kept" in "\n".join(lines)
 
-    run(state_table, apply=True, delete_old=True)
+    run(mvp_table, apply=True, delete_old=True)
 
-    assert items(state_table, TABLE_NAME) == []
-    assert len(items(state_table, STATE_TABLE_NAME)) == 2
+    assert items(mvp_table, MVP_TABLE_NAME) == []
+    assert len(items(mvp_table, TABLE_NAME)) == 2
 
 
 @pytest.mark.usefixtures("seeded")
-def test_delete_old_without_apply_changes_nothing(state_table: DynamoDBClient) -> None:
-    run(state_table, apply=True)
-    before = snapshot(state_table)
+def test_delete_old_without_apply_changes_nothing(mvp_table: DynamoDBClient) -> None:
+    run(mvp_table, apply=True)
+    before = snapshot(mvp_table)
 
-    lines, _ = run(state_table, delete_old=True)
+    lines, _ = run(mvp_table, delete_old=True)
 
-    assert snapshot(state_table) == before
+    assert snapshot(mvp_table) == before
     assert "Delete old: 2 items copied to weather-story-bot-state" in "\n".join(lines)
 
 
-def test_empty_old_table_fails(state_table: DynamoDBClient) -> None:
+def test_empty_old_table_fails(mvp_table: DynamoDBClient) -> None:
     with pytest.raises(MigrationError, match="is empty"):
-        run(state_table, apply=True)
+        run(mvp_table, apply=True)
 
 
 def put_old(dynamodb: DynamoDBClient, sort_key: str, **attributes: str) -> None:
     dynamodb.put_item(
-        TableName=TABLE_NAME,
+        TableName=MVP_TABLE_NAME,
         Item={
             "office_id": {"S": attributes.pop("office_id", "MKX")},
             "image_id": {"S": sort_key},
@@ -177,30 +238,30 @@ def put_old(dynamodb: DynamoDBClient, sort_key: str, **attributes: str) -> None:
     ],
 )
 def test_unexpected_items_fail_before_writing(
-    state_table: DynamoDBClient, sort_key: str, attributes: dict[str, str], error: str
+    mvp_table: DynamoDBClient, sort_key: str, attributes: dict[str, str], error: str
 ) -> None:
-    put_old(state_table, sort_key, **attributes)
-    before = snapshot(state_table)
+    put_old(mvp_table, sort_key, **attributes)
+    before = snapshot(mvp_table)
 
     with pytest.raises(MigrationError, match=error):
-        run(state_table, apply=True)
+        run(mvp_table, apply=True)
 
-    assert snapshot(state_table) == before
+    assert snapshot(mvp_table) == before
 
 
 @pytest.mark.usefixtures("seeded")
 def test_sort_key_not_matching_title_and_start_fails_before_writing(
-    state_table: DynamoDBClient,
+    mvp_table: DynamoDBClient,
 ) -> None:
-    state_table.update_item(
-        TableName=TABLE_NAME,
+    mvp_table.update_item(
+        TableName=MVP_TABLE_NAME,
         Key={"office_id": {"S": "MKX"}, "image_id": {"S": f"story#{story_key(HEAT)}"}},
         UpdateExpression="SET title = :title",
         ExpressionAttributeValues={":title": {"S": "Heat Index Tomorrow"}},
     )
-    before = snapshot(state_table)
+    before = snapshot(mvp_table)
 
     with pytest.raises(MigrationError, match="would never be found"):
-        run(state_table, apply=True)
+        run(mvp_table, apply=True)
 
-    assert snapshot(state_table) == before
+    assert snapshot(mvp_table) == before

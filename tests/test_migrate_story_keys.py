@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from scripts.migrate_story_keys import MigrationError, Revision, migrate, plan_copies
-from tests.conftest import BUCKET_NAME, TABLE_NAME, make_story
+from tests.conftest import BUCKET_NAME, MVP_TABLE_NAME, make_story
 from weather_story_bot.archive import archive_prefix
 from weather_story_bot.models import Story
-from weather_story_bot.state import PostedStore, content_fingerprint, story_key
+from weather_story_bot.state import content_fingerprint, story_key
 
 if TYPE_CHECKING:
     from types_boto3_dynamodb import DynamoDBClient
@@ -57,17 +57,22 @@ def seed_post(
         "archive_prefix": {"S": prefix},
     }
     dynamodb.put_item(
-        TableName=TABLE_NAME,
+        TableName=MVP_TABLE_NAME,
         Item={**common, "image_id": {"S": story.image_id}, "fingerprint": {"S": "old"}},
     )
     dynamodb.put_item(
-        TableName=TABLE_NAME,
+        TableName=MVP_TABLE_NAME,
         Item={
             **common,
             "image_id": {"S": f"content#old-{message_id}"},
             "posted_image_id": {"S": story.image_id},
         },
     )
+
+
+@pytest.fixture(autouse=True)
+def _mvp_table(mvp_table: DynamoDBClient) -> None:
+    """This script predates the state table and reads and writes only the MVP table."""
 
 
 @pytest.fixture
@@ -78,7 +83,7 @@ def seeded(s3: S3Client, dynamodb: DynamoDBClient) -> None:
     seed_post(s3, dynamodb, OTHER, b"v3", 11, "2026-09-12T22:30:00+00:00")
     seed_post(s3, dynamodb, REVISED, b"v2", 9, "2026-09-12T23:02:00+00:00")
     dynamodb.put_item(
-        TableName=TABLE_NAME,
+        TableName=MVP_TABLE_NAME,
         Item={
             "office_id": {"S": "MKX"},
             "image_id": {"S": "eeee-5555"},
@@ -95,7 +100,7 @@ def run(s3: S3Client, dynamodb: DynamoDBClient, **flags: bool) -> tuple[list[str
         s3,
         dynamodb,
         BUCKET_NAME,
-        TABLE_NAME,
+        MVP_TABLE_NAME,
         apply=flags.get("apply", False),
         delete_old=flags.get("delete_old", False),
         out=lines.append,
@@ -103,12 +108,19 @@ def run(s3: S3Client, dynamodb: DynamoDBClient, **flags: bool) -> tuple[list[str
     return lines, plan
 
 
+def story_record(dynamodb: DynamoDBClient, story: Story) -> dict[str, Any]:
+    return dynamodb.get_item(
+        TableName=MVP_TABLE_NAME,
+        Key={"office_id": {"S": "MKX"}, "image_id": {"S": f"story#{story_key(story)}"}},
+    )["Item"]
+
+
 def keys(s3: S3Client) -> set[str]:
     return {obj["Key"] for obj in s3.list_objects_v2(Bucket=BUCKET_NAME).get("Contents", [])}
 
 
 def sort_keys(dynamodb: DynamoDBClient) -> set[str]:
-    return {item["image_id"]["S"] for item in dynamodb.scan(TableName=TABLE_NAME)["Items"]}
+    return {item["image_id"]["S"] for item in dynamodb.scan(TableName=MVP_TABLE_NAME)["Items"]}
 
 
 def new_keys(story: Story, image: bytes) -> set[str]:
@@ -155,22 +167,15 @@ def test_apply_records_each_story_from_its_latest_post(
 ) -> None:
     run(s3, dynamodb, apply=True)
 
-    store = PostedStore(dynamodb, TABLE_NAME)
-    first = store.find_story("MKX", story_key(FIRST))
-    assert first is not None
-    assert first.telegram_message_id == 9
-    assert first.image_id == REVISED.image_id
+    first = story_record(dynamodb, FIRST)
+    assert first["telegram_message_id"] == {"N": "9"}
+    assert first["posted_image_id"] == {"S": REVISED.image_id}
     # The handler compares this fingerprint, so the live revision isn't reposted after deploy.
-    assert first.fingerprint == content_fingerprint(REVISED, b"v2")
-    assert first.archive_prefix == archive_prefix(REVISED, first.fingerprint)
-    other = store.find_story("MKX", story_key(OTHER))
-    assert other is not None
-    assert other.telegram_message_id == 11
-    item = dynamodb.get_item(
-        TableName=TABLE_NAME,
-        Key={"office_id": {"S": "MKX"}, "image_id": {"S": f"story#{story_key(FIRST)}"}},
-    )["Item"]
-    assert item["posted_at"] == {"S": "2026-09-12T23:02:00+00:00"}
+    fingerprint = content_fingerprint(REVISED, b"v2")
+    assert first["fingerprint"] == {"S": fingerprint}
+    assert first["archive_prefix"] == {"S": archive_prefix(REVISED, fingerprint)}
+    assert first["posted_at"] == {"S": "2026-09-12T23:02:00+00:00"}
+    assert story_record(dynamodb, OTHER)["telegram_message_id"] == {"N": "11"}
     assert len([key for key in sort_keys(dynamodb) if key.startswith("story#")]) == 2
 
 
@@ -178,8 +183,14 @@ def test_apply_records_each_story_from_its_latest_post(
 def test_rerun_changes_nothing_and_existing_records_are_kept(
     s3: S3Client, dynamodb: DynamoDBClient
 ) -> None:
-    store = PostedStore(dynamodb, TABLE_NAME)
-    store.record_posted(OTHER, 99, "stories/MKX/new-lambda", "fp-new")
+    dynamodb.put_item(
+        TableName=MVP_TABLE_NAME,
+        Item={
+            "office_id": {"S": "MKX"},
+            "image_id": {"S": f"story#{story_key(OTHER)}"},
+            "telegram_message_id": {"N": "99"},
+        },
+    )
 
     run(s3, dynamodb, apply=True)
     after_first = (keys(s3), sort_keys(dynamodb))
@@ -189,9 +200,7 @@ def test_rerun_changes_nothing_and_existing_records_are_kept(
     output = "\n".join(lines)
     assert "Archive: 0 copies, 0 identical re-issues" in output
     assert "DynamoDB: 0 story# records to write" in output
-    other = store.find_story("MKX", story_key(OTHER))
-    assert other is not None
-    assert other.telegram_message_id == 99
+    assert story_record(dynamodb, OTHER)["telegram_message_id"] == {"N": "99"}
 
 
 @pytest.mark.usefixtures("seeded")

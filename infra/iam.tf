@@ -21,10 +21,11 @@ data "aws_iam_policy_document" "lambda" {
     resources = ["${aws_cloudwatch_log_group.lambda.arn}:*"]
   }
 
+  # Only the state table. The MVP table is the rollback and the Lambda no longer touches it.
   statement {
-    sid       = "PostedState"
+    sid       = "State"
     actions   = ["dynamodb:GetItem", "dynamodb:PutItem"]
-    resources = [aws_dynamodb_table.posted.arn]
+    resources = [aws_dynamodb_table.state.arn]
   }
 
   statement {
