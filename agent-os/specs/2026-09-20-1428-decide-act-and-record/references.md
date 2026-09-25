@@ -88,6 +88,7 @@
 
 ### DynamoDB secondary index backfill
 
-- **Relevance:** A GSI added later indexes only items that carry its key attributes, which is why
-  event items must be written with `GSI1PK`/`GSI1SK` from the very first write. Without that,
-  Phase 2.2 would still need a migration.
+- **Relevance:** A GSI added later indexes only items that carry its key attributes. That once
+  argued for writing `GSI1PK`/`GSI1SK` from the first event; reversed 2026-09-23, because a GSI can
+  key on ordinary attributes (`PK`, `event_at`) and analytics reads an S3 export instead. LSIs, by
+  contrast, can only be created with the table (5 per table; GSIs default to 20).

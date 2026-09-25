@@ -98,9 +98,7 @@ Sources: `agent-os/notes/2026-09-16-standards-review.md` ("Suggested order" #1, 
   `schema_version` on every item. Two things settled it: the table holds 42 items today and never
   will again — it is growing by about 6 a day — so this migration's cost only rises; and the sort key's *values* are ours to
   choose even though its attribute is misleadingly named `image_id`, so sortable keys cost nothing
-  extra now. Event items also carry `GSI1PK`/`GSI1SK` from the very first write, because an index
-  added later backfills only items that already have its key attributes — without that, Phase 2.2
-  would need a migration after all.
+  extra now. No secondary indexes: the keys serve the bot, and analytics reads an S3 export.
   - **No TTL. Records stay permanent.** There is none today, and the Phase 2.2 sketch's TTL
     proposal is declined for now. Revisit once the S3 archive is the record of last resort.
   - The old table isn't touched. It's the rollback, and `infra/data-retention` forbids replacing
@@ -186,8 +184,8 @@ Sources: standards review, sections on `env-config`, `dynamodb-schema`, `side-ef
 - **A time zone per office.** Captions and every "year" fact need the office's local calendar; a
   story starting at 7 PM on December 31 lands on January 1 in UTC.
 - **DynamoDB work here is additive — Phase 1.2 already did the key redesign and the migration.**
-  What's left: create the `GSI1` index for "all offices on this day or year" (Phase 1.2 already
-  writes its key attributes, so it backfills on creation). The lease item also already exists. Revisit expiring
+  Cross-office questions ("all offices on this day or year") are analytics and go through the S3
+  export, not a GSI. The lease item also already exists. Revisit expiring
   current records and leases then, if the archive has become the record of last resort. Events
   never expire either way.
 - **The per-office lease already exists** (moved into Phase 1.2). What remains here is that
@@ -251,12 +249,14 @@ which the S3 archive plus a derived dataset already cover.
     is how you find out you're capturing the wrong fields *while you can still change them*.
     Discover a gap in January 2027 and that data is gone — NWS lists only active stories. It also
     acts as a canary: an export that sees no new ledger events means the writes broke.
-  - **Split the dump from the transform.** The scheduled job only dumps DynamoDB to S3, so it
-    needs nothing but `boto3` and can share the bot's zip, like Phase 2.3's digest Lambda.
-    Parquet conversion and querying happen downstream, where a heavy dependency is free.
+  - **Split the dump from the transform.** The dump is DynamoDB's native export to S3
+    (`ExportTableToPointInTime`, using the PITR already on): no dump code, no `Scan` permission,
+    no read capacity. It may not need a Lambda at all if an EventBridge Scheduler universal target
+    can start it (verify when shaping). Its DynamoDB JSON (typed `{"S": ...}` attributes) is
+    unwrapped downstream with the Parquet conversion and querying, where a heavy dependency is free.
     **DuckDB cannot go in the bot's zip:** it ships `manylinux_2_26/2_28` aarch64 wheels and
     `make build` targets `manylinux2014`, so adding it would fail the build.
-  - **Lands after Phase 2.1.** Adding a second Lambda before pipeline deploys just means another
+  - **Lands after Phase 2.1.** Adding a second Lambda (if one is still needed) before pipeline deploys just means another
     thing deployed by hand — the same problem in a different coat. It needs its own failure alarm,
     since the bot's error alarm wants two consecutive 15-minute failures.
 - **Inference runs after the fact, never in the posting Lambda.** A small model labels archived

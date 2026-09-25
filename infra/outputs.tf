@@ -6,6 +6,10 @@ output "table_name" {
   value = aws_dynamodb_table.posted.name
 }
 
+output "state_table_name" {
+  value = aws_dynamodb_table.state.name
+}
+
 output "bucket_name" {
   value = aws_s3_bucket.archive.bucket
 }

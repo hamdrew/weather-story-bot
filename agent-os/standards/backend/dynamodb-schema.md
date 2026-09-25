@@ -1,18 +1,30 @@
 # DynamoDB Schema
 
-## Current keys (MVP only)
+## Keys (`aws_dynamodb_table.state`)
 
-| Attribute | Role | Holds |
+One table, generic key names, every item under its office's partition:
+
+| Item | `PK` | `SK` |
 |---|---|---|
-| `office_id` | partition key | `MKX` |
-| `image_id` | sort key | `story#<story_key>`, **not** an image UUID |
-| `posted_image_id` | attribute | the real image UUID |
+| Current story | `OFFICE#<id>` | `STORY#<start_utc_iso>#<story_key>` |
+| Ledger event | `OFFICE#<id>` | `EVENT#<start_utc_iso>#<story_key>#<at_utc_iso>` |
+| Daily run record | `OFFICE#<id>` | `DAY#<YYYY-MM-DD>` (UTC day) |
+| Office lease | `OFFICE#<id>` | `LEASE` |
 
-- This is a lookup design. The hash sort key has no useful order, so there are no date-range queries and no cross-office listing without a Scan
-- Don't rename or reshape the keys in regular work. A future spec (all offices, analytics) will design keys from access patterns and migrate
-- Mark each item type with a sort-key prefix (`story#`). Old kinds (bare UUID, `content#`) are ignored, not read
-- Any read that isn't an exact key (Scan, Query on `office_id`) filters on the prefix
+- Key attributes are named `PK` and `SK`, never after what they hold, so new item types need no schema change
+- Sort-key values sort usefully: UTC ISO timestamps, so a `begins_with`/`BETWEEN` Query answers date ranges within one office
+- Every item carries `schema_version` (a number). Bump it when an item type's attributes change shape
+- Mark each item type with its uppercase sort-key prefix. Any read that isn't an exact key (a Query on `PK`) filters on the prefix
+- Global identity is `(office_id, story_key)` (`backend/story-identity`). `story_key` alone never appears as a key without its office
+- Keys serve the bot's own access patterns only. Analytics never queries the table: it reads a native export to S3 (`ExportTableToPointInTime`, which uses the PITR already on) and runs downstream (`global/principles`)
+- No secondary indexes today. Never add an LSI: it can only be created with the table and caps each partition at 10 GB for good. A GSI can be added any time and backfills every item that already has its key attributes, so no attribute is written "for a future index"
+- Timestamp attributes carry item-specific names (`event_at` on events, `posted_at`, `last_seen_at`, `expires_at`), never a generic `at`, so an index on one of them stays sparse
+- **No TTL.** Records are permanent and the ledger is a source of truth (`global/principles`). The lease expires through a conditional write on an ordinary `expires_at` attribute, not TTL
 - Use the low-level client with typed attributes (`{"S": ...}`) and `ConsistentRead=True` on dedupe lookups
+
+Until Phase 1.2's Stage 3 flips `STATE_TABLE`, the Lambda still reads and writes the MVP table
+`aws_dynamodb_table.posted` (`office_id` / `image_id = story#<story_key>`). That table is left
+untouched as the rollback and is removed deliberately after the new keys have soaked.
 
 ## Migrations
 
