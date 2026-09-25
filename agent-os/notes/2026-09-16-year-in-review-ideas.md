@@ -50,6 +50,23 @@ It might be shared with the NWS offices themselves, so the tone is appreciation.
 - Per story: hazard type, season, a drama rating, a one-line image description
 - Per year: narrative text written *from computed facts*
 - Candidates: "most dramatic story", "calmest week", recurring themes, a friendly look at title wordplay
+- **Design flair** (added 2026-09-25): stories where someone at the office had fun with the graphic.
+  Prompted by MKX's "Nice Weekend on Tap!" (start 2026-09-25T19:28Z, Telegram message 62, archived
+  at `stories/MKX/2026/09/25/1928Z-nice-weekend-on-tap-36b1559a/2d1c64f41d0a986c`): a 70s
+  sunburst, slab display type and a halftone texture on an unremarkable forecast. Its alt text
+  is "Graphic showing a three day forecast for this weekend with nice weather conditions." That
+  is accurate and says nothing about the design. Alt text describes what a story says, not how it
+  looks, so the flair is only in the pixels. This story is the first test case. Two parts:
+  - *Inferred, per image:* descriptive tags only: layout (house template or custom), type
+    (standard or display/novelty), and a motif when there is one ("retro 70s", "holiday",
+    "pop-culture reference"). The model describes; it doesn't decide what's unusual
+  - *Deterministic, per office:* "unusual" means unusual **for that office**, since each office has
+    its own house template. Measure each image's distance from its office's typical look (image
+    embeddings, or a perceptual hash as a cheap baseline). The template clusters tightly and a
+    one-off like this lands far outside, so "unusual" is a computed fact the grounding check can
+    verify, not a model's opinion
+  - In the PDF: an appreciation page ("the stories where someone had fun"), motifs marked as
+    inferred. Not a ranking of anyone's work
 
 ## Data needed vs captured
 
@@ -62,6 +79,7 @@ It might be shared with the NWS offices themselves, so the tone is appreciation.
 | Office time zone | holidays, hour of day, year boundaries | No | Office config (standards review) |
 | Historical warnings / storm reports | weather joins | No | Fetch at build time from public sources |
 | Inference labels | inferred facts | No | Derived dataset, keyed by model + prompt version |
+| Image embeddings per revision | design flair | No | Derived dataset, keyed by model; rebuilt from the archive's images |
 
 ### Daily run record (replaces the log aggregation idea)
 
@@ -89,6 +107,11 @@ archive (S3) + ledger + daily run records (DynamoDB) + external weather data
 ## Inference (Bedrock)
 
 - **Labels:** a small, fast model (Haiku 4.5 class) over each archived revision's image + text. Store the output with `model_id`, `prompt_version` and `labeled_at`. Re-label when either changes
+- **Embeddings:** a multimodal embedding model over each archived image, for design flair's
+  per-office distance. A different pattern from invoking a chat model (vectors plus a
+  nearest-neighbour check, no prompt), and a useful one to learn for cloud model management.
+  Compare with a perceptual-hash baseline before paying for it. Check which Bedrock embedding
+  models accept images in `us-east-2`, and their prices, at spec time
 - **Narrative:** a stronger model (Sonnet 5 / Opus 5 class) gets the **computed facts JSON as its only data**. It never counts or dates anything itself
 - **Grounding check (deterministic):** every number, date, office and story title in the generated text must appear in the facts JSON, or the build fails. Invented facts in something shared with an NWS office aren't acceptable
 - Inferred facts are marked as inferred in the PDF ("our AI reader thought...")
