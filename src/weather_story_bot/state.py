@@ -46,9 +46,25 @@ def content_fingerprint(story: Story, image: bytes) -> str:
 
 def story_key(story: Story) -> str:
     """Identify one story across revisions and image UUIDs: title plus start time."""
-    return _sha256_json(
-        {"title": story.title, "start_time": story.start_time.astimezone(UTC).isoformat()}
-    )
+    return story_key_for(story.title, story.start_time)
+
+
+def story_key_for(title: str, start_time: datetime) -> str:
+    """`story_key` from a stored title and start time, for code that has no `Story`."""
+    return _sha256_json({"title": title, "start_time": start_time.astimezone(UTC).isoformat()})
+
+
+# Keys of the state table (backend/dynamodb-schema). Shared with scripts/migrate_table_keys.py,
+# which must write exactly what this module reads.
+SCHEMA_VERSION = 1
+
+
+def office_pk(office_id: str) -> str:
+    return f"OFFICE#{office_id}"
+
+
+def story_sk(start_time: datetime, key: str) -> str:
+    return f"STORY#{start_time.astimezone(UTC).isoformat()}#{key}"
 
 
 @dataclass(frozen=True, slots=True)

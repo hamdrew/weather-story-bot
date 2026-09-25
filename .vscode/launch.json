@@ -12,6 +12,17 @@
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "args": ["--dry-run"]
+        },
+        {
+            "name": "Migrate Table Keys: Dry Run",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/migrate_table_keys.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "args": [],
+            // The ReadOnly role can't write, so this stays a dry run even if --apply is added.
+            "env": {"AWS_PROFILE": "readonly"}
         }
     ]
 }

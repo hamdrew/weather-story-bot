@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TABLE_NAME = "weather-story-bot-posted"
+STATE_TABLE_NAME = "weather-story-bot-state"
 BUCKET_NAME = "weather-story-bot-archive-test"
 
 
@@ -81,6 +82,24 @@ def dynamodb(aws: None) -> DynamoDBClient:
         BillingMode="PAY_PER_REQUEST",
     )
     return client
+
+
+@pytest.fixture
+def state_table(dynamodb: DynamoDBClient) -> DynamoDBClient:
+    """The state table (PK/SK keys, backend/dynamodb-schema) beside the MVP table."""
+    dynamodb.create_table(
+        TableName=STATE_TABLE_NAME,
+        KeySchema=[
+            {"AttributeName": "PK", "KeyType": "HASH"},
+            {"AttributeName": "SK", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "PK", "AttributeType": "S"},
+            {"AttributeName": "SK", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+    )
+    return dynamodb
 
 
 @pytest.fixture

@@ -14,6 +14,8 @@ One table, generic key names, every item under its office's partition:
 - Key attributes are named `PK` and `SK`, never after what they hold, so new item types need no schema change
 - Sort-key values sort usefully: UTC ISO timestamps, so a `begins_with`/`BETWEEN` Query answers date ranges within one office
 - Every item carries `schema_version` (a number). Bump it when an item type's attributes change shape
+- Build keys and `schema_version` with `state.py`'s `office_pk`, `story_sk` and `SCHEMA_VERSION`, never by hand, so migration scripts write exactly what the Lambda reads
+- Current-story items also carry `office_id` and `story_key` as ordinary attributes, so an S3 export reads them without parsing keys
 - Mark each item type with its uppercase sort-key prefix. Any read that isn't an exact key (a Query on `PK`) filters on the prefix
 - Global identity is `(office_id, story_key)` (`backend/story-identity`). `story_key` alone never appears as a key without its office
 - Keys serve the bot's own access patterns only. Analytics never queries the table: it reads a native export to S3 (`ExportTableToPointInTime`, which uses the PITR already on) and runs downstream (`global/principles`)
