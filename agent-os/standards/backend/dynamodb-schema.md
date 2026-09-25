@@ -35,7 +35,9 @@ Follow `scripts/migrate_story_keys.py`:
 
 - Module docstring: date, before and after, steps, runbook (pause the schedule, dry run, `--apply`, deploy)
 - Dry run by default, writes only with `--apply`, and every step idempotent
-- Old data is deleted only with a separate flag (`--delete-old`), after the new Lambda works. PITR and S3 versioning cover 35 days
+- Old data is deleted only after the new Lambda works. PITR and S3 versioning cover 35 days
+  - Within one table or bucket: a separate flag (`--delete-old`), as `migrate_story_keys.py` does
+  - To a new table (`scripts/migrate_table_keys.py`): no delete step. Drop the old table whole through Terraform in two applies, `deletion_protection_enabled = false` and then the resource. A table deleted with PITR on keeps a free 35-day SYSTEM backup
 - Raise a `MigrationError` before any write if the data doesn't look as expected
 - Test against moto with seeded old-shape data. Keep the script and tests in `scripts/` after running
 - Run with admin creds, not the Lambda role (`infra/iam`)

@@ -14,9 +14,11 @@ Lambda skips live stories instead of reposting them, and deletes the right messa
    start time. A mismatch means the flipped Lambda would never find the record and would repost.
 2. Copies each item to the state table. Items already there are kept, never overwritten: after
    the flip the Lambda writes them, and the old table is stale.
-3. With --delete-old, deletes each old item whose copy exists in the state table. Items stay
-   recoverable for 35 days through PITR. Only run this once the flipped Lambda has soaked: the
-   old table is the rollback.
+
+Never deletes anything. The old table is the rollback until the state table has soaked, then it
+is removed as a whole through Terraform (backend/dynamodb-schema): deletion protection off, then
+the resource. PITR keeps a free 35-day system backup of a deleted table, so deleting its items
+one by one first would add nothing.
 
 Prints the plan and changes nothing unless --apply is given. Every step is idempotent.
 
@@ -70,7 +72,6 @@ class MigrationError(Exception):
 class Copy:
     """One old item and the state-table item it becomes."""
 
-    old_key: dict[str, AttributeValueTypeDef]
     new_item: dict[str, AttributeValueTypeDef]
 
     @property
@@ -121,8 +122,7 @@ def convert(item: dict[str, Any]) -> Copy:
         "schema_version": {"N": str(SCHEMA_VERSION)},
         "story_key": {"S": key},
     }
-    old_key = {"office_id": item["office_id"], "image_id": item["image_id"]}
-    return Copy(old_key=old_key, new_item=new_item)
+    return Copy(new_item=new_item)
 
 
 def build_plan(dynamodb: DynamoDBClient, old_table: str, new_table: str) -> Plan:
@@ -149,7 +149,6 @@ def migrate(
     new_table: str,
     *,
     apply: bool,
-    delete_old: bool,
     out: Callable[[str], None] = print,
 ) -> Plan:
     plan = build_plan(dynamodb, old_table, new_table)
@@ -172,17 +171,6 @@ def migrate(
                 Item=copy.new_item,
                 ConditionExpression="attribute_not_exists(PK)",
             )
-
-    if not delete_old:
-        out(f"\nOld items kept: {plan.old_count} in {old_table}")
-        return plan
-    # Only items whose copy existed when the plan was read, so a dry run's count is exact.
-    out(f"\nDelete old: {len(plan.already_copied)} items copied to {new_table}")
-    if plan.copies:
-        out(f"  {len(plan.copies)} items not copied yet are kept; rerun after --apply")
-    if apply:
-        for copy in plan.already_copied:
-            dynamodb.delete_item(TableName=old_table, Key=copy.old_key)
     return plan
 
 
@@ -203,9 +191,6 @@ def _short(sort_key: str) -> str:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Copy story records to the state table's keys.")
     parser.add_argument("--apply", action="store_true", help="write the changes (default: dry run)")
-    parser.add_argument(
-        "--delete-old", action="store_true", help="also delete old items already copied"
-    )
     parser.add_argument("--old-table", default=DEFAULT_OLD_TABLE)
     parser.add_argument("--new-table", default=DEFAULT_NEW_TABLE)
     parser.add_argument("--region", default="us-east-2")
@@ -219,7 +204,6 @@ def main(argv: list[str] | None = None) -> None:
         args.old_table,
         args.new_table,
         apply=args.apply,
-        delete_old=args.delete_old,
     )
 
 

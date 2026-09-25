@@ -67,7 +67,6 @@ def run(dynamodb: DynamoDBClient, **flags: bool) -> tuple[list[str], Plan]:
         MVP_TABLE_NAME,
         TABLE_NAME,
         apply=flags.get("apply", False),
-        delete_old=flags.get("delete_old", False),
         out=lines.append,
     )
     return lines, plan
@@ -177,37 +176,6 @@ def test_rerun_keeps_records_already_in_the_new_table(mvp_table: DynamoDBClient)
     assert snapshot(mvp_table) == before
     assert new_item(mvp_table, STORMS_SK)["telegram_message_id"] == {"N": "99"}
     assert "2 story# items: 0 to copy, 2 already in weather-story-bot-state" in "\n".join(lines)
-
-
-@pytest.mark.usefixtures("seeded")
-def test_delete_old_removes_only_items_already_copied(mvp_table: DynamoDBClient) -> None:
-    mvp_table.put_item(
-        TableName=TABLE_NAME,
-        Item={"PK": {"S": "OFFICE#MKX"}, "SK": {"S": STORMS_SK}, "schema_version": {"N": "1"}},
-    )
-
-    lines, _ = run(mvp_table, apply=True, delete_old=True)
-
-    # HEAT is copied by this run but only deleted by the next, once its copy was seen.
-    remaining = {item["image_id"]["S"] for item in items(mvp_table, MVP_TABLE_NAME)}
-    assert remaining == {f"story#{story_key(HEAT)}"}
-    assert "1 items not copied yet are kept" in "\n".join(lines)
-
-    run(mvp_table, apply=True, delete_old=True)
-
-    assert items(mvp_table, MVP_TABLE_NAME) == []
-    assert len(items(mvp_table, TABLE_NAME)) == 2
-
-
-@pytest.mark.usefixtures("seeded")
-def test_delete_old_without_apply_changes_nothing(mvp_table: DynamoDBClient) -> None:
-    run(mvp_table, apply=True)
-    before = snapshot(mvp_table)
-
-    lines, _ = run(mvp_table, delete_old=True)
-
-    assert snapshot(mvp_table) == before
-    assert "Delete old: 2 items copied to weather-story-bot-state" in "\n".join(lines)
 
 
 def test_empty_old_table_fails(mvp_table: DynamoDBClient) -> None:

@@ -266,7 +266,10 @@ The only stage with manual work and a schedule pause.
 
 Follows `scripts/migrate_story_keys.py` exactly: dated module docstring with before/after and a
 runbook, dry run by default, `--apply` to write, every step idempotent, `MigrationError` before
-any write if the data looks wrong, `--delete-old` as a separate later step, moto-backed tests.
+any write if the data looks wrong, moto-backed tests. **No `--delete-old`** (decided
+2026-09-25): that flag exists in `migrate_story_keys.py` because it moved data within one table
+and bucket. This migration moves to a new table, so the old one is dropped whole through
+Terraform instead, and PITR keeps a free 35-day system backup of a deleted table.
 
 Copies each `story#<story_key>` item from the old table to `STORY#<start>#<story_key>` on the new
 one, preserving `telegram_message_id`, `posted_at`, `fingerprint` and `archive_prefix` so live
@@ -303,7 +306,8 @@ so pointing `STATE_TABLE` at a `PK`/`SK` table alone fails every `GetItem` and s
 
 - **Watch:** the first run must post **nothing**. A repost here means the migration missed items.
 - **Rollback:** point `STATE_TABLE` back at the old table and deploy. The old table is untouched
-  and still current, so this is a clean revert. Do not run `--delete-old` until the soak is clean.
+  and still current, so this is a clean revert. Don't remove the old table until Stage 4's soak
+  is clean.
 
 ---
 
@@ -387,4 +391,7 @@ the delta in the spec folder.
 - `make cost` before and after; the delta should be pennies (on-demand writes only).
 - `uv run weather-story-bot --dry-run --office MKX` against live NWS prints a decision beside
   every caption, including expired and rejected ones.
-- Leave the old table in place until Stage 4's soak is clean, then run `--delete-old` deliberately.
+- Leave the old table in place until Stage 4's soak is clean, then remove
+  `aws_dynamodb_table.posted` deliberately in two reviewed applies: `deletion_protection_enabled =
+  false` first, then the resource (and its `mvp_table_name` output). DynamoDB keeps a SYSTEM
+  backup of a table deleted with PITR on, free for 35 days, so it stays restorable.
