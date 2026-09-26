@@ -11,6 +11,7 @@ import boto3
 import httpx
 import pytest
 import respx
+from botocore.exceptions import ClientError
 
 from tests.conftest import BUCKET_NAME, TABLE_NAME
 from weather_story_bot import handler
@@ -18,7 +19,7 @@ from weather_story_bot.archive import StoryArchive
 from weather_story_bot.config import OfficeConfig
 from weather_story_bot.models import Story
 from weather_story_bot.nws import NwsClient
-from weather_story_bot.state import PostedStore
+from weather_story_bot.state import OfficeLease, PostedStore
 from weather_story_bot.telegram import TelegramClient
 
 TOKEN = "123:secret-token"
@@ -42,6 +43,7 @@ def services(dynamodb: Any, s3: Any) -> handler.Services:
     return handler.Services(
         nws=NwsClient(http, "tests", sleep=lambda _: None),
         store=PostedStore(dynamodb, TABLE_NAME),
+        lease=OfficeLease(dynamodb, TABLE_NAME),
         archive=StoryArchive(s3, BUCKET_NAME),
         telegram=TelegramClient(http, TOKEN, sleep=lambda _: None),
     )
@@ -605,3 +607,75 @@ def test_json_formatter_includes_extra_fields() -> None:
     entry = json.loads(handler.JsonFormatter().format(record))
     assert entry["message"] == "Story posted"
     assert entry["office"] == "MKX"
+
+
+def test_overlapping_run_sends_nothing(services: handler.Services, api: Any) -> None:
+    send = api.routes["photo"].side_effect
+    overlapping: list[Any] = []
+
+    def send_during_overlap(request: httpx.Request) -> httpx.Response:
+        # Scheduler's at-least-once delivery: a second run starts while the first is sending.
+        if not overlapping:
+            overlapping.append(run(services))
+        return send(request)
+
+    api.routes["photo"].side_effect = send_during_overlap
+
+    summary = run(services)
+
+    assert overlapping == [{"MKX": counts(skipped=1)}]
+    assert summary["MKX"] == counts(posted=2)
+    assert api.routes["photo"].call_count == 2
+    # The first run released its lease, so the next one runs and finds nothing new.
+    assert run(services)["MKX"] == counts(skipped=2)
+    assert api.routes["photo"].call_count == 2
+
+
+def test_held_lease_skips_the_office(
+    services: handler.Services, api: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    assert services.lease.take("MKX", NOW) is not None
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    assert run(services)["MKX"] == counts(skipped=1)
+    assert not api.calls
+    [record] = [r for r in caplog.records if r.getMessage() == "Office run already in progress"]
+    assert record.levelno == logging.INFO
+    assert vars(record)["office"] == "MKX"
+
+
+def test_lease_error_counts_as_failed(
+    services: handler.Services, api: Any, dynamodb: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def throttled(**_: Any) -> None:
+        raise ClientError(
+            {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"}},
+            "PutItem",
+        )
+
+    # moto can't throttle; this PutItem is the lease's, the first write of the run.
+    monkeypatch.setattr(dynamodb, "put_item", throttled)
+
+    assert run(services)["MKX"] == counts(failed=1)
+    assert not api.calls
+
+
+def test_failed_release_still_counts_the_run(
+    services: handler.Services,
+    api: Any,
+    dynamodb: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def throttled(**_: Any) -> None:
+        raise ClientError(
+            {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"}},
+            "DeleteItem",
+        )
+
+    monkeypatch.setattr(dynamodb, "delete_item", throttled)
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    assert run(services)["MKX"] == counts(posted=2)
+    [record] = [r for r in caplog.records if r.getMessage() == "Office lease release failed"]
+    assert record.levelno == logging.WARNING

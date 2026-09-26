@@ -5,8 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
+from uuid import uuid4
+
+from botocore.exceptions import ClientError
 
 from weather_story_bot.models import Story, parse_time
 
@@ -69,6 +72,9 @@ def story_sk(start_time: datetime, key: str) -> str:
 
 def event_sk(start_time: datetime, key: str, at: datetime) -> str:
     return f"EVENT#{start_time.astimezone(UTC).isoformat()}#{key}#{utc_timestamp(at)}"
+
+
+LEASE_SK = "LEASE"
 
 
 def run_sk(at: datetime) -> str:
@@ -180,3 +186,71 @@ def story_item_key(story: Story) -> dict[str, AttributeValueTypeDef]:
         "PK": {"S": office_pk(story.office_id)},
         "SK": {"S": story_sk(story.start_time, story_key(story))},
     }
+
+
+# The Lambda timeout (300s, infra/lambda.tf) plus a margin for clock skew between runs. Shorter
+# than the 900s schedule, so a crashed run's lease is gone before the next run starts.
+LEASE_DURATION = timedelta(seconds=360)
+
+
+class OfficeLease:
+    """One `LEASE` item per office, so only one run acts on an office at a time.
+
+    Step 0 of backend/side-effect-order, and in the safety chain: a lease that can't be taken
+    means the run does nothing for that office. It expires through a conditional write on
+    `expires_at`, not TTL (backend/dynamodb-schema).
+    """
+
+    def __init__(self, dynamodb_client: DynamoDBClient, table_name: str) -> None:
+        self._client = dynamodb_client
+        self._table = table_name
+
+    def take(
+        self, office_id: str, now: datetime, *, duration: timedelta = LEASE_DURATION
+    ) -> str | None:
+        """Take the office's lease, returning its holder token, or `None` if another run has it.
+
+        Any other DynamoDB error raises: without the lease the run can't know it's alone.
+        """
+        holder = uuid4().hex
+        try:
+            self._client.put_item(
+                TableName=self._table,
+                Item={
+                    **_lease_key(office_id),
+                    "schema_version": {"N": str(SCHEMA_VERSION)},
+                    "office_id": {"S": office_id},
+                    "holder": {"S": holder},
+                    "taken_at": {"S": utc_timestamp(now)},
+                    "expires_at": {"S": utc_timestamp(now + duration)},
+                },
+                ConditionExpression="attribute_not_exists(PK) OR expires_at < :now",
+                ExpressionAttributeValues={":now": {"S": utc_timestamp(now)}},
+            )
+        except ClientError as exc:
+            if _is_condition_failure(exc):
+                return None
+            raise
+        return holder
+
+    def release(self, office_id: str, holder: str) -> None:
+        """Delete the lease if it's still this run's, so the next run needn't wait for it."""
+        try:
+            self._client.delete_item(
+                TableName=self._table,
+                Key=_lease_key(office_id),
+                ConditionExpression="holder = :holder",
+                ExpressionAttributeValues={":holder": {"S": holder}},
+            )
+        except ClientError as exc:
+            # Ours expired and a later run took it; that one is theirs to release.
+            if not _is_condition_failure(exc):
+                raise
+
+
+def _lease_key(office_id: str) -> dict[str, AttributeValueTypeDef]:
+    return {"PK": {"S": office_pk(office_id)}, "SK": {"S": LEASE_SK}}
+
+
+def _is_condition_failure(exc: ClientError) -> bool:
+    return exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException"

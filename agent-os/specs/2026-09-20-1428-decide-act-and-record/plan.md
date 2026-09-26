@@ -365,11 +365,16 @@ lives in `state.py`.
 - `infra/iam.tf`: add `DeleteItem` on the new table's ARN. Amend `infra/iam.md`, whose "No
   `Delete*`" rule then needs to allow exact item-level `DeleteItem` for the lease.
 
+**Wired into `handler.run` here, not in Task 12 (decided 2026-09-26).** The counts and the
+interleaved-runs test need the lease in the run loop, and `side-effect-order.md` gains step 0 in
+the task that makes it true. Release is conditional on a per-take `holder` token, so a run whose
+lease expired can't free the next run's. `LEASE_DURATION` is 360s.
+
 ## Task 12: Wire the lease and history into the apply step
 
-Take the lease first (step 0), then the existing side effects in order, with the three history
-writes around them and never between them. Amend `backend/side-effect-order.md` with step 0 and
-with where the best-effort writes sit — outside the chain — noting that Phase 2.2 deliberately
+The lease (step 0) is already in place from Task 11. Add the three history writes around the
+existing side effects and never between them. Amend `backend/side-effect-order.md` with where
+the best-effort writes sit — outside the chain — noting that Phase 2.2 deliberately
 reverses the latter by making the ledger write atomic with the record.
 
 ## Task 13: Cost and index sweep

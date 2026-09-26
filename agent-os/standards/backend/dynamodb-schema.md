@@ -33,6 +33,14 @@ Best-effort and append-only, outside the safety chain: a failed write logs WARNI
 - **`last_seen_at`** on the `STORY#` item: rewritten only when the value read with the record is an hour stale, decided before any request, since a failed conditional write still bills. The condition `attribute_exists(PK)` keeps it from creating an item. `record_posted` replaces the item and clears it, so each repost starts unseen. A story pulled early shows `last_seen_at` well before `end_time`
 - **`RUN#`**: one immutable item per office per run, written like events: `run_at`, `nws_failed`, `stories_seen`, the run's outcome counts (`backend/run-outcomes`) and `aws_request_id`. Raw runs, never daily totals: outages, days and per-office baselines are derived at analysis time, so the record doesn't depend on the schedule's cadence. A duplicate run is its own item
 
+## Office lease (`state.OfficeLease`)
+
+In the safety chain (step 0 of `backend/side-effect-order`), so it lives in `state.py`. One `LEASE` item per office: `office_id`, `holder` (a random token per take), `taken_at`, `expires_at`.
+
+- **Take**: conditional `PutItem` on `attribute_not_exists(PK) OR expires_at < :now`. A condition failure means another run holds it; any other error raises
+- **Release**: `DeleteItem` in a `finally`, conditional on `holder`, so a run whose lease expired can't delete the next run's
+- `expires_at` is `taken_at + LEASE_DURATION` (360s: the 300s Lambda timeout plus a margin), shorter than the 900s schedule, so a crashed run's lease is gone before the next run. Raising the Lambda timeout means raising `LEASE_DURATION` with it
+
 The MVP table `aws_dynamodb_table.posted` (`office_id` / `image_id = story#<story_key>`) was
 copied here by `scripts/migrate_table_keys.py` in Phase 1.2's Stage 3. The Lambda no longer reads
 or writes it. It stays untouched as the rollback and is removed deliberately after the new keys

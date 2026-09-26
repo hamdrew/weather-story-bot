@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+from botocore.exceptions import BotoCoreError, ClientError
 
 from weather_story_bot.archive import StoryArchive
 from weather_story_bot.config import OfficeConfig, Settings
@@ -19,6 +20,7 @@ from weather_story_bot.models import Story
 from weather_story_bot.nws import NwsClient
 from weather_story_bot.planner import Decision, Outcome, decide, select_active
 from weather_story_bot.state import (
+    OfficeLease,
     PostedRecord,
     PostedStore,
     content_fingerprint,
@@ -114,6 +116,7 @@ class ProcessingError(Exception):
 class Services:
     nws: NwsClient
     store: PostedStore
+    lease: OfficeLease
     archive: StoryArchive
     telegram: TelegramClient
 
@@ -129,31 +132,59 @@ def run(
         summary[office.office_id] = counts
         with _office_context(office.office_id):
             try:
-                stories = services.nws.list_stories(office.office_id)
+                holder = services.lease.take(office.office_id, now)
             except Exception:
-                logger.exception("Failed to list stories")
+                logger.exception("Failed to take office lease")
                 counts["failed"] += 1
                 continue
-
-            active, expired = select_active(stories, now)
-            counts["skipped"] += len(expired)
-
-            downloaded: list[tuple[Story, bytes]] = []
-            for story in active:
-                try:
-                    downloaded.append((story, services.nws.download_image(story)))
-                except Exception:
-                    logger.exception("Failed to download story image", extra={"title": story.title})
-                    counts["failed"] += 1
-
-            records: dict[str, PostedRecord] = {}
-            for story, _ in downloaded:
-                record = services.store.find_story(story)
-                if record is not None:
-                    records[story_key(story)] = record
-            decisions = decide(office.office_id, downloaded, records, now)
-            _apply_decisions(office, decisions, services, counts)
+            if holder is None:
+                logger.info("Office run already in progress")
+                counts["skipped"] += 1
+                continue
+            try:
+                _run_office(office, services, now, counts)
+            finally:
+                _release_lease(services.lease, office.office_id, holder)
     return summary
+
+
+def _run_office(
+    office: OfficeConfig, services: Services, now: datetime, counts: dict[str, int]
+) -> None:
+    """List, download, decide and act for one office, while holding its lease."""
+    try:
+        stories = services.nws.list_stories(office.office_id)
+    except Exception:
+        logger.exception("Failed to list stories")
+        counts["failed"] += 1
+        return
+
+    active, expired = select_active(stories, now)
+    counts["skipped"] += len(expired)
+
+    downloaded: list[tuple[Story, bytes]] = []
+    for story in active:
+        try:
+            downloaded.append((story, services.nws.download_image(story)))
+        except Exception:
+            logger.exception("Failed to download story image", extra={"title": story.title})
+            counts["failed"] += 1
+
+    records: dict[str, PostedRecord] = {}
+    for story, _ in downloaded:
+        record = services.store.find_story(story)
+        if record is not None:
+            records[story_key(story)] = record
+    decisions = decide(office.office_id, downloaded, records, now)
+    _apply_decisions(office, decisions, services, counts)
+
+
+def _release_lease(lease: OfficeLease, office_id: str, holder: str) -> None:
+    """Free the office for the next run; if this fails, the lease expires before that run."""
+    try:
+        lease.release(office_id, holder)
+    except (BotoCoreError, ClientError) as exc:
+        logger.warning("Office lease release failed", extra={"error": str(exc)})
 
 
 def _apply_decisions(
@@ -275,9 +306,11 @@ def _build_services(settings: Settings) -> Services:
         Name=settings.telegram_token_param, WithDecryption=True
     )["Parameter"]["Value"]
     http = httpx.Client()
+    dynamodb = boto3.client("dynamodb")
     return Services(
         nws=NwsClient(http, settings.nws_user_agent),
-        store=PostedStore(boto3.client("dynamodb"), settings.state_table),
+        store=PostedStore(dynamodb, settings.state_table),
+        lease=OfficeLease(dynamodb, settings.state_table),
         archive=StoryArchive(boto3.client("s3"), settings.archive_bucket),
         telegram=TelegramClient(http, token),
     )
