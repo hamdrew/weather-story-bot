@@ -18,6 +18,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from weather_story_bot.models import Story
 from weather_story_bot.state import (
     SCHEMA_VERSION,
+    PostedRecord,
     event_sk,
     office_pk,
     run_sk,
@@ -90,6 +91,39 @@ class StoryHistory:
             item["telegram_message_id"] = {"N": str(telegram_message_id)}
         if reasons:
             item["reasons"] = {"L": [{"S": reason} for reason in reasons]}
+        self._put_event(item, story.office_id, story.image_id)
+
+    def record_deletion(
+        self, story: Story, replaced: PostedRecord, kind: EventKind, *, at: datetime
+    ) -> None:
+        """Write a `deleted` or `delete_failed` event about the message a repost replaced.
+
+        About the replaced revision only: its image id, fingerprint and message id, from its
+        record. `story` supplies the identity (title and start), which revisions share; its end
+        and update times are the new revision's, and the record doesn't keep the old ones, so the
+        event leaves them out rather than mixing revisions.
+        """
+        key = story_key(story)
+        item: dict[str, AttributeValueTypeDef] = {
+            "PK": {"S": office_pk(story.office_id)},
+            "SK": {"S": event_sk(story.start_time, key, at)},
+            "schema_version": {"N": str(SCHEMA_VERSION)},
+            "office_id": {"S": story.office_id},
+            "story_key": {"S": key},
+            "event": {"S": kind},
+            "event_at": {"S": utc_timestamp(at)},
+            "image_id": {"S": replaced.image_id},
+            "title": {"S": story.title},
+            "start_time": {"S": story.start_time.isoformat()},
+            "fingerprint": {"S": replaced.fingerprint},
+            "telegram_message_id": {"N": str(replaced.telegram_message_id)},
+        }
+        self._put_event(item, story.office_id, replaced.image_id)
+
+    def _put_event(
+        self, item: dict[str, AttributeValueTypeDef], office_id: str, image_id: str
+    ) -> None:
+        # Never overwrites: a key collision is a failed write, not a replacement.
         try:
             self._client.put_item(
                 TableName=self._table,
@@ -97,7 +131,7 @@ class StoryHistory:
                 ConditionExpression="attribute_not_exists(PK)",
             )
         except (BotoCoreError, ClientError) as exc:
-            _log_failure("event", story.office_id, exc, image_id=story.image_id)
+            _log_failure("event", office_id, exc, image_id=image_id)
 
     def touch_last_seen(
         self, story: Story, last_seen_at: datetime | None, *, now: datetime

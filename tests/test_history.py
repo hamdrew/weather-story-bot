@@ -9,7 +9,7 @@ import pytest
 
 from tests.conftest import TABLE_NAME, make_story
 from weather_story_bot.history import EventKind, StoryHistory
-from weather_story_bot.state import PostedStore, story_key
+from weather_story_bot.state import PostedRecord, PostedStore, story_key
 
 NOW = datetime(2026, 9, 25, 14, 37, 12, 345678, tzinfo=UTC)
 MISSING_TABLE = "no-such-table"
@@ -83,6 +83,34 @@ def test_record_event_stores_no_update_diff(dynamodb: Any) -> None:
 
     [item] = items(dynamodb, "EVENT#")
     assert not {key for key in item if key.startswith("previous_") or key == "changes"}
+
+
+def test_record_deletion_describes_the_replaced_revision_only(dynamodb: Any) -> None:
+    story = make_story()  # The listing now shows a new revision under a new image id.
+    replaced = PostedRecord(
+        image_id="old-image", telegram_message_id=41, archive_prefix="p", fingerprint="fp1"
+    )
+
+    StoryHistory(dynamodb, TABLE_NAME).record_deletion(story, replaced, EventKind.DELETED, at=NOW)
+
+    [item] = items(dynamodb, "EVENT#")
+    assert item == {
+        "PK": {"S": "OFFICE#MKX"},
+        "SK": {
+            "S": f"EVENT#2026-09-12T19:24:00+00:00#{story_key(story)}"
+            "#2026-09-25T14:37:12.345678+00:00"
+        },
+        "schema_version": {"N": "1"},
+        "office_id": {"S": "MKX"},
+        "story_key": {"S": story_key(story)},
+        "event": {"S": "deleted"},
+        "event_at": {"S": "2026-09-25T14:37:12.345678+00:00"},
+        "image_id": {"S": "old-image"},
+        "title": {"S": "Storms Monday Night"},
+        "start_time": {"S": "2026-09-12T19:24:00+00:00"},
+        "fingerprint": {"S": "fp1"},
+        "telegram_message_id": {"N": "41"},
+    }
 
 
 def test_events_sort_by_time_within_a_story(dynamodb: Any) -> None:

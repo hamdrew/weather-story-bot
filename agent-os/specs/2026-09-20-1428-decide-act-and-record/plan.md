@@ -377,6 +377,14 @@ existing side effects and never between them. Amend `backend/side-effect-order.m
 the best-effort writes sit — outside the chain — noting that Phase 2.2 deliberately
 reverses the latter by making the ledger write atomic with the record.
 
+**As built (2026-09-26).** Events are written after step 5, timed at the send and the delete;
+the `deleted`/`delete_failed` event (`record_deletion`) describes only the replaced revision:
+its image id, fingerprint and message id, and no end or update time.
+`last_seen_at` is touched on `unchanged` decisions only. `RUN#` is written after the lease is
+released, and only by a run that held it, so a lease lost to another run leaves no item.
+A story that stays ambiguous gets a `rejected` event every run (96 a day), which Task 13's
+usage estimate should count.
+
 ## Task 13: Cost and index sweep
 
 Refresh `agent-os/standards/index.yml` descriptions for every file touched across all four stages,
@@ -387,7 +395,8 @@ the delta in the spec folder.
 
 `make build && make deploy`. No pause needed.
 
-- **Watch:** a ledger event, a `last_seen_at` and a `RUN#` record appear for MKX within an hour.
+- **Watch:** a `RUN#` record and a `last_seen_at` appear for MKX within an hour; a ledger event
+  appears with the next post, update or rejection, which can be hours away.
   Two runs never post the same story. `Office run already in progress` appears only if a genuine
   overlap happens.
 - **Rollback:** redeploy the previous zip. Ledger items already written are harmless — they are

@@ -7,7 +7,7 @@
 | `posted` / `updated` | new post / repost of a changed story | success |
 | `skipped` | unchanged, or expired (no action at all); `1` for the office when another run holds its lease | success + INFO `"Office run already in progress"` |
 | `rejected` | ambiguous NWS data we refuse (`backend/untrusted-nws-data`) | success + ERROR log + `nws-ambiguous` alarm |
-| `failed` | exception taking the office lease, or on list, download or process | `ProcessingError` -> Lambda Errors -> `errors` alarm |
+| `failed` | exception taking the office lease, or on list, download, reading posted stories (fails the whole office) or process | `ProcessingError` -> Lambda Errors -> `errors` alarm |
 
 - Choosing a count: if the next run may fix it (our side or a transient error), it's `failed`. Upstream data we refuse on purpose gets its own count, an ERROR log line and a metric-filter alarm, and the run still succeeds
 - `lambda_handler` logs `"Run complete"` with the summary **before** raising `ProcessingError`, so runs with failed stories still leave a summary. Errors before `run()` (`ConfigError`, SSM or boto3 failures in `_build_services`) raise with no summary. Look for the Lambda traceback instead
