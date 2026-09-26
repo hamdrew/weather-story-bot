@@ -41,28 +41,33 @@ _aws_request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 _office: contextvars.ContextVar[str | None] = contextvars.ContextVar("office", default=None)
 
 
-class _RequestContextFilter(logging.Filter):
-    """Adds `office` and `aws_request_id` to every line this logger emits.
+_base_record_factory = logging.getLogRecordFactory()
+
+
+def _record_with_request_context(*args: Any, **kwargs: Any) -> logging.LogRecord:
+    """Add `office` and `aws_request_id` to every log record created while they are set.
 
     Set once per invocation (`aws_request_id`, via `_invocation_context`, from the Lambda
     context) and once per office within it (`office`, via `_office_context`), instead of every
     caller passing them through `extra`. `ContextVar.set`'s token makes each scope's cleanup
     exact, even on an exception, rather than relying on a plain attribute someone remembers to
-    reset. Attached once, at import time, to the `weather_story_bot` logger itself, so it still
-    applies when tests call `run()` directly without `configure_logging`.
+    reset. A record factory rather than a logger filter, because a logger's filters never see
+    its child loggers' records (`weather_story_bot.telegram`, `.nws`, `.history`). Installed at
+    import time, chained to the factory already in place, so it applies when tests call `run()`
+    directly without `configure_logging`. Callers must not pass either key in `extra`: logging
+    refuses to overwrite a record attribute and raises `KeyError`.
     """
+    record = _base_record_factory(*args, **kwargs)
+    aws_request_id = _aws_request_id.get()
+    if aws_request_id is not None:
+        record.aws_request_id = aws_request_id
+    office = _office.get()
+    if office is not None:
+        record.office = office
+    return record
 
-    def filter(self, record: logging.LogRecord) -> bool:
-        aws_request_id = _aws_request_id.get()
-        if aws_request_id is not None:
-            record.aws_request_id = aws_request_id
-        office = _office.get()
-        if office is not None:
-            record.office = office
-        return True
 
-
-logger.addFilter(_RequestContextFilter())
+logging.setLogRecordFactory(_record_with_request_context)
 
 
 @contextmanager
@@ -173,6 +178,24 @@ def _run_office(
         counts["failed"] += 1
         return None
 
+    # The office catch-all (backend/client-errors), inside the lease so the run is still recorded
+    # as one that saw NWS. Per-step catches below keep their own, more specific messages.
+    try:
+        _act_on_stories(office, stories, services, now, counts)
+    except Exception:
+        logger.exception("Failed to process office")
+        counts["failed"] += 1
+    return len(stories)
+
+
+def _act_on_stories(
+    office: OfficeConfig,
+    stories: list[Story],
+    services: Services,
+    now: datetime,
+    counts: dict[str, int],
+) -> None:
+    """Download, decide and act on one office's listing."""
     active, expired = select_active(stories, now)
     counts["skipped"] += len(expired)
 
@@ -195,10 +218,9 @@ def _run_office(
     except Exception:
         logger.exception("Failed to read posted stories")
         counts["failed"] += 1
-        return len(stories)
+        return
     decisions = decide(office.office_id, downloaded, records, now)
     _apply_decisions(office, decisions, services, now, counts)
-    return len(stories)
 
 
 def _release_lease(lease: OfficeLease, office_id: str, holder: str) -> None:

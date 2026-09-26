@@ -400,7 +400,9 @@ result and the delta are in `cost.md`.
 
 ### 🚦 Deploy gate 4
 
-`make build && make deploy`. No pause needed.
+`make build && make plan`; the plan should change only the Lambda's code and the DynamoDB
+actions in its IAM policy (`UpdateItem` for `last_seen_at`, `DeleteItem` for the lease release).
+Then `make deploy`. No pause needed.
 
 - **Watch:** a `RUN#` record and a `last_seen_at` appear for MKX within an hour; a ledger event
   appears with the next post, update or rejection, which can be hours away.

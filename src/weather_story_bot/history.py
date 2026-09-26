@@ -91,7 +91,7 @@ class StoryHistory:
             item["telegram_message_id"] = {"N": str(telegram_message_id)}
         if reasons:
             item["reasons"] = {"L": [{"S": reason} for reason in reasons]}
-        self._put_event(item, story.office_id, story.image_id)
+        self._put_event(item, story.image_id)
 
     def record_deletion(
         self, story: Story, replaced: PostedRecord, kind: EventKind, *, at: datetime
@@ -118,11 +118,9 @@ class StoryHistory:
             "fingerprint": {"S": replaced.fingerprint},
             "telegram_message_id": {"N": str(replaced.telegram_message_id)},
         }
-        self._put_event(item, story.office_id, replaced.image_id)
+        self._put_event(item, replaced.image_id)
 
-    def _put_event(
-        self, item: dict[str, AttributeValueTypeDef], office_id: str, image_id: str
-    ) -> None:
+    def _put_event(self, item: dict[str, AttributeValueTypeDef], image_id: str) -> None:
         # Never overwrites: a key collision is a failed write, not a replacement.
         try:
             self._client.put_item(
@@ -131,7 +129,7 @@ class StoryHistory:
                 ConditionExpression="attribute_not_exists(PK)",
             )
         except (BotoCoreError, ClientError) as exc:
-            _log_failure("event", office_id, exc, image_id=image_id)
+            _log_failure("event", exc, image_id=image_id)
 
     def touch_last_seen(
         self, story: Story, last_seen_at: datetime | None, *, now: datetime
@@ -154,7 +152,7 @@ class StoryHistory:
         except (BotoCoreError, ClientError) as exc:
             if _is_condition_failure(exc):
                 return  # No record to touch; the story was never posted.
-            _log_failure("last_seen", story.office_id, exc, image_id=story.image_id)
+            _log_failure("last_seen", exc, image_id=story.image_id)
 
     def record_run(
         self,
@@ -191,7 +189,7 @@ class StoryHistory:
                 ConditionExpression="attribute_not_exists(PK)",
             )
         except (BotoCoreError, ClientError) as exc:
-            _log_failure("run", office_id, exc)
+            _log_failure("run", exc)
 
 
 def _is_condition_failure(exc: Exception) -> bool:
@@ -201,9 +199,8 @@ def _is_condition_failure(exc: Exception) -> bool:
     )
 
 
-def _log_failure(write: str, office_id: str, exc: Exception, **extra: str) -> None:
-    # This module's logger isn't handler's, so its lines don't get `office` from the filter.
+def _log_failure(write: str, exc: Exception, **extra: str) -> None:
+    # `office` comes from handler's log record factory, which fails on a caller-supplied one.
     logger.warning(
-        "History write failed",
-        extra={"history_write": write, "office": office_id, "error": str(exc), **extra},
+        "History write failed", extra={"history_write": write, "error": str(exc), **extra}
     )

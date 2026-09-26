@@ -569,6 +569,42 @@ def test_failed_record_lookup_fails_only_its_office(
     assert grb_run["nws_failed"] == {"BOOL": False}
 
 
+def test_unexpected_error_fails_only_its_office(
+    services: handler.Services,
+    api: Any,
+    mkx_payload: dict[str, Any],
+    dynamodb: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    grb_payload = copy.deepcopy(mkx_payload)
+    for story in grb_payload["stories"]:
+        story["officeId"] = "GRB"
+    api.get(GRB_URL).respond(json=grb_payload)
+    decide = handler.decide
+
+    def broken_for_grb(office_id: str, *args: Any) -> Any:
+        if office_id == "GRB":
+            raise TypeError("can't compare offset-naive and offset-aware datetimes")
+        return decide(office_id, *args)
+
+    # A bug, not a client error: nothing at the wire raises TypeError.
+    monkeypatch.setattr(handler, "decide", broken_for_grb)
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    summary = run(services, GRB, MKX)
+
+    assert summary == {"GRB": counts(failed=1), "MKX": counts(posted=2)}
+    [failed] = [r for r in caplog.records if r.getMessage() == "Failed to process office"]
+    assert vars(failed)["office"] == "GRB"
+    assert failed.exc_info is not None
+    # GRB still released its lease and recorded a run that saw NWS.
+    assert services.lease.take("GRB", NOW) is not None
+    [grb_run] = [r for r in history_items(dynamodb, "RUN#") if r["office_id"]["S"] == "GRB"]
+    assert grb_run["nws_failed"] == {"BOOL": False}
+    assert grb_run["stories_seen"] == {"N": "2"}
+
+
 def test_log_lines_carry_their_own_office_and_never_a_stale_one(
     services: handler.Services, api: Any, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -581,6 +617,11 @@ def test_log_lines_carry_their_own_office_and_never_a_stale_one(
     assert vars(failed)["office"] == "GRB"
     posted = [r for r in caplog.records if r.getMessage() == "Story posted"]
     assert {vars(r)["office"] for r in posted} == {"MKX"}
+    # Child modules' loggers get it too, not only handler's.
+    sent = [r for r in caplog.records if r.getMessage() == "Telegram message sent"]
+    assert sent
+    assert {r.name for r in sent} == {"weather_story_bot.telegram"}
+    assert {vars(r)["office"] for r in sent} == {"MKX"}
 
 
 def test_lambda_handler_end_to_end(
@@ -616,6 +657,9 @@ def test_lambda_handler_end_to_end(
     # aws_request_id comes from the Lambda context, not a caller-supplied extra.
     complete = [r for r in caplog.records if r.getMessage() == "Run complete"]
     assert all(vars(r)["aws_request_id"] == "test-request-id" for r in complete)
+    sent = [r for r in caplog.records if r.getMessage() == "Telegram message sent"]
+    assert len(sent) == 2
+    assert all(vars(r)["aws_request_id"] == "test-request-id" for r in sent)
     # Run complete spans every office, so it carries no single office's id.
     assert all("office" not in vars(r) for r in complete)
 
@@ -890,5 +934,6 @@ def test_failed_history_writes_never_block_a_post(
     failed = [vars(r) for r in caplog.records if r.getMessage() == "History write failed"]
     assert all(r["levelno"] == logging.WARNING for r in failed)
     assert {r["history_write"] for r in failed} == {"event", "last_seen", "run"}
+    assert {r["office"] for r in failed} == {"MKX"}
     # Every run still released its lease.
     assert services.lease.take("MKX", NOW) is not None

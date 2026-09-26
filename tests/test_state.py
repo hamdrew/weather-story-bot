@@ -136,7 +136,8 @@ def test_record_posted_then_find_story(dynamodb: Any) -> None:
     assert item["start_time"] == {"S": "2026-09-12T19:24:00+00:00"}
     assert item["end_time"] == {"S": "2026-09-13T19:24:00+00:00"}
     assert item["update_time"] == {"S": "2026-09-12T19:30:25+00:00"}
-    assert item["posted_at"] == {"S": "2026-09-12T20:00:00+00:00"}
+    # Fixed width even on a whole second, so it sorts as a string beside the other timestamps.
+    assert item["posted_at"] == {"S": "2026-09-12T20:00:00.000000+00:00"}
 
 
 def test_sort_key_uses_the_utc_start(dynamodb: Any) -> None:

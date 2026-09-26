@@ -152,11 +152,8 @@ def test_record_event_failure_logs_warning_and_returns(
 
     [record] = failures(caplog)
     assert record["levelno"] == logging.WARNING
-    assert (record["history_write"], record["office"], record["image_id"]) == (
-        "event",
-        "MKX",
-        "aaaa-1111",
-    )
+    # `office` comes from handler's log context; test_handler pins it on these lines.
+    assert (record["history_write"], record["image_id"]) == ("event", "aaaa-1111")
     assert "ResourceNotFoundException" in record["error"]
 
 
@@ -342,4 +339,4 @@ def test_record_run_failure_logs_warning_and_returns(
 
     [record] = failures(caplog)
     assert record["levelno"] == logging.WARNING
-    assert (record["history_write"], record["office"]) == ("run", "MKX")
+    assert record["history_write"] == "run"

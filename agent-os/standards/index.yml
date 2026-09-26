@@ -28,7 +28,7 @@ backend:
   story-identity:
     description: story_key (title + UTC start) vs content_fingerprint (image + description); no NWS-volatile fields; stored hash parts only explain changes
   structured-logging:
-    description: Fixed message + extra fields, no f-strings; reserved LogRecord keys; log level by consequence; office and aws_request_id come from a context filter
+    description: Fixed message + extra fields, no f-strings; reserved LogRecord keys; log level by consequence; office and aws_request_id come from a log record factory, never extra
   untrusted-nws-data:
     description: Reject and alert on ambiguous NWS listings (shared image ID, title + start, or image); ignore expired stories
 

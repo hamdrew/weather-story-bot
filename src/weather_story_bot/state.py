@@ -160,7 +160,7 @@ class PostedStore:
             "start_time": {"S": story.start_time.isoformat()},
             "end_time": {"S": story.end_time.isoformat()},
             "update_time": {"S": story.update_time.isoformat()},
-            "posted_at": {"S": posted_at.isoformat()},
+            "posted_at": {"S": utc_timestamp(posted_at)},
             "telegram_message_id": {"N": str(message_id)},
             "archive_prefix": {"S": archive_prefix},
             "fingerprint": {"S": fingerprint},
