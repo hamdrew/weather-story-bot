@@ -30,7 +30,7 @@ resource "aws_dynamodb_table" "posted" {
 # Items under PK = OFFICE#<id>, each carrying schema_version:
 #   STORY#<start_utc_iso>#<story_key>                current story
 #   EVENT#<start_utc_iso>#<story_key>#<at_utc_iso>   ledger event (append-only)
-#   DAY#<YYYY-MM-DD>                                 daily run record (UTC)
+#   RUN#<at_utc_iso>                                 run record (append-only)
 #   LEASE                                            office lease
 resource "aws_dynamodb_table" "state" {
   name         = "${local.name}-state"

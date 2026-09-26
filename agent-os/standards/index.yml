@@ -12,7 +12,7 @@ backend:
   client-errors:
     description: One public error type per client; handler.run is the only catch-all boundary
   dynamodb-schema:
-    description: Generic PK/SK with OFFICE#/STORY#/EVENT#/DAY#/LEASE keys, schema_version, no TTL, no indexes (analytics via S3 export), never an LSI; migration script pattern
+    description: Generic PK/SK with OFFICE#/STORY#/EVENT#/RUN#/LEASE keys, schema_version, no TTL, no indexes (analytics via S3 export), never an LSI; best-effort append-only history; office lease; migration script pattern
   env-config:
     description: Settings.from_env(Mapping) with ConfigError; add a setting in config.py, lambda.tf, variables.tf and a test; office id regex in both places
   injected-clients:
@@ -20,15 +20,15 @@ backend:
   retries:
     description: At most one in-client retry, decided by side effects; next run is the real retry; platform retries off
   run-outcomes:
-    description: Fixed summary counts; failed = next run may fix, refused upstream data gets its own count; cold-start token cache
+    description: Fixed summary counts; failed = next run may fix, refused upstream data gets its own count; a lost office lease is skipped; cold-start token cache
   secrets-in-errors:
     description: Keep the Telegram token URL out of exceptions, tracebacks and logs
   side-effect-order:
-    description: find, archive, send, record, delete old message; each failure leaves the old message or both, never zero
+    description: Office lease first; find, archive, send, record, delete old message; each failure leaves the old message or both, never zero; history writes around the chain, never between its steps
   story-identity:
-    description: story_key (title + UTC start) vs content_fingerprint (image + description); no NWS-volatile fields
+    description: story_key (title + UTC start) vs content_fingerprint (image + description); no NWS-volatile fields; stored hash parts only explain changes
   structured-logging:
-    description: Fixed message + extra fields, no f-strings; reserved LogRecord keys; log level by consequence
+    description: Fixed message + extra fields, no f-strings; reserved LogRecord keys; log level by consequence; office and aws_request_id come from a context filter
   untrusted-nws-data:
     description: Reject and alert on ambiguous NWS listings (shared image ID, title + start, or image); ignore expired stories
 
@@ -38,11 +38,11 @@ infra:
   data-retention:
     description: Archive and state table kept forever (no TTL) with matched 35-day undo windows; stop and ask before replacing a table or bucket
   iam:
-    description: Exact actions on narrowest ARNs via policy documents; SourceAccount guard on service trust policies
+    description: Exact actions on narrowest ARNs via policy documents; the only delete is item-level DeleteItem for the lease; SourceAccount guard on service trust policies
 
 testing:
   handler-tests:
-    description: Handler tests run real clients over respx+moto; inject now/sleep; assert counts(); rerun after state changes
+    description: Planner tests are table-driven with no moto; handler tests run real clients over respx+moto; inject now/sleep; assert counts(); rerun after state changes
   log-contracts:
     description: Pin metric-filter/runbook log messages with tests; rename log, test and monitoring.tf together
   offline-tests:

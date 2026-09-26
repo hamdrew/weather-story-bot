@@ -57,7 +57,7 @@
 - **Location:** `agent-os/notes/2026-09-16-year-in-review-ideas.md`
 - **Relevance:** "Data needed vs captured" defines the three writes, and the "Daily run record"
   section specifies the 96-slot bitmap. Its open question on UTC vs local days is answered here:
-  **UTC**.
+  **UTC**. The daily record itself was replaced by one `RUN#` item per run on 2026-09-25.
 - **The deadline behind this spec:** the bot went live 2026-09-13 and NWS lists only *active*
   stories, so nothing can be backfilled. A full-year 2027 edition needs recording live well
   before 2027-01-01.

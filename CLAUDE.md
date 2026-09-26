@@ -13,6 +13,14 @@ Python 3.13 Lambda (arm64) that posts NWS Weather Stories to Telegram. Infra is 
 ## Standards
 - Read `agent-os/standards/index.yml` and the relevant files before changing clients, error handling, retries, logging, config, state/archive, the CLI, tests or infra
 
+## Skills
+- Planning lives in agent-os (shape-spec, spec plan.md, numbered tasks with deploy gates).
+  Don't use superpowers:brainstorming, writing-plans, executing-plans,
+  subagent-driven-development or dispatching-parallel-agents.
+- Within a spec task, use superpowers for discipline: test-driven-development for
+  behaviour changes, systematic-debugging for failures, verification-before-completion
+  before reporting a task done, requesting-code-review before handing back.
+
 ## Gotchas
 - boto3 is a dev-only dependency (the Lambda runtime provides it). The only runtime dependency is httpx; don't add boto3 to `dependencies`.
 - The dev group installs `boto3[crt]` so local scripts can use `aws login` credentials (the login provider needs `awscrt`). `make build` exports `--no-dev`, so it never reaches the Lambda zip.

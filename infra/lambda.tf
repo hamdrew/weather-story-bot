@@ -13,7 +13,8 @@ resource "aws_lambda_function" "bot" {
   filename         = var.lambda_zip_path
   source_code_hash = filebase64sha256(var.lambda_zip_path)
   memory_size      = 256
-  timeout          = 300
+  # state.LEASE_DURATION (360s) must stay longer than this, or a slow run's lease can expire mid-run.
+  timeout = 300
 
   environment {
     variables = {

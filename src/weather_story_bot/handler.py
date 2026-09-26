@@ -12,13 +12,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+from botocore.exceptions import BotoCoreError, ClientError
 
 from weather_story_bot.archive import StoryArchive
 from weather_story_bot.config import OfficeConfig, Settings
+from weather_story_bot.history import EventKind, StoryHistory
 from weather_story_bot.models import Story
 from weather_story_bot.nws import NwsClient
 from weather_story_bot.planner import Decision, Outcome, decide, select_active
 from weather_story_bot.state import (
+    OfficeLease,
     PostedRecord,
     PostedStore,
     content_fingerprint,
@@ -114,6 +117,8 @@ class ProcessingError(Exception):
 class Services:
     nws: NwsClient
     store: PostedStore
+    lease: OfficeLease
+    history: StoryHistory
     archive: StoryArchive
     telegram: TelegramClient
 
@@ -129,37 +134,89 @@ def run(
         summary[office.office_id] = counts
         with _office_context(office.office_id):
             try:
-                stories = services.nws.list_stories(office.office_id)
+                holder = services.lease.take(office.office_id, now)
             except Exception:
-                logger.exception("Failed to list stories")
+                logger.exception("Failed to take office lease")
                 counts["failed"] += 1
                 continue
-
-            active, expired = select_active(stories, now)
-            counts["skipped"] += len(expired)
-
-            downloaded: list[tuple[Story, bytes]] = []
-            for story in active:
-                try:
-                    downloaded.append((story, services.nws.download_image(story)))
-                except Exception:
-                    logger.exception("Failed to download story image", extra={"title": story.title})
-                    counts["failed"] += 1
-
-            records: dict[str, PostedRecord] = {}
-            for story, _ in downloaded:
-                record = services.store.find_story(story)
-                if record is not None:
-                    records[story_key(story)] = record
-            decisions = decide(office.office_id, downloaded, records, now)
-            _apply_decisions(office, decisions, services, counts)
+            if holder is None:
+                logger.info("Office run already in progress")
+                counts["skipped"] += 1
+                continue
+            try:
+                stories_seen = _run_office(office, services, now, counts)
+            finally:
+                _release_lease(services.lease, office.office_id, holder)
+            # Only runs that held the lease are recorded: a missing RUN# item means no run.
+            services.history.record_run(
+                office.office_id,
+                at=now,
+                nws_failed=stories_seen is None,
+                stories_seen=stories_seen or 0,
+                counts=counts,
+                aws_request_id=_aws_request_id.get(),
+            )
     return summary
 
 
+def _run_office(
+    office: OfficeConfig, services: Services, now: datetime, counts: dict[str, int]
+) -> int | None:
+    """List, download, decide and act for one office, while holding its lease.
+
+    Returns how many stories NWS listed, or `None` if the listing failed.
+    """
+    try:
+        stories = services.nws.list_stories(office.office_id)
+    except Exception:
+        logger.exception("Failed to list stories")
+        counts["failed"] += 1
+        return None
+
+    active, expired = select_active(stories, now)
+    counts["skipped"] += len(expired)
+
+    downloaded: list[tuple[Story, bytes]] = []
+    for story in active:
+        try:
+            downloaded.append((story, services.nws.download_image(story)))
+        except Exception:
+            logger.exception("Failed to download story image", extra={"title": story.title})
+            counts["failed"] += 1
+
+    # All or nothing: deciding without a record would repost its story, and dropping the story
+    # would hide it from the ambiguity checks, so one failed read fails the office.
+    records: dict[str, PostedRecord] = {}
+    try:
+        for story, _ in downloaded:
+            record = services.store.find_story(story)
+            if record is not None:
+                records[story_key(story)] = record
+    except Exception:
+        logger.exception("Failed to read posted stories")
+        counts["failed"] += 1
+        return len(stories)
+    decisions = decide(office.office_id, downloaded, records, now)
+    _apply_decisions(office, decisions, services, now, counts)
+    return len(stories)
+
+
+def _release_lease(lease: OfficeLease, office_id: str, holder: str) -> None:
+    """Free the office for the next run; if this fails, the lease expires before that run."""
+    try:
+        lease.release(office_id, holder)
+    except (BotoCoreError, ClientError) as exc:
+        logger.warning("Office lease release failed", extra={"error": str(exc)})
+
+
 def _apply_decisions(
-    office: OfficeConfig, decisions: list[Decision], services: Services, counts: dict[str, int]
+    office: OfficeConfig,
+    decisions: list[Decision],
+    services: Services,
+    now: datetime,
+    counts: dict[str, int],
 ) -> None:
-    """Log rejections once per office, then act on every remaining decision in order."""
+    """Log and record rejections once per office, then act on every remaining decision."""
     rejected = [d for d in decisions if d.outcome is Outcome.REJECTED]
     if rejected:
         # The `nws-ambiguous` alarm's metric filter matches this exact ERROR message.
@@ -177,12 +234,18 @@ def _apply_decisions(
             },
         )
     counts["rejected"] += len(rejected)
+    for decision in rejected:
+        _record_rejection(services.history, decision)
 
     for decision in decisions:
         if decision.outcome is Outcome.REJECTED:
             continue
         if decision.outcome is Outcome.UNCHANGED:
             counts["skipped"] += 1
+            if decision.record is not None:
+                services.history.touch_last_seen(
+                    decision.story, decision.record.last_seen_at, now=now
+                )
             continue
         try:
             _apply_post_or_update(office, decision, services)
@@ -209,9 +272,15 @@ def _apply_post_or_update(office: OfficeConfig, decision: Decision, services: Se
         image,
         updated=decision.outcome is Outcome.UPDATE,
     )
+    posted_at = datetime.now(UTC)
     # Recorded only after Telegram accepts it: a failure here may cause a repost, never a miss.
     services.store.record_posted(
-        story, message_id, prefix, fingerprint, image_sha256=image_sha256(image)
+        story,
+        message_id,
+        prefix,
+        fingerprint,
+        image_sha256=image_sha256(image),
+        posted_at=posted_at,
     )
     extra: dict[str, Any] = {
         "image_id": story.image_id,
@@ -229,13 +298,30 @@ def _apply_post_or_update(office: OfficeConfig, decision: Decision, services: Se
             "previous_archive_prefix": replaced.archive_prefix,
         }
     logger.info("Story posted", extra=extra)
+    delete_event: tuple[EventKind, datetime] | None = None
     if replaced is not None:
-        _delete_replaced_message(services.telegram, office, story, replaced)
+        deleted = _delete_replaced_message(services.telegram, office, story, replaced)
+        delete_event = (
+            EventKind.DELETED if deleted else EventKind.DELETE_FAILED,
+            datetime.now(UTC),
+        )
+
+    # History goes after the whole chain, never between its steps (backend/side-effect-order).
+    services.history.record_event(
+        story,
+        EventKind.POSTED if decision.outcome is Outcome.POST else EventKind.UPDATED,
+        at=posted_at,
+        fingerprint=fingerprint,
+        telegram_message_id=message_id,
+    )
+    if replaced is not None and delete_event is not None:
+        kind, deleted_at = delete_event
+        services.history.record_deletion(story, replaced, kind, at=deleted_at)
 
 
 def _delete_replaced_message(
     telegram: TelegramClient, office: OfficeConfig, story: Story, replaced: PostedRecord
-) -> None:
+) -> bool:
     """Delete the message a repost replaced; if Telegram refuses, both stay in the channel."""
     try:
         telegram.delete_message(office.chat_id, replaced.telegram_message_id)
@@ -248,6 +334,22 @@ def _delete_replaced_message(
                 "error": str(exc),
             },
         )
+        return False
+    return True
+
+
+def _record_rejection(history: StoryHistory, decision: Decision) -> None:
+    fingerprint = (
+        content_fingerprint(decision.story, decision.image) if decision.image is not None else None
+    )
+    history.record_event(
+        decision.story,
+        EventKind.REJECTED,
+        # Read per event: stories rejected as duplicate_title_and_start share a story_key.
+        at=datetime.now(UTC),
+        fingerprint=fingerprint,
+        reasons=decision.reasons,
+    )
 
 
 def post_story(
@@ -275,9 +377,12 @@ def _build_services(settings: Settings) -> Services:
         Name=settings.telegram_token_param, WithDecryption=True
     )["Parameter"]["Value"]
     http = httpx.Client()
+    dynamodb = boto3.client("dynamodb")
     return Services(
         nws=NwsClient(http, settings.nws_user_agent),
-        store=PostedStore(boto3.client("dynamodb"), settings.state_table),
+        store=PostedStore(dynamodb, settings.state_table),
+        lease=OfficeLease(dynamodb, settings.state_table),
+        history=StoryHistory(dynamodb, settings.state_table),
         archive=StoryArchive(boto3.client("s3"), settings.archive_bucket),
         telegram=TelegramClient(http, token),
     )

@@ -81,9 +81,9 @@ Sources: `agent-os/notes/2026-09-16-standards-review.md` ("Suggested order" #1, 
     office, story, time, fingerprint, message id and reasons.
   - **Last seen,** updated only when it's at least an hour stale, so a story pulled before its end
     time is visible.
-  - **A daily record per office** counting runs, NWS failures, stories seen and rejections, with a
-    bit per 15-minute slot marking the runs where NWS couldn't be reached. Outages are just runs of
-    consecutive set bits.
+  - **A record per run per office:** when it ran, whether NWS answered, stories seen and the
+    run's outcome counts. Outages and daily totals are derived from these, so they don't depend on
+    the schedule's cadence.
 
   These are best effort. A failed write logs a warning and never blocks a post — they are
   deliberately not part of the safety chain.
@@ -94,7 +94,7 @@ Sources: `agent-os/notes/2026-09-16-standards-review.md` ("Suggested order" #1, 
   reversed that: the migration is cheaper now than it will ever be again, so it happens here. See
   the next item.
 - **Redesign the DynamoDB keys now, once** (moved here from Phase 2.2 during shaping). A new
-  table with generic `PK`/`SK` names, sortable sort-key values (`STORY#`, `EVENT#`, `DAY#`) and a
+  table with generic `PK`/`SK` names, sortable sort-key values (`STORY#`, `EVENT#`, `RUN#`) and a
   `schema_version` on every item. Two things settled it: the table holds 42 items today and never
   will again — it is growing by about 6 a day — so this migration's cost only rises; and the sort key's *values* are ours to
   choose even though its attribute is misleadingly named `image_id`, so sortable keys cost nothing
@@ -297,7 +297,7 @@ so these travel together. Sources: standards review, "Before about 50 offices" a
   script from Phase 2.2 are the starting point; at some point it wants to be one command.
 - **A daily health digest instead of per-office quiet alarms.** The global "gone quiet" alarm can't
   see one silent office, and a per-office version would be noisy, because some offices rarely
-  publish at all. Build the digest from the daily run records, comparing each office against its
+  publish at all. Build the digest from the run records, comparing each office against its
   *own* history. That's a report, not an alarm, which keeps fixed monthly cost O(1) in offices per
   `infra/budget` — per-office alarms and per-office custom metrics are exactly what that standard
   exists to prevent.

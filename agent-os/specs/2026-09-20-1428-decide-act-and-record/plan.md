@@ -205,7 +205,7 @@ touched; it is the rollback, and `infra/data-retention` forbids replacing it.
 |---|---|---|
 | Current story | `OFFICE#<id>` | `STORY#<start_utc_iso>#<story_key>` |
 | Ledger event | `OFFICE#<id>` | `EVENT#<start_utc_iso>#<story_key>#<at_utc_iso>` |
-| Daily run record | `OFFICE#<id>` | `DAY#<YYYY-MM-DD>` (UTC) |
+| Run record | `OFFICE#<id>` | `RUN#<at_utc_iso>` (replaced `DAY#<YYYY-MM-DD>`, 2026-09-25) |
 | Office lease | `OFFICE#<id>` | `LEASE` |
 
 - Generic `PK`/`SK` attribute names, `schema_version` on every item.
@@ -327,10 +327,20 @@ WARNING and never blocks a post.
   (decided 2026-09-24). What an update changed is derived at analysis time from consecutive
   events for the same story, not stored in the ledger.
 - `touch_last_seen(...)` — `UpdateItem` on the current-story item, **only when `last_seen_at` is
-  at least an hour stale**, so a story pulled before its `endTime` is visible.
-- `record_run(...)` — one `UpdateItem` with `ADD` per run: `runs`, `nws_failures`,
-  `stories_seen`, `rejected`, plus a 96-bit UTC slot bitmap with the bit set when that run's NWS
-  list failed. Outages read back as runs of consecutive set bits.
+  at least an hour stale**, so a story pulled before its `endTime` is visible. The staleness check
+  runs client-side on the value `find_story` already read (decided 2026-09-25): a failed
+  conditional write still bills, so a condition alone would save nothing.
+- `record_run(...)` — one immutable `RUN#<at_utc_iso>` item per office per run: `run_at`,
+  `nws_failed`, `stories_seen`, the run's outcome counts and `aws_request_id`. Outages, day totals
+  and per-office baselines are derived from these at analysis time.
+
+  **Replaced the daily record (decided 2026-09-25).** The plan was one `DAY#` item per office per
+  UTC day, `ADD`ing counters and a 96-bit slot bitmap. That compression bought nothing: writes are
+  one per run either way, and one item per run is a few MB per office per year. It cost detail
+  that can't be recovered: exact run times, `failed` (not in the counters), anything not thought
+  of as a counter, and slot numbers whose meaning changes with the schedule's cadence. A numeric
+  bitmap also corrupts when a duplicate run in the same slot carries a bit into the next. Day
+  totals are derived data (`global/principles`), so they're built from the raw runs, not stored.
 
 A separate module from `state.py` on purpose: `state.py` is the safety chain, `history.py` is not.
 
@@ -355,12 +365,25 @@ lives in `state.py`.
 - `infra/iam.tf`: add `DeleteItem` on the new table's ARN. Amend `infra/iam.md`, whose "No
   `Delete*`" rule then needs to allow exact item-level `DeleteItem` for the lease.
 
+**Wired into `handler.run` here, not in Task 12 (decided 2026-09-26).** The counts and the
+interleaved-runs test need the lease in the run loop, and `side-effect-order.md` gains step 0 in
+the task that makes it true. Release is conditional on a per-take `holder` token, so a run whose
+lease expired can't free the next run's. `LEASE_DURATION` is 360s.
+
 ## Task 12: Wire the lease and history into the apply step
 
-Take the lease first (step 0), then the existing side effects in order, with the three history
-writes around them and never between them. Amend `backend/side-effect-order.md` with step 0 and
-with where the best-effort writes sit — outside the chain — noting that Phase 2.2 deliberately
+The lease (step 0) is already in place from Task 11. Add the three history writes around the
+existing side effects and never between them. Amend `backend/side-effect-order.md` with where
+the best-effort writes sit — outside the chain — noting that Phase 2.2 deliberately
 reverses the latter by making the ledger write atomic with the record.
+
+**As built (2026-09-26).** Events are written after step 5, timed at the send and the delete;
+the `deleted`/`delete_failed` event (`record_deletion`) describes only the replaced revision:
+its image id, fingerprint and message id, and no end or update time.
+`last_seen_at` is touched on `unchanged` decisions only. `RUN#` is written after the lease is
+released, and only by a run that held it, so a lease lost to another run leaves no item.
+A story that stays ambiguous gets a `rejected` event every run (96 a day), which Task 13's
+usage estimate should count.
 
 ## Task 13: Cost and index sweep
 
@@ -368,11 +391,19 @@ Refresh `agent-os/standards/index.yml` descriptions for every file touched acros
 and update `infra/infracost-usage.yml` for the extra DynamoDB writes. Run `make cost` and record
 the delta in the spec folder.
 
+**Three scenarios (decided 2026-09-26).** One estimate hides how design choices scale, so `make
+cost` prices 1 office, 6 offices and all 122 US offices side by side. The per-office rates live
+once in `scripts/infracost_usage.py`, which writes a usage file per scenario, replacing the
+hand-kept `infra/infracost-usage.yml`. Every scenario is priced as one invocation per office per
+run (measured single-office run time), anticipating the per-office isolation of Phase 2.2. The
+result and the delta are in `cost.md`.
+
 ### 🚦 Deploy gate 4
 
 `make build && make deploy`. No pause needed.
 
-- **Watch:** a ledger event, a `last_seen_at` and a `DAY#` record appear for MKX within an hour.
+- **Watch:** a `RUN#` record and a `last_seen_at` appear for MKX within an hour; a ledger event
+  appears with the next post, update or rejection, which can be hours away.
   Two runs never post the same story. `Office run already in progress` appears only if a genuine
   overlap happens.
 - **Rollback:** redeploy the previous zip. Ledger items already written are harmless — they are
@@ -388,7 +419,8 @@ the delta in the spec folder.
   proving no Telegram call, moto-backed migration tests.
 - `make plan` at gates 2 and 3 shows **zero replacements** on the existing table and bucket
   (`infra/data-retention`).
-- `make cost` before and after; the delta should be pennies (on-demand writes only).
+- `make cost` before and after; the delta should be pennies (on-demand writes only). Recorded in
+  `cost.md`: +$0.007 a month for one office.
 - `uv run weather-story-bot --dry-run --office MKX` against live NWS prints a decision beside
   every caption, including expired and rejected ones.
 - Leave the old table in place until Stage 4's soak is clean, then remove

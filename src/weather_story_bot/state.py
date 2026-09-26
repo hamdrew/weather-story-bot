@@ -5,10 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
-from weather_story_bot.models import Story
+from botocore.exceptions import ClientError
+
+from weather_story_bot.models import Story, parse_time
 
 if TYPE_CHECKING:
     from types_boto3_dynamodb import DynamoDBClient
@@ -67,12 +70,31 @@ def story_sk(start_time: datetime, key: str) -> str:
     return f"STORY#{start_time.astimezone(UTC).isoformat()}#{key}"
 
 
+def event_sk(start_time: datetime, key: str, at: datetime) -> str:
+    return f"EVENT#{start_time.astimezone(UTC).isoformat()}#{key}#{utc_timestamp(at)}"
+
+
+LEASE_SK = "LEASE"
+
+
+def run_sk(at: datetime) -> str:
+    return f"RUN#{utc_timestamp(at)}"
+
+
+def utc_timestamp(at: datetime) -> str:
+    """Fixed-width UTC ISO timestamp, so stored values sort and compare as strings."""
+    return at.astimezone(UTC).isoformat(timespec="microseconds")
+
+
 @dataclass(frozen=True, slots=True)
 class PostedRecord:
     """The latest posted revision of a story and the Telegram message showing it.
 
     `image_sha256` and `description_sha256` are the fingerprint's two inputs, kept so an update
     can say which one changed. Records written before 2026-09-24 don't have them.
+
+    `last_seen_at` is written by `history.StoryHistory.touch_last_seen`, not here, and is `None`
+    until the first touch after each post.
     """
 
     image_id: str
@@ -81,6 +103,7 @@ class PostedRecord:
     fingerprint: str
     image_sha256: str | None = None
     description_sha256: str | None = None
+    last_seen_at: datetime | None = None
 
 
 class PostedStore:
@@ -97,7 +120,7 @@ class PostedStore:
     def find_story(self, story: Story) -> PostedRecord | None:
         response = self._client.get_item(
             TableName=self._table,
-            Key=_story_item_key(story),
+            Key=story_item_key(story),
             ConsistentRead=True,
         )
         item = response.get("Item")
@@ -112,6 +135,7 @@ class PostedStore:
             description_sha256=(
                 item["description_sha256"]["S"] if "description_sha256" in item else None
             ),
+            last_seen_at=_last_seen_at(item),
         )
 
     def record_posted(
@@ -127,7 +151,7 @@ class PostedStore:
         """Replace the story's record with the revision just posted."""
         posted_at = posted_at or datetime.now(UTC)
         item: dict[str, AttributeValueTypeDef] = {
-            **_story_item_key(story),
+            **story_item_key(story),
             "schema_version": {"N": str(SCHEMA_VERSION)},
             "office_id": {"S": story.office_id},
             "story_key": {"S": story_key(story)},
@@ -146,8 +170,87 @@ class PostedStore:
         self._client.put_item(TableName=self._table, Item=item)
 
 
-def _story_item_key(story: Story) -> dict[str, AttributeValueTypeDef]:
+def _last_seen_at(item: dict[str, AttributeValueTypeDef]) -> datetime | None:
+    """Read history's best-effort `last_seen_at`; a bad value must never fail the lookup.
+
+    `None` makes the next run rewrite it.
+    """
+    try:
+        return parse_time(item["last_seen_at"]["S"])
+    except (KeyError, ValueError):
+        return None
+
+
+def story_item_key(story: Story) -> dict[str, AttributeValueTypeDef]:
     return {
         "PK": {"S": office_pk(story.office_id)},
         "SK": {"S": story_sk(story.start_time, story_key(story))},
     }
+
+
+# The Lambda timeout (300s, infra/lambda.tf) plus a margin for clock skew between runs. Shorter
+# than the 900s schedule, so a crashed run's lease is gone before the next run starts.
+LEASE_DURATION = timedelta(seconds=360)
+
+
+class OfficeLease:
+    """One `LEASE` item per office, so only one run acts on an office at a time.
+
+    Step 0 of backend/side-effect-order, and in the safety chain: a lease that can't be taken
+    means the run does nothing for that office. It expires through a conditional write on
+    `expires_at`, not TTL (backend/dynamodb-schema).
+    """
+
+    def __init__(self, dynamodb_client: DynamoDBClient, table_name: str) -> None:
+        self._client = dynamodb_client
+        self._table = table_name
+
+    def take(
+        self, office_id: str, now: datetime, *, duration: timedelta = LEASE_DURATION
+    ) -> str | None:
+        """Take the office's lease, returning its holder token, or `None` if another run has it.
+
+        Any other DynamoDB error raises: without the lease the run can't know it's alone.
+        """
+        holder = uuid4().hex
+        try:
+            self._client.put_item(
+                TableName=self._table,
+                Item={
+                    **_lease_key(office_id),
+                    "schema_version": {"N": str(SCHEMA_VERSION)},
+                    "office_id": {"S": office_id},
+                    "holder": {"S": holder},
+                    "taken_at": {"S": utc_timestamp(now)},
+                    "expires_at": {"S": utc_timestamp(now + duration)},
+                },
+                ConditionExpression="attribute_not_exists(PK) OR expires_at < :now",
+                ExpressionAttributeValues={":now": {"S": utc_timestamp(now)}},
+            )
+        except ClientError as exc:
+            if _is_condition_failure(exc):
+                return None
+            raise
+        return holder
+
+    def release(self, office_id: str, holder: str) -> None:
+        """Delete the lease if it's still this run's, so the next run needn't wait for it."""
+        try:
+            self._client.delete_item(
+                TableName=self._table,
+                Key=_lease_key(office_id),
+                ConditionExpression="holder = :holder",
+                ExpressionAttributeValues={":holder": {"S": holder}},
+            )
+        except ClientError as exc:
+            # Ours expired and a later run took it; that one is theirs to release.
+            if not _is_condition_failure(exc):
+                raise
+
+
+def _lease_key(office_id: str) -> dict[str, AttributeValueTypeDef]:
+    return {"PK": {"S": office_pk(office_id)}, "SK": {"S": LEASE_SK}}
+
+
+def _is_condition_failure(exc: ClientError) -> bool:
+    return exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException"

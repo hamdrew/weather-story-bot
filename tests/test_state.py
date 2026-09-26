@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 
 from tests.conftest import TABLE_NAME, make_story
 from weather_story_bot.state import (
+    LEASE_DURATION,
+    OfficeLease,
     PostedRecord,
     PostedStore,
     content_fingerprint,
@@ -187,3 +189,83 @@ def test_find_story_reads_records_written_before_content_hashes(dynamodb: Any) -
         None,
         None,
     )
+
+
+@pytest.mark.parametrize("stored", [{"S": "not a time"}, {"N": "1758810000"}])
+def test_find_story_ignores_a_malformed_last_seen_at(dynamodb: Any, stored: dict[str, str]) -> None:
+    # last_seen_at is history.py's best-effort data; it must never break the dedupe lookup.
+    store = PostedStore(dynamodb, TABLE_NAME)
+    story = make_story()
+    store.record_posted(story, 42, "p1", "fp1", image_sha256="img1")
+    [item] = dynamodb.scan(TableName=TABLE_NAME)["Items"]
+    dynamodb.update_item(
+        TableName=TABLE_NAME,
+        Key={"PK": item["PK"], "SK": item["SK"]},
+        UpdateExpression="SET last_seen_at = :v",
+        ExpressionAttributeValues={":v": stored},
+    )
+
+    record = store.find_story(story)
+
+    assert record is not None
+    assert (record.fingerprint, record.last_seen_at) == ("fp1", None)
+
+
+LEASE_AT = datetime(2026, 9, 13, 0, 0, tzinfo=UTC)
+LEASE_KEY = {"PK": {"S": "OFFICE#MKX"}, "SK": {"S": "LEASE"}}
+
+
+def test_take_lease_writes_the_lease_item(dynamodb: Any) -> None:
+    holder = OfficeLease(dynamodb, TABLE_NAME).take("MKX", LEASE_AT)
+
+    item = dynamodb.get_item(TableName=TABLE_NAME, Key=LEASE_KEY)["Item"]
+    assert item == {
+        **LEASE_KEY,
+        "schema_version": {"N": "1"},
+        "office_id": {"S": "MKX"},
+        "holder": {"S": holder},
+        "taken_at": {"S": "2026-09-13T00:00:00.000000+00:00"},
+        "expires_at": {"S": "2026-09-13T00:06:00.000000+00:00"},
+    }
+
+
+def test_held_lease_is_not_taken_until_it_expires(dynamodb: Any) -> None:
+    lease = OfficeLease(dynamodb, TABLE_NAME)
+    first = lease.take("MKX", LEASE_AT)
+
+    assert first is not None
+    assert lease.take("MKX", LEASE_AT) is None
+    assert lease.take("MKX", LEASE_AT + LEASE_DURATION) is None
+    # A crashed run never releases; its lease just runs out.
+    second = lease.take("MKX", LEASE_AT + LEASE_DURATION + timedelta(microseconds=1))
+    assert second not in (None, first)
+
+
+def test_lease_is_per_office(dynamodb: Any) -> None:
+    lease = OfficeLease(dynamodb, TABLE_NAME)
+
+    assert lease.take("MKX", LEASE_AT) is not None
+    assert lease.take("GRB", LEASE_AT) is not None
+
+
+def test_release_frees_the_lease(dynamodb: Any) -> None:
+    lease = OfficeLease(dynamodb, TABLE_NAME)
+    holder = lease.take("MKX", LEASE_AT)
+    assert holder is not None
+
+    lease.release("MKX", holder)
+
+    assert "Item" not in dynamodb.get_item(TableName=TABLE_NAME, Key=LEASE_KEY)
+    assert lease.take("MKX", LEASE_AT) is not None
+
+
+def test_release_leaves_a_later_runs_lease(dynamodb: Any) -> None:
+    lease = OfficeLease(dynamodb, TABLE_NAME)
+    stale = lease.take("MKX", LEASE_AT)
+    assert stale is not None
+    later = LEASE_AT + LEASE_DURATION + timedelta(microseconds=1)
+    assert lease.take("MKX", later) is not None
+
+    lease.release("MKX", stale)
+
+    assert lease.take("MKX", later) is None
