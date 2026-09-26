@@ -46,9 +46,25 @@ def content_fingerprint(story: Story, image: bytes) -> str:
 
 def story_key(story: Story) -> str:
     """Identify one story across revisions and image UUIDs: title plus start time."""
-    return _sha256_json(
-        {"title": story.title, "start_time": story.start_time.astimezone(UTC).isoformat()}
-    )
+    return story_key_for(story.title, story.start_time)
+
+
+def story_key_for(title: str, start_time: datetime) -> str:
+    """`story_key` from a stored title and start time, for code that has no `Story`."""
+    return _sha256_json({"title": title, "start_time": start_time.astimezone(UTC).isoformat()})
+
+
+# Keys of the state table (backend/dynamodb-schema). Shared with scripts/migrate_table_keys.py,
+# which must write exactly what this module reads.
+SCHEMA_VERSION = 1
+
+
+def office_pk(office_id: str) -> str:
+    return f"OFFICE#{office_id}"
+
+
+def story_sk(start_time: datetime, key: str) -> str:
+    return f"STORY#{start_time.astimezone(UTC).isoformat()}#{key}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,24 +83,21 @@ class PostedRecord:
     description_sha256: str | None = None
 
 
-_STORY_PREFIX = "story#"
-
-
 class PostedStore:
-    """One `story#<story_key>` item per posted story, keyed by `office_id` (partition).
+    """One current-story item per posted story in the state table (backend/dynamodb-schema).
 
-    The sort key attribute is still named `image_id`. Items from before 2026-09-15 (keyed by
-    image UUID or `content#<fingerprint>`) are no longer read.
+    Keyed `PK = OFFICE#<office_id>`, `SK = STORY#<start_utc_iso>#<story_key>`, and built from the
+    `Story` alone, so a lookup and the write it follows can't disagree about the key.
     """
 
     def __init__(self, dynamodb_client: DynamoDBClient, table_name: str) -> None:
         self._client = dynamodb_client
         self._table = table_name
 
-    def find_story(self, office_id: str, key: str) -> PostedRecord | None:
+    def find_story(self, story: Story) -> PostedRecord | None:
         response = self._client.get_item(
             TableName=self._table,
-            Key={"office_id": {"S": office_id}, "image_id": {"S": _STORY_PREFIX + key}},
+            Key=_story_item_key(story),
             ConsistentRead=True,
         )
         item = response.get("Item")
@@ -108,14 +121,16 @@ class PostedStore:
         archive_prefix: str,
         fingerprint: str,
         *,
-        image_sha256: str | None = None,
+        image_sha256: str,
         posted_at: datetime | None = None,
     ) -> None:
-        """Replace the story's record. `image_sha256` is optional only for migration scripts."""
+        """Replace the story's record with the revision just posted."""
         posted_at = posted_at or datetime.now(UTC)
         item: dict[str, AttributeValueTypeDef] = {
+            **_story_item_key(story),
+            "schema_version": {"N": str(SCHEMA_VERSION)},
             "office_id": {"S": story.office_id},
-            "image_id": {"S": _STORY_PREFIX + story_key(story)},
+            "story_key": {"S": story_key(story)},
             "posted_image_id": {"S": story.image_id},
             "title": {"S": story.title},
             "start_time": {"S": story.start_time.isoformat()},
@@ -125,8 +140,14 @@ class PostedStore:
             "telegram_message_id": {"N": str(message_id)},
             "archive_prefix": {"S": archive_prefix},
             "fingerprint": {"S": fingerprint},
+            "image_sha256": {"S": image_sha256},
             "description_sha256": {"S": description_sha256(story)},
         }
-        if image_sha256 is not None:
-            item["image_sha256"] = {"S": image_sha256}
         self._client.put_item(TableName=self._table, Item=item)
+
+
+def _story_item_key(story: Story) -> dict[str, AttributeValueTypeDef]:
+    return {
+        "PK": {"S": office_pk(story.office_id)},
+        "SK": {"S": story_sk(story.start_time, story_key(story))},
+    }

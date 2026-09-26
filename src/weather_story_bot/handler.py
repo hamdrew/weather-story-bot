@@ -148,10 +148,9 @@ def run(
 
             records: dict[str, PostedRecord] = {}
             for story, _ in downloaded:
-                key = story_key(story)
-                record = services.store.find_story(office.office_id, key)
+                record = services.store.find_story(story)
                 if record is not None:
-                    records[key] = record
+                    records[story_key(story)] = record
             decisions = decide(office.office_id, downloaded, records, now)
             _apply_decisions(office, decisions, services, counts)
     return summary

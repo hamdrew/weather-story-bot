@@ -36,10 +36,11 @@ from typing import TYPE_CHECKING, Any
 
 from weather_story_bot.archive import archive_prefix
 from weather_story_bot.models import Story, parse_time
-from weather_story_bot.state import PostedStore, content_fingerprint, story_key
+from weather_story_bot.state import content_fingerprint, story_key
 
 if TYPE_CHECKING:
     from types_boto3_dynamodb import DynamoDBClient
+    from types_boto3_dynamodb.type_defs import AttributeValueTypeDef
     from types_boto3_s3 import S3Client
 
 DEFAULT_TABLE = "weather-story-bot-posted"
@@ -230,7 +231,6 @@ def migrate(
                 )
 
     out(f"\nDynamoDB: {len(plan.backfills)} story# records to write")
-    store = PostedStore(dynamodb, table)
     for backfill in plan.backfills:
         story = backfill.revision.story
         earlier = ", ".join(str(message_id) for message_id in backfill.earlier_message_ids)
@@ -240,13 +240,7 @@ def migrate(
             + (f" (earlier posts, left in the channel: {earlier})" if earlier else "")
         )
         if apply:
-            store.record_posted(
-                story,
-                backfill.message_id,
-                backfill.revision.new_prefix,
-                backfill.revision.fingerprint,
-                posted_at=backfill.posted_at,
-            )
+            dynamodb.put_item(TableName=table, Item=_story_record(backfill))
     for office_id, key in plan.existing_story_keys:
         out(f"  keep     {office_id} story#{key[:12]}… already recorded")
 
@@ -263,6 +257,27 @@ def migrate(
                 Key={"office_id": item["office_id"], "image_id": item["image_id"]},
             )
     return plan
+
+
+def _story_record(backfill: Backfill) -> dict[str, AttributeValueTypeDef]:
+    """The MVP table's `story#` item, as the Lambda wrote it before the 2026-09 key migration.
+
+    Written here rather than through `PostedStore`, which now writes the state table's keys.
+    """
+    story = backfill.revision.story
+    return {
+        "office_id": {"S": story.office_id},
+        "image_id": {"S": STORY_ITEM_PREFIX + story_key(story)},
+        "posted_image_id": {"S": story.image_id},
+        "title": {"S": story.title},
+        "start_time": {"S": story.start_time.isoformat()},
+        "end_time": {"S": story.end_time.isoformat()},
+        "update_time": {"S": story.update_time.isoformat()},
+        "posted_at": {"S": backfill.posted_at.isoformat()},
+        "telegram_message_id": {"N": str(backfill.message_id)},
+        "archive_prefix": {"S": backfill.revision.new_prefix},
+        "fingerprint": {"S": backfill.revision.fingerprint},
+    }
 
 
 def _is_new_or_content_item(item: dict[str, Any]) -> bool:

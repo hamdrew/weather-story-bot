@@ -18,7 +18,7 @@ resource "aws_lambda_function" "bot" {
   environment {
     variables = {
       OFFICES_JSON         = jsonencode(var.offices)
-      STATE_TABLE          = aws_dynamodb_table.posted.name
+      STATE_TABLE          = aws_dynamodb_table.state.name
       ARCHIVE_BUCKET       = aws_s3_bucket.archive.bucket
       TELEGRAM_TOKEN_PARAM = var.telegram_token_param_name
       NWS_USER_AGENT       = var.nws_user_agent

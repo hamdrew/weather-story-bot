@@ -18,7 +18,7 @@ from weather_story_bot.archive import StoryArchive
 from weather_story_bot.config import OfficeConfig
 from weather_story_bot.models import Story
 from weather_story_bot.nws import NwsClient
-from weather_story_bot.state import PostedStore, story_key
+from weather_story_bot.state import PostedStore
 from weather_story_bot.telegram import TelegramClient
 
 TOKEN = "123:secret-token"
@@ -109,7 +109,7 @@ def revise(
 
 
 def posted_record(services: handler.Services, story: dict[str, Any]) -> Any:
-    return services.store.find_story("MKX", story_key(Story.from_api(story)))
+    return services.store.find_story(Story.from_api(story))
 
 
 def test_new_stories_are_archived_posted_and_recorded(
@@ -120,7 +120,7 @@ def test_new_stories_are_archived_posted_and_recorded(
     assert summary == {"MKX": counts(posted=2)}
     assert [c.startswith("<b>Active Start") for c in captions(api)] == [True, False]
     items = dynamodb.scan(TableName=TABLE_NAME)["Items"]
-    assert all(i["image_id"]["S"].startswith("story#") for i in items)
+    assert all(i["SK"]["S"].startswith("STORY#") for i in items)
     assert sorted(int(i["telegram_message_id"]["N"]) for i in items) == [100, 101]
     assert api.routes["delete"].call_count == 0
     keys = [o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET_NAME)["Contents"]]
