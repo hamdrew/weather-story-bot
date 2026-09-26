@@ -391,6 +391,13 @@ Refresh `agent-os/standards/index.yml` descriptions for every file touched acros
 and update `infra/infracost-usage.yml` for the extra DynamoDB writes. Run `make cost` and record
 the delta in the spec folder.
 
+**Three scenarios (decided 2026-09-26).** One estimate hides how design choices scale, so `make
+cost` prices 1 office, 6 offices and all 122 US offices side by side. The per-office rates live
+once in `scripts/infracost_usage.py`, which writes a usage file per scenario, replacing the
+hand-kept `infra/infracost-usage.yml`. Every scenario is priced as one invocation per office per
+run (measured single-office run time), anticipating the per-office isolation of Phase 2.2. The
+result and the delta are in `cost.md`.
+
 ### 🚦 Deploy gate 4
 
 `make build && make deploy`. No pause needed.
@@ -412,7 +419,8 @@ the delta in the spec folder.
   proving no Telegram call, moto-backed migration tests.
 - `make plan` at gates 2 and 3 shows **zero replacements** on the existing table and bucket
   (`infra/data-retention`).
-- `make cost` before and after; the delta should be pennies (on-demand writes only).
+- `make cost` before and after; the delta should be pennies (on-demand writes only). Recorded in
+  `cost.md`: +$0.007 a month for one office.
 - `uv run weather-story-bot --dry-run --office MKX` against live NWS prints a decision beside
   every caption, including expired and rejected ones.
 - Leave the old table in place until Stage 4's soak is clean, then remove

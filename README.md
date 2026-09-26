@@ -165,7 +165,9 @@ Then:
 make cost
 ```
 
-It prints each costed resource with its full-precision monthly cost, then the total (about $0.54/month at the committed estimates, mostly the five $0.10 CloudWatch alarms). The full scan result is saved to `build/infracost.json`. Infracost's own tables round to whole dollars, which would show `$0` for everything here, so `make cost` doesn't use them.
+It prices `infra/` for three scenarios side by side: **1 office** (MKX today), **6 offices** (Wisconsin and its neighbours) and **all 122** NWS forecast offices. Each column shows every costed resource at full precision, with a total at the bottom. At the committed estimates that's about $0.60, $1.12 and $13.91 a month. The full scan result is saved to `build/infracost.json`. Infracost's own tables round to whole dollars, which would show `$0` for most of this, so `make cost` prints its own table.
+
+All three scenarios assume one Lambda invocation per office per run, the design offices are moving to. Infracost doesn't price the EventBridge schedule, which is free up to 14 million invocations a month (about 350,000 for all 122 offices), or data transfer out: each post uploads its image to Telegram, about 24 GB a month for all 122 offices, inside the 100 GB of free egress (about $2.20 at list price).
 
 **The estimate does not subtract the AWS free tier.** Every request, GB-second and GB is priced at list price, so the real bill can be lower.
 
@@ -175,11 +177,11 @@ Infracost also lists FinOps suggestions (such as S3 lifecycle rules). To see the
 infracost inspect --file build/infracost.json --failing
 ```
 
-### Updating the usage file
+### Updating the usage assumptions
 
-Almost everything here is billed by usage, which Infracost can't read from Terraform. `infra/infracost-usage.yml` holds monthly usage worked out from the 15-minute schedule and the expected story volume, and `infracost.yml` points the scan at it. When the schedule, story volume or retention changes, update the base assumptions at the top of the usage file, then the values that depend on them (each value's comment shows the math), and run `make cost` again.
+Almost everything here is billed by usage, which Infracost can't read from Terraform. `scripts/infracost_usage.py` holds the monthly usage of one office (runs, stories, posts, run time, image size), with a comment on each value saying where it came from. `make cost` multiplies those rates out into one usage file per scenario in `build/`, and `infracost.yml` points one scan project at each. When the schedule, story volume, run time or retention changes, update the constants at the top of the script and run `make cost` again.
 
-Keys are Terraform resource addresses, such as `aws_lambda_function.bot`. A misspelled key or address is silently ignored, so check that the resource's cost changed in `build/infracost.json`. Infracost treats values under 1 GB of DynamoDB storage as 0.
+Usage keys are Terraform resource addresses, such as `aws_lambda_function.bot`. A misspelled key or address is silently ignored, so check that the resource's cost changed in the table. Infracost rounds DynamoDB storage down to whole GB, so anything under 1 GB shows as $0.
 
 ## Recovering data
 
