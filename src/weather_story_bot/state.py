@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from weather_story_bot.models import Story
+from weather_story_bot.models import Story, parse_time
 
 if TYPE_CHECKING:
     from types_boto3_dynamodb import DynamoDBClient
@@ -67,12 +67,28 @@ def story_sk(start_time: datetime, key: str) -> str:
     return f"STORY#{start_time.astimezone(UTC).isoformat()}#{key}"
 
 
+def event_sk(start_time: datetime, key: str, at: datetime) -> str:
+    return f"EVENT#{start_time.astimezone(UTC).isoformat()}#{key}#{utc_timestamp(at)}"
+
+
+def run_sk(at: datetime) -> str:
+    return f"RUN#{utc_timestamp(at)}"
+
+
+def utc_timestamp(at: datetime) -> str:
+    """Fixed-width UTC ISO timestamp, so stored values sort and compare as strings."""
+    return at.astimezone(UTC).isoformat(timespec="microseconds")
+
+
 @dataclass(frozen=True, slots=True)
 class PostedRecord:
     """The latest posted revision of a story and the Telegram message showing it.
 
     `image_sha256` and `description_sha256` are the fingerprint's two inputs, kept so an update
     can say which one changed. Records written before 2026-09-24 don't have them.
+
+    `last_seen_at` is written by `history.StoryHistory.touch_last_seen`, not here, and is `None`
+    until the first touch after each post.
     """
 
     image_id: str
@@ -81,6 +97,7 @@ class PostedRecord:
     fingerprint: str
     image_sha256: str | None = None
     description_sha256: str | None = None
+    last_seen_at: datetime | None = None
 
 
 class PostedStore:
@@ -97,7 +114,7 @@ class PostedStore:
     def find_story(self, story: Story) -> PostedRecord | None:
         response = self._client.get_item(
             TableName=self._table,
-            Key=_story_item_key(story),
+            Key=story_item_key(story),
             ConsistentRead=True,
         )
         item = response.get("Item")
@@ -112,6 +129,7 @@ class PostedStore:
             description_sha256=(
                 item["description_sha256"]["S"] if "description_sha256" in item else None
             ),
+            last_seen_at=_last_seen_at(item),
         )
 
     def record_posted(
@@ -127,7 +145,7 @@ class PostedStore:
         """Replace the story's record with the revision just posted."""
         posted_at = posted_at or datetime.now(UTC)
         item: dict[str, AttributeValueTypeDef] = {
-            **_story_item_key(story),
+            **story_item_key(story),
             "schema_version": {"N": str(SCHEMA_VERSION)},
             "office_id": {"S": story.office_id},
             "story_key": {"S": story_key(story)},
@@ -146,7 +164,18 @@ class PostedStore:
         self._client.put_item(TableName=self._table, Item=item)
 
 
-def _story_item_key(story: Story) -> dict[str, AttributeValueTypeDef]:
+def _last_seen_at(item: dict[str, AttributeValueTypeDef]) -> datetime | None:
+    """Read history's best-effort `last_seen_at`; a bad value must never fail the lookup.
+
+    `None` makes the next run rewrite it.
+    """
+    try:
+        return parse_time(item["last_seen_at"]["S"])
+    except (KeyError, ValueError):
+        return None
+
+
+def story_item_key(story: Story) -> dict[str, AttributeValueTypeDef]:
     return {
         "PK": {"S": office_pk(story.office_id)},
         "SK": {"S": story_sk(story.start_time, story_key(story))},

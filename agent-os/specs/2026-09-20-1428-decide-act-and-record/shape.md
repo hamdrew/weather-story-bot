@@ -42,6 +42,8 @@ that was going to arrive in Phase 2.2.
 - **Daily run records use the UTC day and 96 fixed UTC slots.** Slot N is always the same 15
   minutes, so there are no DST gaps or doubled slots, and no per-office timezone is needed —
   that arrives in Phase 2.2. Converting to local dates is a build-time, derived-data concern.
+  **Superseded 2026-09-25:** one `RUN#<at_utc_iso>` item per run instead, with days and slots
+  derived at analysis time (see Task 10 in `plan.md`). The UTC reasoning still holds.
 - **The CLI survives**, rewritten as a thin read-only printer over the shared planner. Its one
   irreplaceable job is pointing at live NWS for any office and showing what the bot *would*
   decide, with no AWS and no deploy — which is the first question asked during the 2026-09-14

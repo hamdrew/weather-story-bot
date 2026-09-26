@@ -187,3 +187,23 @@ def test_find_story_reads_records_written_before_content_hashes(dynamodb: Any) -
         None,
         None,
     )
+
+
+@pytest.mark.parametrize("stored", [{"S": "not a time"}, {"N": "1758810000"}])
+def test_find_story_ignores_a_malformed_last_seen_at(dynamodb: Any, stored: dict[str, str]) -> None:
+    # last_seen_at is history.py's best-effort data; it must never break the dedupe lookup.
+    store = PostedStore(dynamodb, TABLE_NAME)
+    story = make_story()
+    store.record_posted(story, 42, "p1", "fp1", image_sha256="img1")
+    [item] = dynamodb.scan(TableName=TABLE_NAME)["Items"]
+    dynamodb.update_item(
+        TableName=TABLE_NAME,
+        Key={"PK": item["PK"], "SK": item["SK"]},
+        UpdateExpression="SET last_seen_at = :v",
+        ExpressionAttributeValues={":v": stored},
+    )
+
+    record = store.find_story(story)
+
+    assert record is not None
+    assert (record.fingerprint, record.last_seen_at) == ("fp1", None)

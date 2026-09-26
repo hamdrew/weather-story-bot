@@ -12,7 +12,7 @@ backend:
   client-errors:
     description: One public error type per client; handler.run is the only catch-all boundary
   dynamodb-schema:
-    description: Generic PK/SK with OFFICE#/STORY#/EVENT#/DAY#/LEASE keys, schema_version, no TTL, no indexes (analytics via S3 export), never an LSI; migration script pattern
+    description: Generic PK/SK with OFFICE#/STORY#/EVENT#/RUN#/LEASE keys, schema_version, no TTL, no indexes (analytics via S3 export), never an LSI; migration script pattern
   env-config:
     description: Settings.from_env(Mapping) with ConfigError; add a setting in config.py, lambda.tf, variables.tf and a test; office id regex in both places
   injected-clients:

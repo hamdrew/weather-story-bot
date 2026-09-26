@@ -205,7 +205,7 @@ touched; it is the rollback, and `infra/data-retention` forbids replacing it.
 |---|---|---|
 | Current story | `OFFICE#<id>` | `STORY#<start_utc_iso>#<story_key>` |
 | Ledger event | `OFFICE#<id>` | `EVENT#<start_utc_iso>#<story_key>#<at_utc_iso>` |
-| Daily run record | `OFFICE#<id>` | `DAY#<YYYY-MM-DD>` (UTC) |
+| Run record | `OFFICE#<id>` | `RUN#<at_utc_iso>` (replaced `DAY#<YYYY-MM-DD>`, 2026-09-25) |
 | Office lease | `OFFICE#<id>` | `LEASE` |
 
 - Generic `PK`/`SK` attribute names, `schema_version` on every item.
@@ -327,10 +327,20 @@ WARNING and never blocks a post.
   (decided 2026-09-24). What an update changed is derived at analysis time from consecutive
   events for the same story, not stored in the ledger.
 - `touch_last_seen(...)` — `UpdateItem` on the current-story item, **only when `last_seen_at` is
-  at least an hour stale**, so a story pulled before its `endTime` is visible.
-- `record_run(...)` — one `UpdateItem` with `ADD` per run: `runs`, `nws_failures`,
-  `stories_seen`, `rejected`, plus a 96-bit UTC slot bitmap with the bit set when that run's NWS
-  list failed. Outages read back as runs of consecutive set bits.
+  at least an hour stale**, so a story pulled before its `endTime` is visible. The staleness check
+  runs client-side on the value `find_story` already read (decided 2026-09-25): a failed
+  conditional write still bills, so a condition alone would save nothing.
+- `record_run(...)` — one immutable `RUN#<at_utc_iso>` item per office per run: `run_at`,
+  `nws_failed`, `stories_seen`, the run's outcome counts and `aws_request_id`. Outages, day totals
+  and per-office baselines are derived from these at analysis time.
+
+  **Replaced the daily record (decided 2026-09-25).** The plan was one `DAY#` item per office per
+  UTC day, `ADD`ing counters and a 96-bit slot bitmap. That compression bought nothing: writes are
+  one per run either way, and one item per run is a few MB per office per year. It cost detail
+  that can't be recovered: exact run times, `failed` (not in the counters), anything not thought
+  of as a counter, and slot numbers whose meaning changes with the schedule's cadence. A numeric
+  bitmap also corrupts when a duplicate run in the same slot carries a bit into the next. Day
+  totals are derived data (`global/principles`), so they're built from the raw runs, not stored.
 
 A separate module from `state.py` on purpose: `state.py` is the safety chain, `history.py` is not.
 
@@ -372,7 +382,7 @@ the delta in the spec folder.
 
 `make build && make deploy`. No pause needed.
 
-- **Watch:** a ledger event, a `last_seen_at` and a `DAY#` record appear for MKX within an hour.
+- **Watch:** a ledger event, a `last_seen_at` and a `RUN#` record appear for MKX within an hour.
   Two runs never post the same story. `Office run already in progress` appears only if a genuine
   overlap happens.
 - **Rollback:** redeploy the previous zip. Ledger items already written are harmless — they are

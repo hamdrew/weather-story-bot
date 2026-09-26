@@ -22,9 +22,10 @@ data "aws_iam_policy_document" "lambda" {
   }
 
   # Only the state table. The MVP table is the rollback and the Lambda no longer touches it.
+  # UpdateItem is history.py's last_seen_at on current-story items.
   statement {
     sid       = "State"
-    actions   = ["dynamodb:GetItem", "dynamodb:PutItem"]
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"]
     resources = [aws_dynamodb_table.state.arn]
   }
 
