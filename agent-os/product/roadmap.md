@@ -23,7 +23,7 @@ Fixes from the first days of running the MVP (spec `2026-09-15-1149-story-update
 
 ## Phase 1.2: Decide, Act, and Record
 
-In progress (spec `2026-09-20-1428-decide-act-and-record`). The refactor that makes the dry run
+Done (spec `2026-09-20-1428-decide-act-and-record`; all four stages deployed, recording live since 2026-09-26). The refactor that makes the dry run
 honest, plus the writes that start saving history. **Shaping moved the DynamoDB key redesign here
 from Phase 2.2**, since the table holds just 42 items today (measured 2026-09-20) and this phase
 starts writing append-only items that never expire.
@@ -113,30 +113,42 @@ Sources: `agent-os/notes/2026-09-16-standards-review.md` ("Suggested order" #1, 
 
 ## Phase 2.0: Staging and Production
 
-A place to watch a real post, now that the CLI can't send one. Source: standards review,
-"Environments".
+In progress (spec `2026-09-26-2319-staging-and-production`). A place to watch a real post, now
+that the CLI can't send one. Source: standards review, "Environments".
 
 - **Two named deployments from one `infra/`:** an environment name threaded through every resource,
-  a separate state key, and a tfvars file each.
+  a separate state key, and a tfvars file each. **Settled while shaping:** `infra/envs/<env>.backend.hcl`
+  and `<env>.tfvars` with a `TF_DATA_DIR` per environment, all selected by one required `ENV` in the
+  Makefile. Not workspaces, and not Terragrunt, which pays off with many dependent stacks or an
+  account per environment, not one module in one account.
 - **Production keeps the resource names it has.** Threading an environment name through everything
   would rename the posted-stories table and the archive bucket, and a rename is a *replace* — the
   table has deletion protection on, the bucket is versioned and not empty, and
   `infra/data-retention` says to stop and ask rather than apply a replace. So either production
   stays unsuffixed and only staging takes a suffix, or the names move behind a variable defaulting
   to today's values. Either way, shaping ends with a `terraform plan` showing zero replacements.
+  **Settled: production stays unsuffixed.**
+- **Things a second environment would silently share** (found while shaping). The log metric
+  filters' `WeatherStoryBot` namespace has no dimensions, so staging's posts would feed
+  production's `quiet` and `repost-loop`. Staging gets its own namespace, and production's
+  keeps its name and history. The budget covers the whole account, so it becomes
+  production-only, as does the MVP `posted` rollback table. `infra/terraform.tfvars` is
+  auto-loaded, so it moves to `envs/production.tfvars`. Otherwise anything missing from
+  staging's file would fall back to production's public chat ids.
 - **Staging** runs a subset of production's offices — at least one, and just MKX until Phase 2.2
   adds the others — into private test channels, with its schedule off by default and invoked by
   hand. **Production** runs the full set into the public channels.
 - **A separate Telegram bot for staging,** with its own SSM parameter, so a staging bug or a wrong
-  chat id physically cannot reach a public channel and a leaked staging token is worthless. (Open:
-  one bot with different chat ids is cheaper to manage — settle it while shaping.)
+  chat id physically cannot reach a public channel and a leaked staging token is worthless.
+  **Settled while shaping: a separate bot.** Staging's role can read only its own parameter.
 - **Staging stays near-free.** DynamoDB on-demand, S3, Lambda and the scheduler all cost nothing
   when idle; the only real fixed additions are alarms past the free tier. Keep staging's alarm set
   minimal and confirm with `make cost`.
 - **Two alarms have to be off or re-tuned in staging.** `missed-runs` and `quiet` both treat
   missing data as breaching, and staging's schedule is off by default — so a staging stack would
   sit permanently in ALARM on both, emailing the shared topic on every flap and training me to
-  ignore the alerts that matter in production.
+  ignore the alerts that matter in production. **Settled:** those two exist only while the
+  schedule is enabled. Staging keeps `errors`, `repost-loop` and `nws-ambiguous` on its own topic.
 - **New standard `infra/budget`,** which a second environment makes concrete: fixed monthly cost
   stays O(1) in offices, per-office visibility comes from queries rather than metrics, prefer
   pay-per-use with no idle cost, every spec carries a cost section, retention is a cost decision,
