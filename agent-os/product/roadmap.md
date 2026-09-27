@@ -155,6 +155,10 @@ Replaces `make deploy` from my laptop, before anything migrates the database or 
 - **One workflow that reuses the Makefile.** Pull requests run lint, test, build and
   `terraform plan`. Merges to `main` run the same steps plus `terraform apply` in a protected
   environment with a required review. Staging applies before production.
+- **Idea: static security checks on the Terraform,** with a scanner such as Trivy or Checkov,
+  run as a Makefile target so pull requests and my laptop run the same checks. (Open: which tool,
+  whether findings block the merge or just report at first, and how suppressions are recorded
+  so an ignored check always carries its reason — settle it while shaping.)
 - **AWS access through GitHub OIDC** with a narrowly scoped IAM role managed in Terraform, so
   there are no long-lived keys. Values that aren't committed come from Actions variables.
   **CI never holds Telegram credentials.**
