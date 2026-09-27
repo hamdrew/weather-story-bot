@@ -1,11 +1,22 @@
 # Infracost project config for `make cost`. Read from the repo root by `infracost scan`.
+# Prices infra/ three times, once per scenario in scripts/infracost_usage.py, which `make cost`
+# runs first to write the usage files into build/.
 version: 0.1
 projects:
   - path: infra
-    usage_file: infra/infracost-usage.yml
+    name: 1-office
+    usage_file: build/infracost-usage-1-office.yml
     # Placeholders for variables without defaults, so the scan needs no terraform.tfvars.
-    # None of them affect cost.
-    terraform_vars:
+    # None of them affect cost: every office shares one Lambda, table and bucket.
+    terraform_vars: &vars
       offices: '{"MKX": {"chat_id": "-100", "name": "Milwaukee/Sullivan"}}'
       nws_user_agent: weather-story-bot (cost estimate)
       alert_email: cost-estimate@example.com
+  - path: infra
+    name: 6-offices
+    usage_file: build/infracost-usage-6-offices.yml
+    terraform_vars: *vars
+  - path: infra
+    name: all-us
+    usage_file: build/infracost-usage-all-us.yml
+    terraform_vars: *vars

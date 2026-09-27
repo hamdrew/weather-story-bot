@@ -28,6 +28,7 @@ variable "nws_user_agent" {
   type        = string
 }
 
+# Keep the interval longer than state.LEASE_DURATION (360s), or a crashed run's lease blocks the next run.
 variable "schedule_expression" {
   description = "EventBridge Scheduler expression for how often to check for stories."
   type        = string

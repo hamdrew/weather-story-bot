@@ -42,15 +42,14 @@ deploy:
 	terraform -chdir=infra apply deploy.tfplan
 	rm infra/deploy.tfplan
 
-# Estimated monthly cost of infra/ using infracost.yml and infra/infracost-usage.yml (no AWS credentials).
-# Infracost v2 replaced `breakdown --usage-file` with `scan` + infracost.yml. Its tables and summary round
-# to whole dollars, so print per-resource costs with --llm (full precision) and the total from the JSON.
+# Estimated monthly cost of infra/ for 1 office, 6 offices and all 122 US offices (no AWS credentials).
+# scripts/infracost_usage.py writes one usage file per scenario, infracost.yml scans infra/ once per
+# file, and the report prints full-precision costs side by side (Infracost's tables round to dollars).
 cost:
 	@command -v infracost >/dev/null || { echo "infracost not found; see 'Cost estimate' in README.md for setup" >&2; exit 1; }
-	@mkdir -p $(BUILD_DIR)
+	@uv run python scripts/infracost_usage.py write $(BUILD_DIR)
 	infracost scan --json > $(BUILD_DIR)/infracost.json
-	@infracost inspect --file $(BUILD_DIR)/infracost.json --group-by resource --costs-only --llm
-	@uv run python -c 'import json, sys; total = json.load(open(sys.argv[1]))["summary"]["total_monthly_cost"]; print(f"Total monthly cost: $${float(total):.2f} USD")' $(BUILD_DIR)/infracost.json
+	@uv run python scripts/infracost_usage.py report $(BUILD_DIR)/infracost.json
 
 clean:
 	rm -rf $(BUILD_DIR)

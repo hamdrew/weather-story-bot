@@ -4,7 +4,8 @@ Grant only what the code calls, so a bug or a compromised dependency can't delet
 
 - Write policies as `data "aws_iam_policy_document"` blocks, not inline JSON
 - One statement per need, each with a `sid` (`State`, `Archive`, `TelegramToken`)
-- List the exact actions the code calls, e.g. `dynamodb:GetItem`, `dynamodb:PutItem`. No `Delete*`, `Scan` or `service:*`
+- List the exact actions the code calls, e.g. `dynamodb:GetItem`, `dynamodb:PutItem`. No `Scan`, `service:*` or wildcard `Delete*`
+- The one delete is item-level `dynamodb:DeleteItem` on the state table, for the office lease's release. Never `DeleteTable`, `DeleteObject` or `DeleteBucket`: the table and archive are permanent (`infra/data-retention`)
 - Scope resources to the narrowest ARN or key prefix: `"${aws_s3_bucket.archive.arn}/stories/*"`, the one SSM parameter ARN
 - Use `*` only where the API has no resource-level permissions, and add a comment saying so
 - Add a new permission in the same change as the code that calls it

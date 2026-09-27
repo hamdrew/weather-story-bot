@@ -92,8 +92,9 @@ def main(argv: list[str] | None = None, *, now: datetime | None = None) -> int:
 
 def _print_decision(decision: Decision, office_id: str) -> None:
     story = decision.story
-    # story_key, not image_id: it's stable across revisions and matches the DynamoDB sort key
-    # (`story#<story_key>`), unlike image_id, which NWS reissues under a new UUID each revision.
+    # story_key, not image_id: it's stable across revisions and ends the state table's sort key
+    # (`STORY#<start_utc_iso>#<story_key>`), unlike image_id, which NWS reissues under a new UUID
+    # each revision.
     print(f"--- #{story.order} {story_key(story)} [{_label(decision)}]")
     print(f"image: {story.download}")
     print(build_caption(story, office_id, updated=False))
