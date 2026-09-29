@@ -13,5 +13,5 @@ The S3 archive permanently records every story revision. The DynamoDB state tabl
 - Never add a `ttl` block to the state table. Records are permanent by decision
 - If you change one undo window, change the others to match
 - A change that force-replaces or destroys a table or the bucket (key schema, name) needs a stop. Don't disable protection or apply a replace yourself. Propose a migration (new resource + script like `scripts/migrate_story_keys.py`) and ask first
-- Check `make plan` for `must be replaced` / `destroy` on these resources before any `deploy`
+- Check `make plan ENV=<env>` for `must be replaced` / `destroy` on these resources before any `deploy`
 - Put a comment next to each protection setting saying why it's there and how to remove it on purpose

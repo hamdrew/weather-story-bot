@@ -1,4 +1,4 @@
-.PHONY: test coverage lint format build plan deploy cost clean
+.PHONY: test coverage lint format build check-env plan deploy check-plan cost clean
 
 BUILD_DIR := build
 PACKAGE_DIR := $(BUILD_DIR)/package
@@ -33,14 +33,37 @@ build: clean
 	cd $(PACKAGE_DIR) && zip -qr ../lambda.zip .
 	@echo "Built $(ZIP)"
 
+# One ENV (production or staging, no default) selects the backend config, var file, data dir and
+# plan file together, so they can't disagree. Each environment has its own data dir: a shared
+# .terraform/ remembers its last backend, and forgetting -reconfigure would point a staging plan at
+# production's state. TF_DATA_DIR is relative to -chdir, so it lands in infra/.terraform-<env>/.
+TF := TF_DATA_DIR=.terraform-$(ENV) terraform -chdir=infra
+PLAN_FILE := deploy-$(ENV).tfplan
+
+# ENV must come from the command line: make would otherwise take an exported ENV from the shell,
+# and a bare `make plan` would quietly target whatever it held.
+check-env:
+	@case "$(origin ENV):$(ENV)" in "command line:production"|"command line:staging") ;; \
+		*) echo "ENV must be production or staging on the command line, e.g. make plan ENV=staging" >&2; exit 2 ;; esac
+
 # Save the plan so deploy applies exactly what was reviewed. Terraform refuses a plan that has
 # gone stale (state changed since it was made), and deploy fails if there is no plan to apply.
-plan:
-	terraform -chdir=infra plan -out=deploy.tfplan
+plan: check-env
+	$(TF) init -input=false -backend-config=envs/$(ENV).backend.hcl
+	$(TF) plan -var environment=$(ENV) -var-file=envs/$(ENV).tfvars -out=$(PLAN_FILE)
 
-deploy:
-	terraform -chdir=infra apply deploy.tfplan
-	rm infra/deploy.tfplan
+deploy: check-env
+	$(TF) apply $(PLAN_FILE)
+	rm infra/$(PLAN_FILE)
+
+# Fail unless the saved plan only moves resources, adds the Environment tag, enables bucket ABAC
+# and re-writes an unchanged deferred role policy (Phase 2.0 Gate 1). Read-only: it inspects the
+# plan file and changes nothing. bash for pipefail, which dash (Debian's /bin/sh) may lack.
+check-plan: SHELL := bash
+check-plan: check-env
+	@test -f infra/$(PLAN_FILE) || { echo "No infra/$(PLAN_FILE); run make plan ENV=$(ENV) first" >&2; exit 1; }
+	set -o pipefail; $(TF) show -json $(PLAN_FILE) | \
+		uv run python scripts/check_tag_plan.py --environment $(ENV) -
 
 # Estimated monthly cost of infra/ for 1 office, 6 offices and all 122 US offices (no AWS credentials).
 # scripts/infracost_usage.py writes one usage file per scenario, infracost.yml scans infra/ once per

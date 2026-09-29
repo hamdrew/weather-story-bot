@@ -73,3 +73,25 @@ Custom metric namespaces are per environment (`local.metric_namespace`): `Weathe
 production, `WeatherStoryBot/<env>` elsewhere. The log metric filters have no dimensions, so a
 shared namespace would merge staging's posts into production's `quiet` and `repost-loop` alarms.
 Production keeps its original namespace so its metric history carries on.
+
+## Makefile
+
+One `ENV` selects the backend config, the var file, the data dir and the plan file together, so
+they can't disagree:
+
+| `ENV=<env>` selects | Path (under `infra/`) |
+|---|---|
+| Backend config | `envs/<env>.backend.hcl` (its own state key) |
+| Var file | `envs/<env>.tfvars` |
+| Data dir | `.terraform-<env>/` (`TF_DATA_DIR`, relative to `-chdir`) |
+| Plan file | `deploy-<env>.tfplan` |
+
+- `ENV` has no default and must be given on the command line (an exported `ENV` is refused).
+  `check-env` fails with exit 2 on anything else
+- `environment` is passed as `-var environment=$(ENV)`, never kept in a tfvars file, so it can't
+  disagree with the backend
+- A data dir per environment, because `.terraform/` remembers the backend it was initialized
+  against: with a shared one, a forgotten `-reconfigure` points a staging plan at production's
+  state
+- Never an `infra/terraform.tfvars`: Terraform auto-loads it, so any variable missing from an
+  environment's file would silently take its value (production's chat ids included)

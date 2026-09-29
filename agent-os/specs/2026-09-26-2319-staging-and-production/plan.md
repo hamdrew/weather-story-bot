@@ -194,6 +194,13 @@ question (separate staging bot) and record the namespace, budget and tfvars find
     counting `after_unknown`, are `tags` and `tags_all`, and the only tag key that differs is
     `Environment`
   - `create` of `aws_s3_bucket_abac.archive`, at most once
+  - `update` of an `aws_iam_role_policy` whose only change is `policy` becoming known after apply,
+    because its one policy document is read at apply (`read_because_dependency_pending`), with
+    statements that are known and identical to the live policy (Sid, Effect, Action and Resource
+    only; anything else fails). **Found at Gate 1:** `data.aws_iam_policy_document.lambda` takes
+    ARNs from the log group, table and bucket, so their tag updates defer its read and the plan
+    shows `aws_iam_role_policy.lambda` as `policy = (known after apply)`. The policy that comes
+    out is the live one; the check proves it rather than trusting an eye on the diff
 
   Anything else, a `delete`, a replace or any other create, fails. Data sources (`mode = "data"`)
   aren't resource changes and are skipped. The test runs it over small hand-written plan JSON
@@ -218,7 +225,8 @@ aws ssm add-tags-to-resource --region us-east-2 --resource-type Parameter \
 You run `make plan ENV=production`, then the Task 3 plan check against it. **Pass:** the check
 passes, and the summary is `1 to add, N to change, 0 to destroy`: the one addition is
 `aws_s3_bucket_abac.archive`, the N changes are tag-only in-place updates adding
-`Environment = "production"`, and there are "has moved to" lines for
+`Environment = "production"` plus `aws_iam_role_policy.lambda` with its deferred, unchanged policy
+(the real plan: 1 to add, 15 to change), and there are "has moved to" lines for
 `aws_budgets_budget.monthly[0]` and `aws_dynamodb_table.posted[0]`. Run it against the zip
 already in `build/`: a rebuild shows a Lambda code update until Phase 2.1 makes the zip
 reproducible. A failing check, a replace or a destroy is a stop. The bucket's tag update runs

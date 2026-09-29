@@ -53,12 +53,12 @@ Prerequisites: [uv](https://docs.astral.sh/uv/), Terraform ≥ 1.11, and the AWS
    aws s3api put-bucket-versioning --bucket <your-tf-state-bucket> --region us-east-2 \
      --versioning-configuration Status=Enabled
    ```
-6. **Configure Terraform.** Both copies are gitignored:
+6. **Configure Terraform.** Each environment has a backend config and a var file in `infra/envs/`. Both copies are gitignored:
    ```sh
-   cp infra/backend.hcl.example infra/backend.hcl             # set the bucket name
-   cp infra/terraform.tfvars.example infra/terraform.tfvars   # set chat_id, nws_user_agent and alert_email
-   terraform -chdir=infra init -backend-config=backend.hcl
+   cp infra/envs/production.backend.hcl.example infra/envs/production.backend.hcl   # set the bucket name
+   cp infra/envs/production.tfvars.example infra/envs/production.tfvars             # set chat_id, nws_user_agent and alert_email
    ```
+   `make plan ENV=production` runs `terraform init` itself, in production's own data dir (`infra/.terraform-production/`). There's no `terraform.tfvars`: Terraform loads that automatically, so any variable an environment's file left out would silently take production's value.
    NWS asks API clients to send a `User-Agent` that identifies the app and gives a way to contact you, e.g. `weather-story-bot (you@example.com)`.
 
 ## Local development
@@ -87,9 +87,17 @@ Variables already set in your shell take precedence over `.env`.
 ## Deploy
 
 ```sh
-make build    # vendors deps for python3.13/arm64 into build/lambda.zip
-make plan     # review changes; saves them to infra/deploy.tfplan
-make deploy   # applies exactly that saved plan, then deletes it
+make build                   # vendors deps for python3.13/arm64 into build/lambda.zip
+make plan ENV=production     # review changes; saves them to infra/deploy-production.tfplan
+make deploy ENV=production   # applies exactly that saved plan, then deletes it
+```
+
+`ENV` (`production` or `staging`) is required and selects the backend config, var file, data dir and plan file together. `make check-plan ENV=production` fails unless the saved plan only moves resources, adds the `Environment` tag and enables the archive bucket's ABAC (Phase 2.0's first production deploy). The Lambda's role policy may also show `policy = (known after apply)`: its policy document takes ARNs from resources that are being retagged, so Terraform reads it at apply. The check passes that only when the document's statements match the live policy exactly.
+
+To run other Terraform commands, point them at the same environment's data dir:
+
+```sh
+TF_DATA_DIR=.terraform-production terraform -chdir=infra output
 ```
 
 Smoke test:
@@ -109,7 +117,7 @@ CloudWatch alarms email `alert_email` through the SNS topic `weather-story-bot-a
 
 ```sh
 aws sns list-subscriptions-by-topic \
-  --topic-arn "$(terraform -chdir=infra output -raw alert_topic_arn)"   # must not say PendingConfirmation
+  --topic-arn "$(TF_DATA_DIR=.terraform-production terraform -chdir=infra output -raw alert_topic_arn)"   # must not say PendingConfirmation
 ```
 
 **Make the alerts notify on your phone.** In Gmail, add a filter for the alert senders:
@@ -143,7 +151,7 @@ Each alarm email includes the same hints and a link to the log group.
 
 ### Tuning thresholds
 
-The starting values are guesses until there's real posting data. Override them in `infra/terraform.tfvars` and run `make plan && make deploy`:
+The starting values are guesses until there's real posting data. Override them in `infra/envs/production.tfvars` and run `make plan ENV=production && make deploy ENV=production`:
 
 ```hcl
 monthly_budget_usd     = 5  # USD per month, whole account
@@ -224,7 +232,7 @@ The DynamoDB table has point-in-time recovery, so it can be restored to any seco
 The archive bucket is versioned. A deleted or overwritten file keeps its old version for 35 days, then S3 removes it. The date and time in a key are the story's start in UTC.
 
 ```sh
-BUCKET=$(terraform -chdir=infra output -raw bucket_name)
+BUCKET=$(TF_DATA_DIR=.terraform-production terraform -chdir=infra output -raw bucket_name)
 aws s3api list-object-versions --bucket "$BUCKET" --prefix stories/MKX/2026/09/14/
 ```
 
@@ -240,11 +248,11 @@ aws s3api list-object-versions --bucket "$BUCKET" --prefix stories/MKX/2026/09/1
 ## Adding an office
 
 1. Create another channel with the bot as admin, and get its chat ID (steps 2–3 above).
-2. Add the office to `offices` in `infra/terraform.tfvars`. Keys are the three-letter NWS office IDs:
+2. Add the office to `offices` in `infra/envs/production.tfvars`. Keys are the three-letter NWS office IDs:
    ```hcl
    offices = {
      MKX = { chat_id = "-100…", name = "Milwaukee/Sullivan" }
      GRB = { chat_id = "-100…", name = "Green Bay" }
    }
    ```
-3. Run `make plan`, review it, then `make deploy`. On its first run, the Lambda posts all of the new office's active stories.
+3. Run `make plan ENV=production`, review it, then `make deploy ENV=production`. On its first run, the Lambda posts all of the new office's active stories.
