@@ -104,8 +104,9 @@ def usage(scenario: Scenario) -> dict[str, dict[str, Any]]:
             "storage_gb": table_gb,
             "pitr_backup_storage_gb": table_gb,  # PITR is billed on table size
         },
-        # The MVP table: no traffic since the flip, kept (a few KB) until it's removed.
-        "aws_dynamodb_table.posted": {
+        # The MVP table: no traffic since the flip, kept (a few KB) until it's removed. Production
+        # only, so it has a count and Infracost matches it as [0].
+        "aws_dynamodb_table.posted[0]": {
             "monthly_read_request_units": 0,
             "monthly_write_request_units": 0,
             "storage_gb": 0.001,

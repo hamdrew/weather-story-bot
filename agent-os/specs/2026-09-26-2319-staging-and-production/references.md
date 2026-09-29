@@ -4,7 +4,7 @@
 
 ### The single-environment Terraform root
 
-- **Location:** `infra/*.tf`, with `local.name = "weather-story-bot"` in `infra/versions.tf`
+- **Location:** `infra/*.tf`, with `local.name = "weather-story-bot"` in `infra/versions.tf` (moved to `infra/locals.tf` in Task 2)
 - **Relevance:** Every resource name already derives from `local.name` (function, log group, roles,
   tables, bucket, SNS topic, alarms, schedule, budget), so making `local.name` depend on the
   environment is most of the naming work. The exceptions are `local.metric_namespace`
@@ -58,7 +58,7 @@
 - **Relevance:** The origin: a staging deployment with a `-staging` suffix, a test channel, one or
   two offices, the schedule off, invoked by hand, and the rule "production is only changed by
   `make deploy` (or CI); staging is where you watch real posts". Its open question "Is a staging
-  stack acceptable cost-wise?" is answered by Task 5's `cost.md`.
+  stack acceptable cost-wise?" is answered by Task 6's `cost.md`.
 
 ### Phase 1.2 cost record
 
@@ -76,3 +76,25 @@
   and the plan reports it as "has moved to". Removing `count` moves it back.
 - S3 backend `use_lockfile` (Terraform 1.11+) writes `<key>.tflock` next to each state object, so
   each environment has its own lock.
+
+### Tags and ABAC
+
+- **S3 bucket ABAC:**
+  https://docs.aws.amazon.com/AmazonS3/latest/userguide/buckets-tagging-enable-abac.html and
+  https://docs.aws.amazon.com/AmazonS3/latest/userguide/buckets-tagging.html. A general purpose
+  bucket's tags count in `aws:ResourceTag`/`s3:BucketTag` conditions only once ABAC is enabled,
+  object actions such as `s3:PutObject` on `bucket/*` included. Once it's on,
+  `PutBucketTagging`/`DeleteBucketTagging` stop working and tags go through S3 Control
+  `TagResource`/`UntagResource`. Reversible with status `Disabled`.
+- **DynamoDB ABAC:**
+  https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/abac-enable-ddb.html.
+  `aws:ResourceTag` works on item actions, but only while the account-level setting is on
+  ("enabled by default for most accounts"). Off, conditions see no tags and an Allow fails closed.
+  The setting shows only on the console's Settings page, so staging's first invoke proves it
+  (Gate 2).
+- **Provider changelog, hashicorp/aws 6.23.0 (issue #45251):** `aws_s3_bucket` tagging uses S3
+  Control `TagResource`/`UntagResource`/`ListTagsForResource` when the caller holds those actions,
+  and otherwise falls back to `PutBucketTagging` without a warning, which fails on an ABAC bucket.
+  The pinned version is 6.66.0, which also has `aws_s3_bucket_abac`.
+- **SSM:** parameters support `aws:ResourceTag`. `put-parameter --tags` works only on create
+  (not with `--overwrite`); an existing parameter is tagged with `add-tags-to-resource`.

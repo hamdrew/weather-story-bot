@@ -1,5 +1,8 @@
 locals {
-  metric_namespace = "WeatherStoryBot"
+  # Per environment: the metric filters have no dimensions, so a shared namespace would pour
+  # staging's posts into production's quiet and repost-loop alarms. Production keeps the original
+  # namespace so its metric history (and the quiet alarm's data) carries on.
+  metric_namespace = local.production ? "WeatherStoryBot" : "WeatherStoryBot/${var.environment}"
   logs_console_url = "https://${var.region}.console.aws.amazon.com/cloudwatch/home?region=${var.region}#logsV2:log-groups/log-group/${replace(aws_cloudwatch_log_group.lambda.name, "/", "$252F")}"
 }
 
@@ -140,7 +143,10 @@ resource "aws_cloudwatch_metric_alarm" "nws_ambiguous" {
 }
 
 # Covers the whole account, not just this project. Emails directly rather than through SNS.
+# Production only: a copy per environment would send duplicate emails for the same spend.
 resource "aws_budgets_budget" "monthly" {
+  count = local.production ? 1 : 0
+
   name         = "${local.name}-monthly"
   budget_type  = "COST"
   limit_amount = tostring(var.monthly_budget_usd)

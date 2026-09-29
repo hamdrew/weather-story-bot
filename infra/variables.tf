@@ -1,3 +1,15 @@
+# Passed by the Makefile from ENV (-var environment=...), never set in a tfvars file, so it can't
+# disagree with the backend config the same ENV selects.
+variable "environment" {
+  description = "Deployment environment: production or staging. Selects names, the token parameter and the metric namespace."
+  type        = string
+
+  validation {
+    condition     = contains(["production", "staging"], var.environment)
+    error_message = "environment must be production or staging."
+  }
+}
+
 variable "region" {
   description = "AWS region for all resources."
   type        = string
@@ -18,9 +30,16 @@ variable "offices" {
 }
 
 variable "telegram_token_param_name" {
-  description = "Name of the SecureString SSM parameter holding the Telegram bot token (created manually)."
+  description = "Name of the SecureString SSM parameter holding this environment's Telegram bot token (created manually), e.g. /weather-story-bot/telegram-token."
   type        = string
-  default     = "/weather-story-bot/telegram-token"
+
+  # Each environment has its own bot, and its parameter lives under that environment's name. The
+  # prefixes can't overlap (/weather-story-bot/ vs /weather-story-bot-staging/), so no
+  # environment's role can be granted another's token.
+  validation {
+    condition     = startswith(var.telegram_token_param_name, "/${local.name}/")
+    error_message = "telegram_token_param_name must be under this environment's own prefix, /${local.name}/."
+  }
 }
 
 variable "nws_user_agent" {

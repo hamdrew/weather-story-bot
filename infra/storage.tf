@@ -1,4 +1,7 @@
+# Production only: it's production's rollback, and no other environment ever had MVP data.
 resource "aws_dynamodb_table" "posted" {
+  count = local.production ? 1 : 0
+
   name         = "${local.name}-posted"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "office_id"
@@ -69,6 +72,21 @@ resource "aws_dynamodb_table" "state" {
 
 resource "aws_s3_bucket" "archive" {
   bucket = "${local.name}-archive-${data.aws_caller_identity.current.account_id}"
+}
+
+# S3 evaluates bucket tags (aws:ResourceTag, s3:BucketTag) on a general purpose bucket only once
+# ABAC is enabled, so this goes live a deploy before any policy condition reads the Environment tag.
+# Enabling it changes no access while no policy checks bucket tags. Once it's on, PutBucketTagging
+# and DeleteBucketTagging stop working and tags must go through S3 Control TagResource and
+# UntagResource. Provider >= 6.23 switches to those only when the caller holds s3:TagResource,
+# s3:UntagResource and s3:ListTagsForResource; without them it silently falls back to
+# PutBucketTagging, which then fails. To undo, apply with status = "Disabled".
+resource "aws_s3_bucket_abac" "archive" {
+  bucket = aws_s3_bucket.archive.id
+
+  abac_status {
+    status = "Enabled"
+  }
 }
 
 resource "aws_s3_bucket_versioning" "archive" {

@@ -5,9 +5,10 @@ The S3 archive permanently records every story revision. The DynamoDB state tabl
 | Store | Protection | Undo window |
 |---|---|---|
 | `aws_dynamodb_table.state` | `deletion_protection_enabled = true`, no TTL | PITR, `recovery_period_in_days = 35` |
-| `aws_dynamodb_table.posted` (MVP, rollback until removed) | `deletion_protection_enabled = true` | PITR, `recovery_period_in_days = 35` |
+| `aws_dynamodb_table.posted` (MVP, rollback until removed; production only) | `deletion_protection_enabled = true` | PITR, `recovery_period_in_days = 35` |
 | `aws_s3_bucket.archive` | versioning, public access blocked | `noncurrent_days = 35` |
 
+- Every environment's table and bucket carry the same protections and undo windows as production's (`infra/environments`). Reset staging by deleting items, never the table
 - Never expire current archive objects. No `expiration { days/date }` in the lifecycle rule
 - Never add a `ttl` block to the state table. Records are permanent by decision
 - If you change one undo window, change the others to match

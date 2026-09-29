@@ -34,11 +34,17 @@ Prerequisites: [uv](https://docs.astral.sh/uv/), Terraform ≥ 1.11, and the AWS
    curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | grep -o '"chat":{"id":-100[0-9]*'
    ```
    The ID starts with `-100`.
-4. **Store the token in SSM.** Use Parameter Store, not Terraform, so the token never ends up in Terraform state:
+4. **Store the token in SSM.** Use Parameter Store, not Terraform, so the token never ends up in Terraform state. Terraform doesn't manage the parameter, so it doesn't get the `Environment` tag the other resources carry; tag it here:
    ```sh
    read -rs TELEGRAM_TOKEN
    aws ssm put-parameter --region us-east-2 --type SecureString \
-     --name /weather-story-bot/telegram-token --value "$TELEGRAM_TOKEN"
+     --name /weather-story-bot/telegram-token --value "$TELEGRAM_TOKEN" \
+     --tags Key=Environment,Value=production
+   ```
+   `--tags` only works when creating the parameter; it can't be combined with `--overwrite`. Rotating the token with `--overwrite` keeps the tag. To tag a parameter that already exists:
+   ```sh
+   aws ssm add-tags-to-resource --region us-east-2 --resource-type Parameter \
+     --resource-id /weather-story-bot/telegram-token --tags Key=Environment,Value=production
    ```
 5. **Create a Terraform state bucket** (skip this if you already have one):
    ```sh

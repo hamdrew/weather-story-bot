@@ -9,6 +9,8 @@ projects:
     # Placeholders for variables without defaults, so the scan needs no terraform.tfvars.
     # None of them affect cost: every office shares one Lambda, table and bucket.
     terraform_vars: &vars
+      environment: production
+      telegram_token_param_name: /weather-story-bot/telegram-token
       offices: '{"MKX": {"chat_id": "-100", "name": "Milwaukee/Sullivan"}}'
       nws_user_agent: weather-story-bot (cost estimate)
       alert_email: cost-estimate@example.com

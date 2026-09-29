@@ -56,6 +56,14 @@ def test_every_office_gets_its_own_invocation(scenario: Scenario) -> None:
     assert lam["request_duration_ms"] == pytest.approx(RUN_SECONDS_PER_OFFICE * 1000)
 
 
+def test_mvp_table_is_keyed_by_its_counted_address() -> None:
+    # The table is production-only (count), so Infracost only matches usage keyed with [0].
+    resources = usage(BY_NAME["1-office"])
+
+    assert "aws_dynamodb_table.posted[0]" in resources
+    assert "aws_dynamodb_table.posted" not in resources
+
+
 def test_write_usage_files_writes_one_infracost_file_per_scenario(tmp_path: Path) -> None:
     write_usage_files(tmp_path)
 

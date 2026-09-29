@@ -171,9 +171,25 @@ Replaces `make deploy` from my laptop, before anything migrates the database or 
   run as a Makefile target so pull requests and my laptop run the same checks. (Open: which tool,
   whether findings block the merge or just report at first, and how suppressions are recorded
   so an ignored check always carries its reason — settle it while shaping.)
+- **Idea: Terraform unit tests** with `terraform test`, run offline from a Makefile target so pull
+  requests and my laptop run them the same way. Phase 2.0's hand checks in `terraform console` are
+  the first cases: names and namespaces per environment, the token parameter's validation refusing
+  another environment's path (including the slash-less form), the production-only `count`s, the
+  `Environment` tag, and Task 5's tag conditions staying attached to exact ARNs. (Open: a
+  `mock_provider` fills computed values with placeholders, including
+  `aws_iam_policy_document.json`, so asserting on policy conditions may need the real provider
+  with `command = plan` and no credentials, or assertions on the document's inputs. Settle it
+  while shaping.)
 - **AWS access through GitHub OIDC** with a narrowly scoped IAM role managed in Terraform, so
   there are no long-lived keys. Values that aren't committed come from Actions variables.
   **CI never holds Telegram credentials.**
+- **Tags and ABAC for the deploy roles** (from Phase 2.0, which enabled ABAC on the archive
+  buckets). The roles need `s3:TagResource`, `s3:UntagResource` and `s3:ListTagsForResource`;
+  without them the provider silently falls back to `PutBucketTagging`, and every bucket tag change
+  fails. Scoping the deploy roles themselves by tag (`aws:ResourceTag` + `aws:RequestTag` +
+  `aws:TagKeys`, a staging role that can't touch production) is the harder, more instructive half:
+  many of the actions Terraform calls don't support tag conditions. Settle how far to go while
+  shaping.
 - **Versioned zips in S3,** keyed by git SHA, so Terraform never needs a local file, plan and apply
   can be separate jobs with an approval between them, and a rollback is re-applying an older SHA.
 - **Decided against a cloud Terraform runner** (HCP Terraform, Spacelift and friends). It can't

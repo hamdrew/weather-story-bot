@@ -9,20 +9,3 @@ terraform {
     }
   }
 }
-
-provider "aws" {
-  region = var.region
-
-  default_tags {
-    tags = {
-      Project   = local.name
-      ManagedBy = "terraform"
-    }
-  }
-}
-
-locals {
-  name = "weather-story-bot"
-}
-
-data "aws_caller_identity" "current" {}

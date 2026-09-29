@@ -3,7 +3,7 @@ output "function_name" {
 }
 
 output "mvp_table_name" {
-  value = aws_dynamodb_table.posted.name
+  value = one(aws_dynamodb_table.posted[*].name)
 }
 
 output "state_table_name" {

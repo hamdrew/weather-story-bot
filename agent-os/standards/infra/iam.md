@@ -7,6 +7,7 @@ Grant only what the code calls, so a bug or a compromised dependency can't delet
 - List the exact actions the code calls, e.g. `dynamodb:GetItem`, `dynamodb:PutItem`. No `Scan`, `service:*` or wildcard `Delete*`
 - The one delete is item-level `dynamodb:DeleteItem` on the state table, for the office lease's release. Never `DeleteTable`, `DeleteObject` or `DeleteBucket`: the table and archive are permanent (`infra/data-retention`)
 - Scope resources to the narrowest ARN or key prefix: `"${aws_s3_bucket.archive.arn}/stories/*"`, the one SSM parameter ARN
+- The `TelegramToken` statement names that environment's own parameter (`var.telegram_token_param_name`, validated to sit under `/${local.name}/`), so no environment's role can read another's token (`infra/environments`)
 - Use `*` only where the API has no resource-level permissions, and add a comment saying so
 - Add a new permission in the same change as the code that calls it
 - Service trust policies (other than Lambda) add the confused-deputy guard:
