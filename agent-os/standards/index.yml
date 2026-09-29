@@ -40,7 +40,7 @@ infra:
   environments:
     description: Production unsuffixed, others weather-story-bot-<env>; differences via variables or local.production, never forked files; created things derived from environment, outside things are required variables; production-only budget and posted table; one Makefile ENV selects backend, var file, data dir and plan; lowercase Environment tag on everything via default_tags, bucket ABAC on; a bot and token parameter per environment; per-environment metric namespaces
   iam:
-    description: Exact actions on narrowest ARNs via policy documents; the only delete is item-level DeleteItem for the lease; SourceAccount guard on service trust policies
+    description: Exact actions on narrowest ARNs via policy documents; the only delete is item-level DeleteItem for the lease; Environment tag conditions (Allow + StringEquals, on exact ARNs, no tag-write actions, live a deploy before the condition; Logs has none); SourceAccount guard on service trust policies
 
 testing:
   handler-tests:

@@ -20,4 +20,15 @@ condition {
 }
 ```
 
+## Tag conditions (ABAC)
+
+The `State`, `TelegramToken` and `Archive` statements add `aws:ResourceTag/Environment` = `[var.environment]`, so a role can only reach resources tagged for its own environment, even if an ARN is wrong.
+
+- Add the condition to the exact ARN, never use it instead of the ARN
+- Allow + `StringEquals` only, so a missing tag fails closed. Never an Allow with `StringNotEquals`
+- A role constrained by tag conditions never holds tag-write actions (`TagResource`, `ssm:AddTagsToResource` and the like), or it could retag its way into access
+- Everything a condition reads (resource tags, bucket ABAC, hand-tagged parameters) goes live at least one deploy before the condition does
+- `Logs` has no condition: whether `PutLogEvents` evaluates log-group tags is unverified, and a wrong guess loses logs quietly (and the metric-filter alarms with them)
+- Comment each condition with what it reads: DynamoDB needs the account's ABAC setting on (console Settings page only), SSM reads the parameter's own hand-made tags, S3 object actions read the bucket's tags and need bucket ABAC on
+
 - Scripts and backfills (e.g. `scripts/migrate_story_keys.py`) run with admin creds, never through the Lambda role
