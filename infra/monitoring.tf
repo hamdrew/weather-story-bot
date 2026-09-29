@@ -54,7 +54,11 @@ resource "aws_cloudwatch_metric_alarm" "errors" {
   ok_actions    = [aws_sns_topic.alerts.arn]
 }
 
+# missed_runs and quiet treat missing data as breaching, so on an idle schedule they would sit in
+# ALARM for good. They exist only while the schedule is enabled.
 resource "aws_cloudwatch_metric_alarm" "missed_runs" {
+  count = local.schedule_enabled ? 1 : 0
+
   alarm_name        = "${local.name}-missed-runs"
   alarm_description = "The bot was not invoked in the last hour, so the schedule is probably disabled, deleted or failing to invoke the function. Check the EventBridge Scheduler schedule ${aws_scheduler_schedule.bot.name}, then the logs for recent runs: ${local.logs_console_url}"
 
@@ -76,6 +80,8 @@ resource "aws_cloudwatch_metric_alarm" "missed_runs" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "quiet" {
+  count = local.schedule_enabled ? 1 : 0
+
   alarm_name        = "${local.name}-quiet"
   alarm_description = "No stories were posted for ${var.quiet_alarm_days} day(s) even though runs are not failing. NWS may have changed the API, or the bot is skipping everything. Check \"Run complete\" summaries in the logs and compare with each office's weather.gov weatherstory page: ${local.logs_console_url}"
 

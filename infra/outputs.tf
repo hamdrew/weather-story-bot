@@ -2,6 +2,10 @@ output "function_name" {
   value = aws_lambda_function.bot.function_name
 }
 
+output "region" {
+  value = var.region
+}
+
 output "mvp_table_name" {
   value = one(aws_dynamodb_table.posted[*].name)
 }

@@ -34,7 +34,7 @@ backend:
 
 infra:
   alarms:
-    description: Alarm descriptions are runbooks; ok_actions, commented treat_missing_data, tunable thresholds as variables
+    description: Alarm descriptions are runbooks; ok_actions, commented treat_missing_data, tunable thresholds as variables; alarms that treat missing data as breaching exist only while the schedule is enabled; per-environment namespaces
   data-retention:
     description: Archive and state table kept forever (no TTL) with matched 35-day undo windows; stop and ask before replacing a table or bucket
   environments:

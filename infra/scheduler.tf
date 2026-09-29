@@ -2,6 +2,7 @@ resource "aws_scheduler_schedule" "bot" {
   name                = local.name
   description         = "Check for new NWS Weather Stories"
   schedule_expression = var.schedule_expression
+  state               = local.schedule_enabled ? "ENABLED" : "DISABLED"
 
   flexible_time_window {
     mode = "OFF"

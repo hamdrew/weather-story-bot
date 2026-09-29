@@ -147,6 +147,8 @@ aws cloudwatch set-alarm-state --alarm-name weather-story-bot-errors \
 
 Each alarm email includes the same hints and a link to the log group.
 
+Staging (`weather-story-bot-staging-*`, on its own `weather-story-bot-staging-alerts` topic) has a smaller alarm set: `errors`, `repost-loop` and `nws-ambiguous`. Its schedule is off and it runs only when you invoke it, so `missed-runs` and `quiet`, which treat missing data as breaching, would sit in ALARM for good. They exist only while the schedule is enabled (`schedule_enabled`, which defaults to on for production and off for other environments). Staging's metrics use the `WeatherStoryBot/staging` namespace, so its posts never count toward production's `quiet` and `repost-loop`. The budget is production-only.
+
 `quiet` and `repost-loop` count the Telegram client's `Telegram message sent` log line through a log metric filter (`WeatherStoryBot/StoriesPosted`), so don't change that message text. It's logged as soon as Telegram accepts a message, so posts whose DynamoDB write then fails still count. "Updated" reposts count too. Until a full day of data exists, `quiet` may show `INSUFFICIENT_DATA`. `nws-ambiguous` counts the handler's `Ambiguous stories from NWS` line (`WeatherStoryBot/AmbiguousStories`), so don't change that message text either.
 
 ### Tuning thresholds

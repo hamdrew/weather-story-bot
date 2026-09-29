@@ -14,5 +14,6 @@ Every `aws_cloudwatch_metric_alarm` has:
 treat_missing_data = "breaching"
 ```
 
-- Custom metrics use `local.metric_namespace`, and the alarm references the filter's `metric_transformation[0].name`
+- `count = local.schedule_enabled ? 1 : 0` if it treats missing data as breaching because of the schedule (`missed-runs`, `quiet`): on an idle schedule it would sit in ALARM for good
+- Custom metrics use `local.metric_namespace`, which is per environment, and the alarm references the filter's `metric_transformation[0].name`
 - A log metric filter matches an exact message, so see `testing/log-contracts`
