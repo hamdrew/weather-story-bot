@@ -39,7 +39,7 @@ def cloudwatch(scheduler: EventBridgeSchedulerClient) -> CloudWatchClient:
 
 @pytest.fixture
 def paused(scheduler: EventBridgeSchedulerClient, cloudwatch: CloudWatchClient) -> None:
-    """What Terraform creates: a DISABLED schedule and alarms whose actions are off."""
+    """A paused environment: a DISABLED schedule and alarms whose actions are off."""
     scheduler.create_schedule(
         Name=SCHEDULE,
         Description="Check for new NWS Weather Stories",

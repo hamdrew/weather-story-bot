@@ -40,7 +40,7 @@ separate AWS accounts.
   values that exist outside Terraform are variables, never hard-coded per environment).
 - **Staging has production's five alarms,** on a `-staging` SNS topic, so alarm changes can be
   tested with `set-alarm-state` before they reach production. Every environment's alarms are
-  created with their actions off and start and pause with the schedule (revised 2026-10-02; the
+  created on, and their actions pause and start with the schedule (revised 2026-10-02; the
   first design dropped `missed-runs` and `quiet` while staging was idle).
 - **Staging's data has production's protections:** deletion protection, 35-day PITR and bucket
   versioning. That keeps `storage.tf` free of environment branches, and staging then tests what
@@ -138,7 +138,7 @@ Amended by this spec:
 - `infra/data-retention` — the MVP table is production-only; staging keeps the same protections
 - `infra/iam` — the Telegram token parameter is per environment; ABAC rules for tag conditions
   (Task 5)
-- `infra/alarms` — every alarm is created with its actions off and toggled with the schedule; metric namespaces are per environment
+- `infra/alarms` — every alarm is created on and its actions are toggled with the schedule; metric namespaces are per environment
 - `global/principles` — "use a deployed environment" becomes "use staging"
 
 Constraining but unchanged:

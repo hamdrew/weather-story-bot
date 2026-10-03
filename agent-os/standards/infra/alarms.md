@@ -14,6 +14,6 @@ Every `aws_cloudwatch_metric_alarm` has:
 treat_missing_data = "breaching"
 ```
 
-- `actions_enabled = false` with `lifecycle { ignore_changes = [actions_enabled] }`: every environment is created paused, and `make start` / `make pause` toggle the actions with the schedule. An alarm that treats missing data as breaching because of the schedule (`missed-runs`, `quiet`) then sits in ALARM without emailing while paused. Add the alarm to `local.alarm_names` (the `alarm_names` output), or the toggle won't reach it
+- `actions_enabled = true` with `lifecycle { ignore_changes = [actions_enabled] }`: alarms are created on, so a new environment is loud until it is running, and `make pause` / `make start` toggle the actions with the schedule. An alarm that treats missing data as breaching because of the schedule (`missed-runs`, `quiet`) sits in ALARM without emailing while paused. Add the alarm to `local.alarm_names` (the `alarm_names` output), or the toggle won't reach it
 - Custom metrics use `local.metric_namespace`, which is per environment, and the alarm references the filter's `metric_transformation[0].name`
 - A log metric filter matches an exact message, so see `testing/log-contracts`

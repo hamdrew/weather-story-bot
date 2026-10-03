@@ -50,14 +50,14 @@ by a script rather than by eye. Nothing is destroyed or replaced.
 | `environment` var | No default, validated to `production`/`staging`, passed by the Makefile as `-var`, never kept in tfvars, so it can't disagree with the backend |
 | `ENV` | Required by `plan`/`deploy`; no default |
 | Telegram | A **separate staging bot**, token at `/weather-story-bot-staging/telegram-token`; staging's IAM can read only that parameter; `telegram_token_param_name` is required and validated to sit under `/${local.name}/` |
-| Staging alarms | `errors`, `repost-loop` and `nws-ambiguous` on its own `-staging` SNS topic. `missed-runs` and `quiet` too: all five alarms exist, created with their actions off and toggled with the schedule |
+| Staging alarms | `errors`, `repost-loop` and `nws-ambiguous` on its own `-staging` SNS topic. `missed-runs` and `quiet` too: all five alarms exist, created on and toggled with the schedule |
 | Staging data | The **same protections as production** (deletion protection, PITR, versioning). Reset staging by deleting items, not the table |
 | Production-only | The account budget and the MVP `posted` table, via `count`; Terraform moves them to `[0]` automatically |
 | Tags | `Environment = var.environment` (lowercase) on everything via `default_tags`, next to `Project = local.name`. **Reversed after shaping**, for the tag conditions |
 | Tag conditions | The Lambda role's `State`, `TelegramToken` and `Archive` statements add `aws:ResourceTag/Environment` to their exact ARNs (Task 5); `Logs` doesn't. Everything a condition reads (tags, bucket ABAC, the hand-tagged token parameter) goes live a deploy before the condition |
 | Bucket ABAC | `aws_s3_bucket_abac` on the archive, in Stage 1: the only addition in production's Gate 1 plan |
 | Gate 1 check | A script reads the saved plan's JSON and fails on anything but a move, a tag-only update or the ABAC addition (Task 3) |
-| Start/pause | `make start ENV=<env>` / `make pause ENV=<env>` toggle the schedule and the alarm actions through the API; Terraform creates both off and ignores them afterwards, in every environment |
+| Start/pause | `make start ENV=<env>` / `make pause ENV=<env>` toggle the schedule and the alarm actions through the API; Terraform creates the schedule `DISABLED` and the alarms on, and ignores both afterwards, in every environment |
 | Rules | New `infra/environments` and `infra/budget` standards |
 | Tooling | Plain Terraform plus the Makefile. **Terragrunt considered and declined** (below) |
 
@@ -242,23 +242,24 @@ resource (the provider docs don't say whether deleting it disables ABAC).
 
 # Stage 2 — Staging exists
 
-## Task 4: Created paused, toggled by `make start` / `make pause`
+## Task 4: Toggled by `make start` / `make pause`
 
 Revised 2026-10-02. This task first made `schedule_enabled` a variable and put `count` on
 `missed_runs` and `quiet`. That gave staging a smaller alarm set and made the toggle a Terraform
-variable. It was replaced by one rule for every environment: **everything is created paused, and a
-script starts and pauses it.**
+variable. It was replaced by one rule for every environment: **Terraform creates the schedule
+`DISABLED` and the alarms on, and a script starts and pauses them.**
 
 - No `schedule_enabled` variable or local. `aws_scheduler_schedule.bot` is created
   `state = "DISABLED"`, and every `aws_cloudwatch_metric_alarm` is created with
-  `actions_enabled = false`. Both have `lifecycle { ignore_changes = [...] }` for that attribute,
+  `actions_enabled = true`. Both have `lifecycle { ignore_changes = [...] }` for that attribute,
   so no apply undoes a start or a pause. `lifecycle` can't be conditional, so this holds in
   production too: its existing schedule and alarms stay as they are, because the attributes are
   ignored, not changed.
 - All five alarms exist in every environment, so `missed_runs` and `quiet` lose their `count`
   (production's plan shows nothing for them, since Task 4's `count` was never deployed there). A
-  paused environment's two breaching alarms sit in ALARM without emailing, because their actions
-  are off.
+  new environment's two breaching alarms email until it is started (deliberate: it proves the
+  alarms work), and a paused one's sit in ALARM without emailing, because `make pause` turned
+  their actions off.
 - `outputs.tf`: `region`, `schedule_name` and `alarm_names`.
 - `scripts/set_run_state.py` (tested against moto): `start` enables the schedule, then the alarm
   actions; `pause` disables the alarm actions, then the schedule. It reads `terraform output -json`,

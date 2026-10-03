@@ -4,7 +4,7 @@ resource "aws_scheduler_schedule" "bot" {
   schedule_expression = var.schedule_expression
   state               = "DISABLED"
 
-  # Every environment is created paused. `state` is only the initial value: make start / make pause
+  # Every environment's schedule is created DISABLED. `state` is only the initial value: make start / make pause
   # toggle it through the API (scripts/set_run_state.py), and a later apply must not flip it back.
   lifecycle {
     ignore_changes = [state]

@@ -58,7 +58,7 @@ resource "aws_cloudwatch_metric_alarm" "errors" {
   threshold           = 1
   treat_missing_data  = "notBreaching"
 
-  actions_enabled = false
+  actions_enabled = true
   alarm_actions   = [aws_sns_topic.alerts.arn]
   ok_actions      = [aws_sns_topic.alerts.arn]
 
@@ -67,10 +67,10 @@ resource "aws_cloudwatch_metric_alarm" "errors" {
   }
 }
 
-# Every alarm is created with its actions off, like the schedule is created off. make start and
-# make pause toggle both (scripts/set_run_state.py), and ignore_changes keeps an apply from
-# undoing that. missed_runs and quiet treat missing data as breaching, so a paused environment's
-# two sit in ALARM without emailing.
+# Every alarm is created with its actions on, so a new environment is loud until it is running:
+# missed_runs and quiet treat missing data as breaching and email while the schedule (created
+# DISABLED) is idle. make pause turns the actions off with the schedule and make start turns them
+# back on (scripts/set_run_state.py). ignore_changes keeps an apply from undoing either.
 resource "aws_cloudwatch_metric_alarm" "missed_runs" {
   alarm_name        = "${local.name}-missed-runs"
   alarm_description = "The bot was not invoked in the last hour, so the schedule is probably disabled, deleted or failing to invoke the function. Check the EventBridge Scheduler schedule ${aws_scheduler_schedule.bot.name}, then the logs for recent runs: ${local.logs_console_url}"
@@ -88,7 +88,7 @@ resource "aws_cloudwatch_metric_alarm" "missed_runs" {
   # A stopped schedule publishes no data points at all.
   treat_missing_data = "breaching"
 
-  actions_enabled = false
+  actions_enabled = true
   alarm_actions   = [aws_sns_topic.alerts.arn]
   ok_actions      = [aws_sns_topic.alerts.arn]
 
@@ -111,7 +111,7 @@ resource "aws_cloudwatch_metric_alarm" "quiet" {
   # Nothing posted means no data points, not zeros.
   treat_missing_data = "breaching"
 
-  actions_enabled = false
+  actions_enabled = true
   alarm_actions   = [aws_sns_topic.alerts.arn]
   ok_actions      = [aws_sns_topic.alerts.arn]
 
@@ -133,7 +133,7 @@ resource "aws_cloudwatch_metric_alarm" "repost_loop" {
   threshold           = var.repost_alarm_max_posts
   treat_missing_data  = "notBreaching"
 
-  actions_enabled = false
+  actions_enabled = true
   alarm_actions   = [aws_sns_topic.alerts.arn]
   ok_actions      = [aws_sns_topic.alerts.arn]
 
@@ -170,7 +170,7 @@ resource "aws_cloudwatch_metric_alarm" "nws_ambiguous" {
   # No rejections means no data points.
   treat_missing_data = "notBreaching"
 
-  actions_enabled = false
+  actions_enabled = true
   alarm_actions   = [aws_sns_topic.alerts.arn]
   ok_actions      = [aws_sns_topic.alerts.arn]
 

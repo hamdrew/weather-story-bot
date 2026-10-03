@@ -40,10 +40,10 @@
   condition. `State`, `TelegramToken` and `Archive` carry conditions; `Logs` doesn't, because
   it's unverified whether `PutLogEvents` reads log-group tags and a denial would silently lose
   the logs and the alarms built on them.
-- **infra/alarms** (Task 4) — Every alarm is created with `actions_enabled = false` and
-  `ignore_changes` on it, and `make start` / `make pause` toggle the actions with the schedule, so
-  an alarm that treats missing data as `breaching` can sit in ALARM on a paused stack without
-  emailing and training you to ignore the inbox. Custom metrics use `local.metric_namespace`,
+- **infra/alarms** (Task 4) — Every alarm is created with `actions_enabled = true` and
+  `ignore_changes` on it, and `make pause` / `make start` toggle the actions with the schedule, so
+  an alarm that treats missing data as `breaching` sits in ALARM on a paused stack without
+  emailing and training you to ignore the inbox. A new environment is loud until it starts. Custom metrics use `local.metric_namespace`,
   which is per environment.
 - **global/principles** (Task 7) — Under "Local tools are read-only", "to watch real behaviour,
   use a deployed environment" becomes "use staging (`infra/environments`)".

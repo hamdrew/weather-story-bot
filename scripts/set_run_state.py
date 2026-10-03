@@ -1,8 +1,8 @@
 """Start or pause an environment: its EventBridge schedule and its alarm actions (2026-10-02).
 
-Terraform creates every environment paused (a DISABLED schedule, alarms with `actions_enabled =
-false`) and ignores both settings afterwards (`infra/environments`), so this is what changes
-them. An apply never undoes a start or a pause.
+Terraform creates the schedule DISABLED and the alarms with their actions on, and ignores both
+settings afterwards (`infra/environments`), so this is what changes them. An apply never undoes
+a start or a pause.
 
 - **start** enables the schedule, then the alarm actions. The schedule has no StartDate, so
   EventBridge fires it at once, then every interval.
@@ -10,8 +10,9 @@ them. An apply never undoes a start or a pause.
   email about the idleness they cause.
 
 Pausing keeps the alarms and their state. `missed-runs` and `quiet` treat missing data as
-breaching, so a paused environment's two sit in ALARM without emailing. Starting re-enables their
-actions, and the first runs then bring them back to OK with an OK email.
+breaching, so a paused environment's two sit in ALARM without emailing. A new environment is the
+reverse: its alarms are on while its schedule is off, so those two email until you start it.
+Starting re-enables their actions, and the first runs then bring them back to OK with an OK email.
 
 Reads `terraform output -json` for the schedule name, alarm names and region, and changes nothing
 unless --apply is given. Idempotent: whatever already matches is left alone. The schedule is

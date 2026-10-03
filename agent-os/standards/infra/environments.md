@@ -61,15 +61,18 @@ name = local.production ? "weather-story-bot" : "weather-story-bot-${var.environ
 
 - **Staging is where real posts get watched.** Production becomes pipeline-only in Phase 2.1.
   Until then it's `make deploy ENV=production`, so the rule is written ahead of being enforceable
-- **Every environment is created paused**: a `DISABLED` schedule and alarms with
-  `actions_enabled = false`. There is no `schedule_enabled` variable, so no environment differs
-  by a flag. `make start ENV=<env>` and `make pause ENV=<env>` toggle both through the API
+- **Every environment's schedule is created `DISABLED` and its alarms are created on.** There is
+  no `schedule_enabled` variable, so no environment differs by a flag. `make start ENV=<env>` and
+  `make pause ENV=<env>` toggle the schedule and the alarm actions through the API
   (`scripts/set_run_state.py`), and `ignore_changes` on `state` and `actions_enabled` keeps an apply
   from undoing them. `lifecycle` can't be conditional, so production is ignored too: its schedule
   and alarms stay as they are, and `make pause ENV=production` is how you stop it. Terraform
   never will
-- Pausing keeps the alarms, so the breaching ones (`missed-runs`, `quiet`) sit in ALARM while
-  paused, silently. Starting re-enables their actions, and the first runs bring them back to OK
+- Alarms are created on, so a new environment emails (`missed-runs` and `quiet` breach on missing
+  data) until it is started. That is deliberate: the first alert proves the alarms and the email
+  path work, and an environment you forgot to start can't be silent
+- Pausing turns the actions off and keeps the alarms, so the breaching ones sit in ALARM while
+  paused, silently. Starting re-enables them, and the first runs bring them back to OK
 - A new alarm goes in `local.alarm_names` (`infra/monitoring.tf`), or the toggle misses it
 
 ## Telegram

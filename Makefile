@@ -74,8 +74,8 @@ cost:
 	infracost scan --json > $(BUILD_DIR)/infracost.json
 	@uv run python scripts/infracost_usage.py report $(BUILD_DIR)/infracost.json
 
-# Start or pause an environment: its schedule and its alarm actions, both of which Terraform creates
-# off and then ignores (scripts/set_run_state.py explains the order and the idempotence). The names
+# Start or pause an environment: its schedule and its alarm actions, which Terraform creates
+# (DISABLED, and on) and then ignores (scripts/set_run_state.py explains the order and the idempotence). The names
 # and region come from the environment's outputs, which need a deploy of this version first. Needs
 # the weather-deploy profile's MFA code, so run it in a real terminal. bash for pipefail.
 start pause: SHELL := bash

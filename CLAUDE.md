@@ -9,7 +9,7 @@ Python 3.13 Lambda (arm64) that posts NWS Weather Stories to Telegram. Infra is 
 - `make build` - vendors deps for aarch64-manylinux2014 / py3.13 (binary wheels only) into `build/lambda.zip`
 - `make plan ENV=<env>` / `make deploy ENV=<env>` - `ENV` is `production` or `staging` (required; selects `infra/envs/<env>.backend.hcl`, `envs/<env>.tfvars` and the data dir `infra/.terraform-<env>/`); `plan` saves `infra/deploy-<env>.tfplan`; `deploy` applies exactly that file (no prompt) and deletes it, failing if there's none; ask before running `deploy`
 - `make check-plan ENV=<env>` - read-only; fails unless the saved plan only moves resources, adds the `Environment` tag, enables archive bucket ABAC and re-writes an unchanged deferred role policy (Phase 2.0 Gate 1)
-- `make start ENV=<env>` / `make pause ENV=<env>` - start or pause an environment's schedule and alarm actions through the API (`scripts/set_run_state.py`; everything is created paused and Terraform ignores both); they change a live environment and need the MFA profile, so ask before running
+- `make start ENV=<env>` / `make pause ENV=<env>` - start or pause an environment's schedule and alarm actions through the API (`scripts/set_run_state.py`; Terraform creates the schedule DISABLED and the alarms on, then ignores both); they change a live environment and need the MFA profile, so ask before running
 - Other Terraform commands need the env's data dir: `TF_DATA_DIR=.terraform-production terraform -chdir=infra output`
 - `uv run weather-story-bot --dry-run [--office MKX]` - live NWS fetch, prints each story's decision (`new-or-updated (state not read)` / `expired` / `rejected`) beside its caption; `--dry-run` is required, read-only, never posts
 
