@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.13"
 
 [[package]]
@@ -869,17 +869,32 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+cloudwatch = [
+    { name = "types-boto3-cloudwatch" },
+]
 dynamodb = [
     { name = "types-boto3-dynamodb" },
 ]
 s3 = [
     { name = "types-boto3-s3" },
 ]
+scheduler = [
+    { name = "types-boto3-scheduler" },
+]
 ssm = [
     { name = "types-boto3-ssm" },
 ]
 sts = [
     { name = "types-boto3-sts" },
+]
+
+[[package]]
+name = "types-boto3-cloudwatch"
+version = "1.43.102"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7f/51/f83bf492e489fac1bed633505fb68a27f68ef5684ef23633c4cc20f88e48/types_boto3_cloudwatch-1.43.102.tar.gz", hash = "sha256:45fb1660b93fd426529dd1fa54279b13800a3a8beb7fa4ad4e41c370ccb7ba9f", size = 41250, upload-time = "2026-09-24T20:44:21.465Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/85/af/16fbda9ec3cb70f70484f160914dff052c33ad7c69cdeecc92b2c98f378c/types_boto3_cloudwatch-1.43.102-py3-none-any.whl", hash = "sha256:0ae8dd65d29c260bfa6eeb1b0e70022541b43867a148bf3160b328f3117deb8d", size = 50531, upload-time = "2026-09-24T20:44:18.327Z" },
 ]
 
 [[package]]
@@ -898,6 +913,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f7/1a/285aa2a27436e437aea1c6d6f964b692df3d8c349bf6a35fd476d0b2f7bb/types_boto3_s3-1.43.93.tar.gz", hash = "sha256:6a7f979872b81f6bf22eb4dc39ea9909d635ec756275eca69e9caabdc94d5a6a", size = 79218, upload-time = "2026-09-11T19:44:38.149Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1f/16/db644e738b967336fb0ca335d708c7d659a965b8ae703e9c50fe209c59be/types_boto3_s3-1.43.93-py3-none-any.whl", hash = "sha256:da9249f05ea081bb3b3f3b8cc49099a988ff5c89da8a7393532397c6174e04d3", size = 86538, upload-time = "2026-09-11T19:44:36.68Z" },
+]
+
+[[package]]
+name = "types-boto3-scheduler"
+version = "1.43.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/76/a5/cfad9801eda12bc958fa84a1c6c2dec0fa535ee6324e207ec23018f7277b/types_boto3_scheduler-1.43.0.tar.gz", hash = "sha256:34303fe8521fbe1a3d302a1b8eeb6aa3bdc970ddd99776bd22868b24b50cf810", size = 18587, upload-time = "2026-04-29T23:06:33.642Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/29/31/45edc82558bef35673dcfa0292684f8cdcee559e67e9dee2038259a0e370/types_boto3_scheduler-1.43.0-py3-none-any.whl", hash = "sha256:77f30d602e767e3875739345f1e48dd44881952e6f46e44254b817082bd7ef23", size = 24859, upload-time = "2026-04-29T23:06:32.336Z" },
 ]
 
 [[package]]
@@ -963,7 +987,7 @@ dev = [
     { name = "respx" },
     { name = "ruff" },
     { name = "ty" },
-    { name = "types-boto3", extra = ["dynamodb", "s3", "ssm", "sts"] },
+    { name = "types-boto3", extra = ["cloudwatch", "dynamodb", "s3", "scheduler", "ssm", "sts"] },
 ]
 
 [package.metadata]
@@ -972,14 +996,14 @@ requires-dist = [{ name = "httpx", specifier = ">=0.28.1" }]
 [package.metadata.requires-dev]
 dev = [
     { name = "boto3", extras = ["crt"], specifier = ">=1.43.93" },
-    { name = "moto", extras = ["dynamodb", "s3", "ssm"], specifier = ">=5.2.3" },
+    { name = "moto", extras = ["cloudwatch", "dynamodb", "s3", "scheduler", "ssm"], specifier = ">=5.2.3" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "python-dotenv", specifier = ">=1.1.1" },
     { name = "respx", specifier = ">=0.23.1" },
     { name = "ruff", specifier = ">=0.16.7" },
     { name = "ty", specifier = ">=0.0.81" },
-    { name = "types-boto3", extras = ["dynamodb", "s3", "ssm", "sts"], specifier = ">=1.43.94" },
+    { name = "types-boto3", extras = ["cloudwatch", "dynamodb", "s3", "scheduler", "ssm", "sts"], specifier = ">=1.43.94" },
 ]
 
 [[package]]

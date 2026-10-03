@@ -17,11 +17,11 @@ production columns are the Phase 1.2 estimate, unchanged: this spec adds no reso
 
 ## What staging costs
 
-- **Staging is priced as a worst case: the schedule stays on.** Staging has a schedule that can be
-  paused and enabled (`schedule_enabled`), and it will be left running for soak tests, perhaps
+- **Staging is priced as a worst case: the schedule stays on.** Staging's schedule can be started
+  and paused (`make start` / `make pause`), and it will be left running for soak tests, perhaps
   permanently. So its column is production's one-office usage at the same `rate(15 minutes)`, with
-  all five alarms (`missed-runs` and `quiet` exist while the schedule is enabled). A paused staging
-  costs less: three alarms, $0.30, and almost no usage.
+  all five alarms. A paused staging has the same five alarms ($0.50: they exist while paused,
+  with their actions off) and almost no usage.
 - **No budget and no `posted` table.** Both are production-only (`infra/environments`).
 - **Real cost is about $0.** The account then has 10 alarms (5 production, 5 staging), exactly
   CloudWatch's 10 free, so the figure above is list price and the worst case. The next alarm

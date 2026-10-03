@@ -7,7 +7,7 @@ Spec folder: `agent-os/specs/2026-09-26-2319-staging-and-production/`
 Phase 1.2 made the CLI strictly read-only, so there is no longer any way to watch a real post
 without deploying to production and posting to the public channel. Phase 2.0 adds a **staging**
 deployment from the same `infra/`: MKX only, a private test channel, its own Telegram bot, the
-schedule off, and invoked by hand. Phase 2.1's pipeline then has somewhere to apply before
+schedule off, and started by hand. Phase 2.1's pipeline then has somewhere to apply before
 production.
 
 The hard constraint: **production must not be renamed.** Renaming the table or the bucket forces
@@ -50,14 +50,14 @@ by a script rather than by eye. Nothing is destroyed or replaced.
 | `environment` var | No default, validated to `production`/`staging`, passed by the Makefile as `-var`, never kept in tfvars, so it can't disagree with the backend |
 | `ENV` | Required by `plan`/`deploy`; no default |
 | Telegram | A **separate staging bot**, token at `/weather-story-bot-staging/telegram-token`; staging's IAM can read only that parameter; `telegram_token_param_name` is required and validated to sit under `/${local.name}/` |
-| Staging alarms | `errors`, `repost-loop` and `nws-ambiguous` on its own `-staging` SNS topic. `missed-runs` and `quiet` exist only while the schedule is enabled |
+| Staging alarms | `errors`, `repost-loop` and `nws-ambiguous` on its own `-staging` SNS topic. `missed-runs` and `quiet` too: all five alarms exist, created with their actions off and toggled with the schedule |
 | Staging data | The **same protections as production** (deletion protection, PITR, versioning). Reset staging by deleting items, not the table |
 | Production-only | The account budget and the MVP `posted` table, via `count`; Terraform moves them to `[0]` automatically |
 | Tags | `Environment = var.environment` (lowercase) on everything via `default_tags`, next to `Project = local.name`. **Reversed after shaping**, for the tag conditions |
 | Tag conditions | The Lambda role's `State`, `TelegramToken` and `Archive` statements add `aws:ResourceTag/Environment` to their exact ARNs (Task 5); `Logs` doesn't. Everything a condition reads (tags, bucket ABAC, the hand-tagged token parameter) goes live a deploy before the condition |
 | Bucket ABAC | `aws_s3_bucket_abac` on the archive, in Stage 1: the only addition in production's Gate 1 plan |
 | Gate 1 check | A script reads the saved plan's JSON and fails on anything but a move, a tag-only update or the ABAC addition (Task 3) |
-| Invoke | `make invoke-staging` only; production runs on its schedule |
+| Start/pause | `make start ENV=<env>` / `make pause ENV=<env>` toggle the schedule and the alarm actions through the API; Terraform creates both off and ignores them afterwards, in every environment |
 | Rules | New `infra/environments` and `infra/budget` standards |
 | Tooling | Plain Terraform plus the Makefile. **Terragrunt considered and declined** (below) |
 
@@ -242,18 +242,32 @@ resource (the provider docs don't say whether deleting it disables ABAC).
 
 # Stage 2 — Staging exists
 
-## Task 4: Schedule toggle and monitoring that tolerates an idle staging
+## Task 4: Created paused, toggled by `make start` / `make pause`
 
-- `schedule_enabled` (nullable bool, `local.schedule_enabled = coalesce(var.schedule_enabled, local.production)`).
-  `aws_scheduler_schedule.bot` gets `state = local.schedule_enabled ? "ENABLED" : "DISABLED"`.
-- `missed_runs` and `quiet` get `count = local.schedule_enabled ? 1 : 0`, with a comment that
-  both treat missing data as breaching and would sit in ALARM on an idle schedule.
-- `outputs.tf`: add `region` for `make invoke-staging`.
-- Amend `infra/alarms`: alarms that treat missing data as breaching exist only while the schedule
-  is enabled; namespaces are per environment. README alarm table: add a note on the staging
-  alarm set.
-- **Production plan:** moves for `missed_runs[0]` and `quiet[0]` plus the new output. No
-  resource changes. It's fine to deploy this with Gate 3.
+Revised 2026-10-02. This task first made `schedule_enabled` a variable and put `count` on
+`missed_runs` and `quiet`. That gave staging a smaller alarm set and made the toggle a Terraform
+variable. It was replaced by one rule for every environment: **everything is created paused, and a
+script starts and pauses it.**
+
+- No `schedule_enabled` variable or local. `aws_scheduler_schedule.bot` is created
+  `state = "DISABLED"`, and every `aws_cloudwatch_metric_alarm` is created with
+  `actions_enabled = false`. Both have `lifecycle { ignore_changes = [...] }` for that attribute,
+  so no apply undoes a start or a pause. `lifecycle` can't be conditional, so this holds in
+  production too: its existing schedule and alarms stay as they are, because the attributes are
+  ignored, not changed.
+- All five alarms exist in every environment, so `missed_runs` and `quiet` lose their `count`
+  (production's plan shows nothing for them, since Task 4's `count` was never deployed there). A
+  paused environment's two breaching alarms sit in ALARM without emailing, because their actions
+  are off.
+- `outputs.tf`: `region`, `schedule_name` and `alarm_names`.
+- `scripts/set_run_state.py` (tested against moto): `start` enables the schedule, then the alarm
+  actions; `pause` disables the alarm actions, then the schedule. It reads `terraform output -json`,
+  sends the schedule's whole current definition back (`update-schedule` replaces it), is a dry run
+  without `--apply`, and is idempotent. `make start ENV=<env>` and `make pause ENV=<env>` run it
+  with `--apply`, through `check-env` and the environment's data dir.
+- Amend `infra/alarms` and `infra/environments`; README alarm section.
+- **Production plan:** the three new outputs and nothing else. It's fine to deploy this with
+  Gate 3. Production's schedule and alarms are already on, and stay on.
 
 ## Task 5: Tag conditions on the Lambda role
 
@@ -264,7 +278,7 @@ resource (the provider docs don't say whether deleting it disables ABAC).
   - DynamoDB supports `aws:ResourceTag` on item actions, but only while the account's DynamoDB
     ABAC setting is on ("enabled by default for most accounts"). If it's off, conditions evaluate
     as if the table had no tags and the Allow fails closed. There's no CLI to read the setting
-    (console Settings page only), so staging's first invoke proves it
+    (console Settings page only), so staging's first run proves it
   - SSM reads the parameter's own tags. The parameter is made by hand, so it's tagged by hand
     (Gate 1 for production, the README's Staging section for staging)
   - S3 `PutObject` on `bucket/*` reads the bucket's tags, which it honours only with bucket ABAC
@@ -300,16 +314,15 @@ resource (the provider docs don't say whether deleting it disables ABAC).
 
 ## Task 7: Stand up staging
 
-- `Makefile`: `invoke-staging` reads `function_name` and `region` from staging's outputs,
-  invokes synchronously with the weather-deploy profile, writes to `build/`, prints the summary,
-  and exits non-zero on a `FunctionError`.
+- `Makefile`: `start` and `pause` (Task 4) take `ENV`, so staging's are `make start ENV=staging`
+  and `make pause ENV=staging`. Nothing else is added here.
 - README **Staging** section (you run it, once): create the bot in BotFather; create a private
   channel and make the staging bot its admin; find the chat id; `aws ssm put-parameter --type
   SecureString --name /weather-story-bot-staging/telegram-token --tags
   Key=Environment,Value=staging` (the tag is what Task 5's condition reads; `--tags` can't be
   combined with `--overwrite`); copy the two staging examples;
   `make build`, `make plan ENV=staging`, `make deploy ENV=staging`; confirm the staging SNS
-  subscription email; `make invoke-staging`.
+  subscription email; `make start ENV=staging`.
 - Amend `global/principles`: "use a deployed environment" becomes "use staging"
   (`infra/environments`). `infra/environments` records the rule: **staging is where real posts
   get watched.** Production becomes pipeline-only in Phase 2.1. Until then it's
@@ -318,12 +331,13 @@ resource (the provider docs don't say whether deleting it disables ABAC).
 ### Gate 2 — deploy staging
 
 Staging is created with its tags, bucket ABAC, a hand-tagged token parameter and the tag
-conditions all at once. That's safe only because nothing public depends on it, and its invoke is
+conditions all at once. That's safe only because nothing public depends on it, and its first run is
 the proof production needs at Gate 3.
 
 **Pass:** the staging plan creates only `-staging` resources (no budget, no `posted`, no
-`missed-runs` or `quiet`, the schedule `DISABLED`). The first `make invoke-staging` posts MKX's
-active stories to the private channel, and a second shows them all `skipped`. The first invoke
+`missed-runs` or `quiet`, the schedule `DISABLED`). `make start ENV=staging` fires a run at once that posts MKX's
+active stories to the private channel, and the next scheduled run (15 min) logs them all
+`skipped`; then `make pause ENV=staging`. The first run
 also proves the conditions in this account: the lease proves DynamoDB (and so the account's
 DynamoDB ABAC setting), the token read proves SSM, and a posted story's archive write proves S3
 bucket ABAC (if MKX has no active story, S3 stays unproved; wait for one before Gate 3). An
@@ -341,7 +355,7 @@ nothing beyond what Gate 3 lists.
 Only after Gate 2 has proved DynamoDB, SSM and S3 in this account. Production's tags, bucket ABAC
 and hand-tagged token parameter have been live since Gate 1, so nothing the conditions read is new.
 
-**Pass:** the plan shows the moves for `missed_runs[0]` and `quiet[0]`, the new `region` output
+**Pass:** the plan shows the new `region`, `schedule_name` and `alarm_names` outputs
 and one in-place update, `aws_iam_role_policy.lambda` (Task 5's conditions). Nothing else. After
 `make deploy ENV=production`, each condition is exercised at a different time:
 - DynamoDB on every run (the lease), so the next scheduled run logging `Run complete` proves it
@@ -366,8 +380,8 @@ post have both happened without it firing.
   production object's `LastModified` is unchanged by the staging deploy.
 - Gate 1: the plan check passes on production's plan (moves, tag-only updates and the ABAC
   addition), and it keeps posting after the deploy.
-- Gate 2: a real post appears in the private channel, and nothing in the public one. A repeat
-  invoke is `skipped`. The staging alarm email arrives with `staging` in its name.
+- Gate 2: a real post appears in the private channel, and nothing in the public one. The next
+  scheduled run is `skipped`. The staging alarm email arrives with `staging` in its name.
 - Gate 3: production keeps posting under the tag conditions through a cold start and a post,
   with the `errors` alarm quiet.
 - `make cost` shows the staging column. `aws cloudwatch describe-alarms` (readonly profile) lists

@@ -15,7 +15,7 @@
 - **Breaching on missing data:** `missed_runs` and `quiet` in `infra/monitoring.tf`. Idle-safe:
   `errors`, `repost_loop` and `nws_ambiguous`.
 - **Scheduler:** `infra/scheduler.tf` doesn't set `state`, so it defaults to `ENABLED`. Phase 1.1
-  paused it outside Terraform for a cutover. Here it becomes `local.schedule_enabled`.
+  paused it outside Terraform for a cutover. Here it is created `DISABLED` and its `state` is ignored afterwards (revised 2026-10-02).
 
 ### Partial backend config
 
@@ -39,7 +39,7 @@
   `agent-os/specs/2026-09-20-1428-decide-act-and-record/cost.md` for the format
 - **Relevance:** Scenarios are office counts over per-office rates. Staging needs a runs figure
   (about 60 hand invocations a month rather than 2,880), and its own Infracost project with
-  `environment: staging` so the budget, MVP table and schedule-bound alarms drop out.
+  `environment: staging` so the budget and MVP table drop out.
 - **Address change:** the usage key for the MVP table becomes `aws_dynamodb_table.posted[0]`.
 
 ### README
@@ -56,7 +56,7 @@
 
 - **Location:** `agent-os/notes/2026-09-16-standards-review.md:212`
 - **Relevance:** The origin: a staging deployment with a `-staging` suffix, a test channel, one or
-  two offices, the schedule off, invoked by hand, and the rule "production is only changed by
+  two offices, the schedule off, started by hand, and the rule "production is only changed by
   `make deploy` (or CI); staging is where you watch real posts". Its open question "Is a staging
   stack acceptable cost-wise?" is answered by Task 6's `cost.md`.
 
@@ -90,7 +90,7 @@
   https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/abac-enable-ddb.html.
   `aws:ResourceTag` works on item actions, but only while the account-level setting is on
   ("enabled by default for most accounts"). Off, conditions see no tags and an Allow fails closed.
-  The setting shows only on the console's Settings page, so staging's first invoke proves it
+  The setting shows only on the console's Settings page, so staging's first run proves it
   (Gate 2).
 - **Provider changelog, hashicorp/aws 6.23.0 (issue #45251):** `aws_s3_bucket` tagging uses S3
   Control `TagResource`/`UntagResource`/`ListTagsForResource` when the caller holds those actions,

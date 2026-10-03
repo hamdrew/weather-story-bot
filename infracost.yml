@@ -23,7 +23,7 @@ projects:
     usage_file: build/infracost-usage-all-us.yml
     terraform_vars: *vars
   # Staging differs in what Terraform creates (no budget, no `posted` table), which `environment`
-  # selects. The schedule is on as the worst case, so it keeps the missed-runs and quiet alarms.
+  # selects. The schedule is priced as on, the worst case.
   # Its parameter lives under its own prefix, which a variable validation checks.
   - path: infra
     name: staging
@@ -31,5 +31,4 @@ projects:
     terraform_vars:
       <<: *vars
       environment: staging
-      schedule_enabled: 'true'
       telegram_token_param_name: /weather-story-bot-staging/telegram-token

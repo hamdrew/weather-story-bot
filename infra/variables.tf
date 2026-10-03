@@ -54,13 +54,6 @@ variable "schedule_expression" {
   default     = "rate(15 minutes)"
 }
 
-variable "schedule_enabled" {
-  description = "Whether the EventBridge schedule runs the bot. Null means on for production and off for every other environment, which is invoked by hand."
-  type        = bool
-  default     = null
-  nullable    = true
-}
-
 variable "alert_email" {
   description = "Email address for CloudWatch alarm and AWS Budget alerts."
   type        = string

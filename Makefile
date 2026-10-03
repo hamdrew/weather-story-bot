@@ -1,4 +1,4 @@
-.PHONY: test coverage lint format build check-env plan deploy check-plan cost clean
+.PHONY: test coverage lint format build check-env plan deploy check-plan cost start pause clean
 
 BUILD_DIR := build
 PACKAGE_DIR := $(BUILD_DIR)/package
@@ -73,6 +73,15 @@ cost:
 	@uv run python scripts/infracost_usage.py write $(BUILD_DIR)
 	infracost scan --json > $(BUILD_DIR)/infracost.json
 	@uv run python scripts/infracost_usage.py report $(BUILD_DIR)/infracost.json
+
+# Start or pause an environment: its schedule and its alarm actions, both of which Terraform creates
+# off and then ignores (scripts/set_run_state.py explains the order and the idempotence). The names
+# and region come from the environment's outputs, which need a deploy of this version first. Needs
+# the weather-deploy profile's MFA code, so run it in a real terminal. bash for pipefail.
+start pause: SHELL := bash
+start pause: check-env
+	set -o pipefail; $(TF) output -json | \
+		uv run python scripts/set_run_state.py $@ --apply -
 
 clean:
 	rm -rf $(BUILD_DIR)

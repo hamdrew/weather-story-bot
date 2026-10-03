@@ -34,13 +34,13 @@ backend:
 
 infra:
   alarms:
-    description: Alarm descriptions are runbooks; ok_actions, commented treat_missing_data, tunable thresholds as variables; alarms that treat missing data as breaching exist only while the schedule is enabled; per-environment namespaces
+    description: Alarm descriptions are runbooks; ok_actions, commented treat_missing_data, tunable thresholds as variables; every alarm created with actions off and toggled with the schedule (make start/pause, ignore_changes); per-environment namespaces
   budget:
     description: Fixed monthly cost O(1) in offices; per-office visibility from queries, not metrics; pay-per-use with no idle cost; every spec has a cost.md from make cost; retention is a cost decision; the budget rises deliberately
   data-retention:
     description: Archive and state table kept forever (no TTL) with matched 35-day undo windows; stop and ask before replacing a table or bucket
   environments:
-    description: Production unsuffixed, others weather-story-bot-<env>; differences via variables or local.production, never forked files; created things derived from environment, outside things are required variables; production-only budget and posted table; one Makefile ENV selects backend, var file, data dir and plan; lowercase Environment tag on everything via default_tags, bucket ABAC on; a bot and token parameter per environment; per-environment metric namespaces
+    description: Production unsuffixed, others weather-story-bot-<env>; differences via variables or local.production, never forked files; created things derived from environment, outside things are required variables; production-only budget and posted table; one Makefile ENV selects backend, var file, data dir and plan; lowercase Environment tag on everything via default_tags, bucket ABAC on; staging is where real posts get watched; every environment created paused (DISABLED schedule, alarm actions off) and toggled by make start/pause; a bot and token parameter per environment; per-environment metric namespaces
   iam:
     description: Exact actions on narrowest ARNs via policy documents; the only delete is item-level DeleteItem for the lease; Environment tag conditions (Allow + StringEquals, on exact ARNs, no tag-write actions, live a deploy before the condition; Logs has none); SourceAccount guard on service trust policies
 

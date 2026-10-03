@@ -6,7 +6,7 @@ Shaped 2026-09-26. Roadmap Phase 2.0.
 
 Two named deployments from one `infra/`. **Production** keeps every resource name, state key and
 behaviour it has today. **Staging** is a new, near-free copy: MKX only, a private test channel, its
-own Telegram bot, the schedule off, invoked by hand with `make invoke-staging`. It replaces
+own Telegram bot, the schedule off, started and paused by hand with `make start ENV=staging` / `make pause ENV=staging`. It replaces
 "run it locally and watch it post", which Phase 1.2 removed on purpose when the CLI became
 read-only, and it gives Phase 2.1's pipeline somewhere to apply before production.
 
@@ -38,16 +38,16 @@ separate AWS accounts.
   worthless. `telegram_token_param_name` is a required variable validated to sit under
   `/${local.name}/`, so a plan can't point at another environment's parameter (decided in Task 2:
   values that exist outside Terraform are variables, never hard-coded per environment).
-- **Staging's alarm set is the three that tolerate idleness:** `errors`, `repost-loop` and
-  `nws-ambiguous`, which all treat missing data as not breaching, on a `-staging` SNS topic.
-  `missed-runs` and `quiet` exist only while the schedule is enabled, a rule tied to the schedule
-  rather than the environment name. This keeps staging useful for testing alarm changes with
-  `set-alarm-state` before they reach production.
+- **Staging has production's five alarms,** on a `-staging` SNS topic, so alarm changes can be
+  tested with `set-alarm-state` before they reach production. Every environment's alarms are
+  created with their actions off and start and pause with the schedule (revised 2026-10-02; the
+  first design dropped `missed-runs` and `quiet` while staging was idle).
 - **Staging's data has production's protections:** deletion protection, 35-day PITR and bucket
   versioning. That keeps `storage.tf` free of environment branches, and staging then tests what
   production runs. It costs pennies at staging's size. Reset staging by deleting its `STORY#`
   items, never the table.
-- **`make invoke-staging` only.** Production runs on its schedule, and the README's raw
+- **`make start` / `make pause`, with `ENV`.** They toggle the schedule and the alarm actions by
+  API (both are in `ignore_changes`). The README's raw
   `aws lambda invoke` stays as production's break-glass smoke test.
 - **A new `infra/environments` standard** holds the environment rules, next to the roadmap's
   `infra/budget`.
@@ -79,7 +79,7 @@ separate AWS accounts.
   back silently to production's value, including `offices` and its public chat ids. It moves to
   `envs/production.tfvars`, which only loads when named.
 - **The MVP `posted` table is production's rollback,** so it's production-only as well. Adding
-  `count` to the budget, the MVP table and the two schedule-bound alarms moves each production
+  `count` to the budget and the MVP table moves each production
   object to `[0]` automatically, and removing `count` in a revert moves it back.
 - **No `Environment` tag** (reversed below). The `Project` default tag is already `local.name`,
   which differs by environment. A new tag would put an in-place update on every production
@@ -106,7 +106,7 @@ separate AWS accounts.
   `Archive` add `aws:ResourceTag/Environment` to their exact ARNs, as Allow + `StringEquals`, so a
   missing tag fails closed. `Logs` doesn't: whether `PutLogEvents` reads log-group tags is
   unverified, and a denial would lose the logs and the alarms built on them without a sound.
-  DynamoDB's account-level ABAC setting can't be read from the CLI, so staging's first invoke
+  DynamoDB's account-level ABAC setting can't be read from the CLI, so staging's first run
   proves it before production takes the conditions.
 - **What a condition reads goes live a deploy before the condition.** Tags and bucket ABAC deploy
   at Gate 1, production's token parameter is tagged by hand before it, and the conditions follow
@@ -138,8 +138,7 @@ Amended by this spec:
 - `infra/data-retention` — the MVP table is production-only; staging keeps the same protections
 - `infra/iam` — the Telegram token parameter is per environment; ABAC rules for tag conditions
   (Task 5)
-- `infra/alarms` — alarms that treat missing data as breaching exist only while the schedule is
-  enabled; metric namespaces are per environment
+- `infra/alarms` — every alarm is created with its actions off and toggled with the schedule; metric namespaces are per environment
 - `global/principles` — "use a deployed environment" becomes "use staging"
 
 Constraining but unchanged:

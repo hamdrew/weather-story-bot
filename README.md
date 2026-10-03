@@ -109,6 +109,43 @@ aws lambda invoke --function-name weather-story-bot out.json && cat out.json
 
 Invoke it again and every story should show as `skipped`. Logs are structured JSON in the CloudWatch log group `/aws/lambda/weather-story-bot`.
 
+## Staging
+
+Staging is where real posts get watched: its own bot, a private channel, its own state and archive, and a schedule that starts off. Create it once:
+
+1. **Bot and channel.** Do [One-time setup](#one-time-setup) steps 1-3 again with a second bot, in a private channel whose only admin is the staging bot. Never make it an admin of a public channel.
+2. **Token.** Store it under staging's own name, tagged `staging` (the Lambda role's tag condition reads the tag; `--tags` can't be combined with `--overwrite`):
+   ```sh
+   read -rs TELEGRAM_TOKEN
+   aws ssm put-parameter --region us-east-2 --type SecureString \
+     --name /weather-story-bot-staging/telegram-token --value "$TELEGRAM_TOKEN" \
+     --tags Key=Environment,Value=staging
+   ```
+3. **Configure Terraform.** Copy the staging examples and fill them in (state bucket, the private channel's `chat_id`, `nws_user_agent`, `alert_email`):
+   ```sh
+   cp infra/envs/staging.backend.hcl.example infra/envs/staging.backend.hcl
+   cp infra/envs/staging.tfvars.example infra/envs/staging.tfvars
+   ```
+4. **Deploy.** The plan should create only `-staging` resources, with no budget, the schedule `DISABLED` and all five alarms' actions off:
+   ```sh
+   make build
+   make plan ENV=staging
+   make deploy ENV=staging
+   ```
+   Then confirm the subscription email for the `weather-story-bot-staging-alerts` topic.
+5. **Start it.** The first run fires immediately and posts MKX's active stories to the private channel, then it runs every 15 minutes. Wait for the next run, which should log every story as `skipped`, then pause it:
+   ```sh
+   make start ENV=staging
+   make pause ENV=staging
+   ```
+
+## Starting and pausing an environment
+
+Every environment is created paused: a `DISABLED` schedule and alarms whose actions are off. `make start ENV=<env>` enables the schedule and the alarm actions, and `make pause ENV=<env>` disables both. Both ask for your MFA code (the `weather-deploy` profile Terraform uses), so run them in a terminal. `scripts/set_run_state.py` does the work and does nothing without `--apply`, which the make targets pass. It is idempotent, and it reads the schedule and alarm names from the environment's Terraform outputs, so deploy an environment before you start it.
+
+- Terraform ignores the schedule's `state` and each alarm's `actions_enabled` after creating them, so `make deploy` never undoes a start or a pause. That includes production, whose schedule and alarms stay as they are: `make pause ENV=production` is how you stop it, never a Terraform change.
+- Pausing keeps the alarms. `missed-runs` and `quiet` treat missing data as breaching, so they sit in ALARM while paused, without emailing. Starting re-enables their actions, and the first runs bring them back to OK, which sends an OK email.
+
 ## Alerts
 
 CloudWatch alarms email `alert_email` through the SNS topic `weather-story-bot-alerts`, and send a second email when the alarm returns to OK. Alerts never go through Telegram, because Telegram might be what's broken. Separately, an AWS Budget emails `alert_email` directly when spend runs high.
@@ -147,7 +184,7 @@ aws cloudwatch set-alarm-state --alarm-name weather-story-bot-errors \
 
 Each alarm email includes the same hints and a link to the log group.
 
-Staging (`weather-story-bot-staging-*`, on its own `weather-story-bot-staging-alerts` topic) has a smaller alarm set: `errors`, `repost-loop` and `nws-ambiguous`. Its schedule is off and it runs only when you invoke it, so `missed-runs` and `quiet`, which treat missing data as breaching, would sit in ALARM for good. They exist only while the schedule is enabled (`schedule_enabled`, which defaults to on for production and off for other environments). Staging's metrics use the `WeatherStoryBot/staging` namespace, so its posts never count toward production's `quiet` and `repost-loop`. The budget is production-only.
+Staging (`weather-story-bot-staging-*`, on its own `weather-story-bot-staging-alerts` topic) has the same five alarms. Every environment's alarms are created with their actions off and are switched on and off with the schedule (`make start` / `make pause`), so a paused staging doesn't email about the idleness itself. Staging's metrics use the `WeatherStoryBot/staging` namespace, so its posts never count toward production's `quiet` and `repost-loop`. The budget is production-only.
 
 `quiet` and `repost-loop` count the Telegram client's `Telegram message sent` log line through a log metric filter (`WeatherStoryBot/StoriesPosted`), so don't change that message text. It's logged as soon as Telegram accepts a message, so posts whose DynamoDB write then fails still count. "Updated" reposts count too. Until a full day of data exists, `quiet` may show `INSUFFICIENT_DATA`. `nws-ambiguous` counts the handler's `Ambiguous stories from NWS` line (`WeatherStoryBot/AmbiguousStories`), so don't change that message text either.
 
