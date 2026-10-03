@@ -15,6 +15,10 @@ Python 3.13 Lambda (arm64) that posts NWS Weather Stories to Telegram. Infra is 
 ## Standards
 - Read `agent-os/standards/index.yml` and the relevant files before changing clients, error handling, retries, logging, config, state/archive, the CLI, tests or infra
 
+## Docs
+- Look up API details in Context7 with these library IDs (skip `resolve-library-id`):
+  NWS API (api.weather.gov) is `/websites/weather_gov`; Telegram Bot API is `/websites/core_telegram_bots_api`
+
 ## Skills
 - Planning lives in agent-os (shape-spec, spec plan.md, numbered tasks with deploy gates).
   Don't use superpowers:brainstorming, writing-plans, executing-plans,
