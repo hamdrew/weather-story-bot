@@ -181,9 +181,9 @@ Then:
 make cost
 ```
 
-It prices `infra/` for three scenarios side by side: **1 office** (MKX today), **6 offices** (Wisconsin and its neighbours) and **all 122** NWS forecast offices. Each column shows every costed resource at full precision, with a total at the bottom. At the committed estimates that's about $0.60, $1.12 and $13.91 a month. The full scan result is saved to `build/infracost.json`. Infracost's own tables round to whole dollars, which would show `$0` for most of this, so `make cost` prints its own table.
+It prices `infra/` for four scenarios side by side: **1 office** (MKX today), **6 offices** (Wisconsin and its neighbours), **all 122** NWS forecast offices and **staging** (one office with the schedule left on, the worst case). Each column shows every costed resource at full precision, with a total at the bottom. At the committed estimates that's about $0.60, $1.12, $13.91 and $0.60 a month. The full scan result is saved to `build/infracost.json`. Infracost's own tables round to whole dollars, which would show `$0` for most of this, so `make cost` prints its own table.
 
-All three scenarios assume one Lambda invocation per office per run, the design offices are moving to. Infracost doesn't price the EventBridge schedule, which is free up to 14 million invocations a month (about 350,000 for all 122 offices), or data transfer out: each post uploads its image to Telegram, about 24 GB a month for all 122 offices, inside the 100 GB of free egress (about $2.20 at list price).
+The production scenarios assume one Lambda invocation per office per run, the design offices are moving to. Infracost doesn't price the EventBridge schedule, which is free up to 14 million invocations a month (about 350,000 for all 122 offices), or data transfer out: each post uploads its image to Telegram, about 24 GB a month for all 122 offices, inside the 100 GB of free egress (about $2.20 at list price).
 
 **The estimate does not subtract the AWS free tier.** Every request, GB-second and GB is priced at list price, so the real bill can be lower.
 

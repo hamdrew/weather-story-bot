@@ -1,5 +1,5 @@
 # Infracost project config for `make cost`. Read from the repo root by `infracost scan`.
-# Prices infra/ three times, once per scenario in scripts/infracost_usage.py, which `make cost`
+# Prices infra/ once per scenario in scripts/infracost_usage.py, which `make cost`
 # runs first to write the usage files into build/.
 version: 0.1
 projects:
@@ -22,3 +22,14 @@ projects:
     name: all-us
     usage_file: build/infracost-usage-all-us.yml
     terraform_vars: *vars
+  # Staging differs in what Terraform creates (no budget, no `posted` table), which `environment`
+  # selects. The schedule is on as the worst case, so it keeps the missed-runs and quiet alarms.
+  # Its parameter lives under its own prefix, which a variable validation checks.
+  - path: infra
+    name: staging
+    usage_file: build/infracost-usage-staging.yml
+    terraform_vars:
+      <<: *vars
+      environment: staging
+      schedule_enabled: 'true'
+      telegram_token_param_name: /weather-story-bot-staging/telegram-token

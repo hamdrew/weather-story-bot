@@ -21,8 +21,9 @@ if TYPE_CHECKING:
 BY_NAME = {scenario.name: scenario for scenario in SCENARIOS}
 
 
-def test_scenarios_are_one_six_and_all_us_offices() -> None:
-    assert [scenario.offices for scenario in SCENARIOS] == [1, 6, 122]
+def test_scenarios_are_one_six_and_all_us_offices_then_staging() -> None:
+    assert [scenario.offices for scenario in SCENARIOS] == [1, 6, 122, 1]
+    assert BY_NAME["staging"].environment == "staging"
 
 
 def test_one_office_counts_every_dynamodb_request() -> None:
@@ -38,6 +39,14 @@ def test_one_office_counts_every_dynamodb_request() -> None:
         + 3 * 96  # rejected events
     )
     assert state["monthly_read_request_units"] == 2 * 2880  # GetItem per active story per run
+
+
+def test_staging_is_priced_like_production_at_one_office_minus_the_posted_table() -> None:
+    # Worst case: the schedule stays on, so staging runs as often as production does.
+    production = usage(BY_NAME["1-office"])
+    expected = {k: v for k, v in production.items() if k != "aws_dynamodb_table.posted[0]"}
+
+    assert usage(BY_NAME["staging"]) == expected
 
 
 def test_dynamodb_requests_scale_linearly_with_offices() -> None:
