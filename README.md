@@ -34,11 +34,17 @@ Prerequisites: [uv](https://docs.astral.sh/uv/), Terraform ≥ 1.11, and the AWS
    curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | grep -o '"chat":{"id":-100[0-9]*'
    ```
    The ID starts with `-100`.
-4. **Store the token in SSM.** Use Parameter Store, not Terraform, so the token never ends up in Terraform state:
+4. **Store the token in SSM.** Use Parameter Store, not Terraform, so the token never ends up in Terraform state. Terraform doesn't manage the parameter, so it doesn't get the `Environment` tag the other resources carry; tag it here:
    ```sh
    read -rs TELEGRAM_TOKEN
    aws ssm put-parameter --region us-east-2 --type SecureString \
-     --name /weather-story-bot/telegram-token --value "$TELEGRAM_TOKEN"
+     --name /weather-story-bot/telegram-token --value "$TELEGRAM_TOKEN" \
+     --tags Key=Environment,Value=production
+   ```
+   `--tags` only works when creating the parameter; it can't be combined with `--overwrite`. Rotating the token with `--overwrite` keeps the tag. To tag a parameter that already exists:
+   ```sh
+   aws ssm add-tags-to-resource --region us-east-2 --resource-type Parameter \
+     --resource-id /weather-story-bot/telegram-token --tags Key=Environment,Value=production
    ```
 5. **Create a Terraform state bucket** (skip this if you already have one):
    ```sh
@@ -47,12 +53,12 @@ Prerequisites: [uv](https://docs.astral.sh/uv/), Terraform ≥ 1.11, and the AWS
    aws s3api put-bucket-versioning --bucket <your-tf-state-bucket> --region us-east-2 \
      --versioning-configuration Status=Enabled
    ```
-6. **Configure Terraform.** Both copies are gitignored:
+6. **Configure Terraform.** Each environment has a backend config and a var file in `infra/envs/`. Both copies are gitignored:
    ```sh
-   cp infra/backend.hcl.example infra/backend.hcl             # set the bucket name
-   cp infra/terraform.tfvars.example infra/terraform.tfvars   # set chat_id, nws_user_agent and alert_email
-   terraform -chdir=infra init -backend-config=backend.hcl
+   cp infra/envs/production.backend.hcl.example infra/envs/production.backend.hcl   # set the bucket name
+   cp infra/envs/production.tfvars.example infra/envs/production.tfvars             # set chat_id, nws_user_agent and alert_email
    ```
+   `make plan ENV=production` runs `terraform init` itself, in production's own data dir (`infra/.terraform-production/`). There's no `terraform.tfvars`: Terraform loads that automatically, so any variable an environment's file left out would silently take production's value.
    NWS asks API clients to send a `User-Agent` that identifies the app and gives a way to contact you, e.g. `weather-story-bot (you@example.com)`.
 
 ## Local development
@@ -81,9 +87,17 @@ Variables already set in your shell take precedence over `.env`.
 ## Deploy
 
 ```sh
-make build    # vendors deps for python3.13/arm64 into build/lambda.zip
-make plan     # review changes; saves them to infra/deploy.tfplan
-make deploy   # applies exactly that saved plan, then deletes it
+make build                   # vendors deps for python3.13/arm64 into build/lambda.zip
+make plan ENV=production     # review changes; saves them to infra/deploy-production.tfplan
+make deploy ENV=production   # applies exactly that saved plan, then deletes it
+```
+
+`ENV` (`production` or `staging`) is required and selects the backend config, var file, data dir and plan file together.
+
+To run other Terraform commands, point them at the same environment's data dir:
+
+```sh
+TF_DATA_DIR=.terraform-production terraform -chdir=infra output
 ```
 
 Smoke test:
@@ -95,6 +109,44 @@ aws lambda invoke --function-name weather-story-bot out.json && cat out.json
 
 Invoke it again and every story should show as `skipped`. Logs are structured JSON in the CloudWatch log group `/aws/lambda/weather-story-bot`.
 
+## Staging
+
+Staging is where real posts get watched: its own bot, a private channel, its own state and archive, and a schedule that starts off. Create it once:
+
+1. **Bot and channel.** Do [One-time setup](#one-time-setup) steps 1-3 again with a second bot, in a private channel whose only admin is the staging bot. Never make it an admin of a public channel.
+2. **Token.** Store it under staging's own name, tagged `staging` (the Lambda role's tag condition reads the tag; `--tags` can't be combined with `--overwrite`):
+   ```sh
+   read -rs TELEGRAM_TOKEN
+   aws ssm put-parameter --region us-east-2 --type SecureString \
+     --name /weather-story-bot-staging/telegram-token --value "$TELEGRAM_TOKEN" \
+     --tags Key=Environment,Value=staging
+   ```
+3. **Configure Terraform.** Copy the staging examples and fill them in (state bucket, the private channel's `chat_id`, `nws_user_agent`, `alert_email`):
+   ```sh
+   cp infra/envs/staging.backend.hcl.example infra/envs/staging.backend.hcl
+   cp infra/envs/staging.tfvars.example infra/envs/staging.tfvars
+   ```
+4. **Deploy.** The plan should create only `-staging` resources, with no budget, the schedule `DISABLED` and all five alarms on:
+   ```sh
+   make build
+   make plan ENV=staging
+   make deploy ENV=staging
+   ```
+   Then confirm the subscription email for the `weather-story-bot-staging-alerts` topic. Until you start staging, `missed-runs` and `quiet` will breach and email you, because their alarms are on and nothing is running. That's expected, and a handy proof that the alarms and the email path work.
+5. **Start it.** The first run fires immediately and posts MKX's active stories to the private channel, then it runs every 15 minutes. Wait for the next run, which should log every story as `skipped`, then pause it:
+   ```sh
+   make start ENV=staging
+   make pause ENV=staging
+   ```
+
+## Starting and pausing an environment
+
+A new environment's schedule is created `DISABLED` and its alarms are created on. `make start ENV=<env>` enables the schedule and the alarm actions, and `make pause ENV=<env>` disables both. Both ask for your MFA code (the `weather-deploy` profile Terraform uses), so run them in a terminal. `scripts/set_run_state.py` does the work and does nothing without `--apply`, which the make targets pass. It is idempotent, and it reads the schedule and alarm names from the environment's Terraform outputs, so deploy an environment before you start it.
+
+- Terraform ignores the schedule's `state` and each alarm's `actions_enabled` after creating them, so `make deploy` never undoes a start or a pause. That includes production, whose schedule and alarms stay as they are (both on): `make pause ENV=production` is how you stop it, never a Terraform change.
+- Pausing production turns its alarm actions off too, `errors` included, so start it again when you're done.
+- Pausing keeps the alarms but turns their actions off. `missed-runs` and `quiet` treat missing data as breaching, so they sit in ALARM while paused, without emailing. Starting re-enables their actions, and the first runs bring them back to OK, which sends an OK email.
+
 ## Alerts
 
 CloudWatch alarms email `alert_email` through the SNS topic `weather-story-bot-alerts`, and send a second email when the alarm returns to OK. Alerts never go through Telegram, because Telegram might be what's broken. Separately, an AWS Budget emails `alert_email` directly when spend runs high.
@@ -103,7 +155,7 @@ CloudWatch alarms email `alert_email` through the SNS topic `weather-story-bot-a
 
 ```sh
 aws sns list-subscriptions-by-topic \
-  --topic-arn "$(terraform -chdir=infra output -raw alert_topic_arn)"   # must not say PendingConfirmation
+  --topic-arn "$(TF_DATA_DIR=.terraform-production terraform -chdir=infra output -raw alert_topic_arn)"   # must not say PendingConfirmation
 ```
 
 **Make the alerts notify on your phone.** In Gmail, add a filter for the alert senders:
@@ -133,11 +185,13 @@ aws cloudwatch set-alarm-state --alarm-name weather-story-bot-errors \
 
 Each alarm email includes the same hints and a link to the log group.
 
+Staging (`weather-story-bot-staging-*`, on its own `weather-story-bot-staging-alerts` topic) has the same five alarms. Every environment's alarms are created with their actions on, and `make pause` / `make start` switch them off and on with the schedule, so a paused staging doesn't email about the idleness itself. Staging's alarms are on before its first start, so `missed-runs` and `quiet` email until then. Staging's metrics use the `WeatherStoryBot/staging` namespace, so its posts never count toward production's `quiet` and `repost-loop`. The budget is production-only.
+
 `quiet` and `repost-loop` count the Telegram client's `Telegram message sent` log line through a log metric filter (`WeatherStoryBot/StoriesPosted`), so don't change that message text. It's logged as soon as Telegram accepts a message, so posts whose DynamoDB write then fails still count. "Updated" reposts count too. Until a full day of data exists, `quiet` may show `INSUFFICIENT_DATA`. `nws-ambiguous` counts the handler's `Ambiguous stories from NWS` line (`WeatherStoryBot/AmbiguousStories`), so don't change that message text either.
 
 ### Tuning thresholds
 
-The starting values are guesses until there's real posting data. Override them in `infra/terraform.tfvars` and run `make plan && make deploy`:
+The starting values are guesses until there's real posting data. Override them in `infra/envs/production.tfvars` and run `make plan ENV=production && make deploy ENV=production`:
 
 ```hcl
 monthly_budget_usd     = 5  # USD per month, whole account
@@ -165,9 +219,9 @@ Then:
 make cost
 ```
 
-It prices `infra/` for three scenarios side by side: **1 office** (MKX today), **6 offices** (Wisconsin and its neighbours) and **all 122** NWS forecast offices. Each column shows every costed resource at full precision, with a total at the bottom. At the committed estimates that's about $0.60, $1.12 and $13.91 a month. The full scan result is saved to `build/infracost.json`. Infracost's own tables round to whole dollars, which would show `$0` for most of this, so `make cost` prints its own table.
+It prices `infra/` for four scenarios side by side: **1 office** (MKX today), **6 offices** (Wisconsin and its neighbours), **all 122** NWS forecast offices and **staging** (one office with the schedule left on, the worst case). Each column shows every costed resource at full precision, with a total at the bottom. At the committed estimates that's about $0.60, $1.12, $13.91 and $0.60 a month. The full scan result is saved to `build/infracost.json`. Infracost's own tables round to whole dollars, which would show `$0` for most of this, so `make cost` prints its own table.
 
-All three scenarios assume one Lambda invocation per office per run, the design offices are moving to. Infracost doesn't price the EventBridge schedule, which is free up to 14 million invocations a month (about 350,000 for all 122 offices), or data transfer out: each post uploads its image to Telegram, about 24 GB a month for all 122 offices, inside the 100 GB of free egress (about $2.20 at list price).
+The production scenarios assume one Lambda invocation per office per run, the design offices are moving to. Infracost doesn't price the EventBridge schedule, which is free up to 14 million invocations a month (about 350,000 for all 122 offices), or data transfer out: each post uploads its image to Telegram, about 24 GB a month for all 122 offices, inside the 100 GB of free egress (about $2.20 at list price).
 
 **The estimate does not subtract the AWS free tier.** Every request, GB-second and GB is priced at list price, so the real bill can be lower.
 
@@ -218,7 +272,7 @@ The DynamoDB table has point-in-time recovery, so it can be restored to any seco
 The archive bucket is versioned. A deleted or overwritten file keeps its old version for 35 days, then S3 removes it. The date and time in a key are the story's start in UTC.
 
 ```sh
-BUCKET=$(terraform -chdir=infra output -raw bucket_name)
+BUCKET=$(TF_DATA_DIR=.terraform-production terraform -chdir=infra output -raw bucket_name)
 aws s3api list-object-versions --bucket "$BUCKET" --prefix stories/MKX/2026/09/14/
 ```
 
@@ -234,11 +288,11 @@ aws s3api list-object-versions --bucket "$BUCKET" --prefix stories/MKX/2026/09/1
 ## Adding an office
 
 1. Create another channel with the bot as admin, and get its chat ID (steps 2–3 above).
-2. Add the office to `offices` in `infra/terraform.tfvars`. Keys are the three-letter NWS office IDs:
+2. Add the office to `offices` in `infra/envs/production.tfvars`. Keys are the three-letter NWS office IDs:
    ```hcl
    offices = {
      MKX = { chat_id = "-100…", name = "Milwaukee/Sullivan" }
      GRB = { chat_id = "-100…", name = "Green Bay" }
    }
    ```
-3. Run `make plan`, review it, then `make deploy`. On its first run, the Lambda posts all of the new office's active stories.
+3. Run `make plan ENV=production`, review it, then `make deploy ENV=production`. On its first run, the Lambda posts all of the new office's active stories.

@@ -178,7 +178,9 @@ terraform.rc
 # Lambda build artifacts
 *.zip
 # Terraform backend config (per-environment, contains bucket names)
-infra/backend.hcl
+infra/envs/*.backend.hcl
+# Per-environment Terraform data dirs (TF_DATA_DIR=.terraform-<env>)
+infra/.terraform-*/
 # Saved Terraform plans (contain real config values)
 *.tfplan
 # Local Lambda invoke output

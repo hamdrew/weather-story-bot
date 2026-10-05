@@ -1,5 +1,16 @@
 locals {
-  metric_namespace = "WeatherStoryBot"
+  # Every alarm make start / make pause toggles; the alarm_names output hands them to the script.
+  alarm_names = [
+    aws_cloudwatch_metric_alarm.errors.alarm_name,
+    aws_cloudwatch_metric_alarm.missed_runs.alarm_name,
+    aws_cloudwatch_metric_alarm.quiet.alarm_name,
+    aws_cloudwatch_metric_alarm.repost_loop.alarm_name,
+    aws_cloudwatch_metric_alarm.nws_ambiguous.alarm_name,
+  ]
+  # Per environment: the metric filters have no dimensions, so a shared namespace would pour
+  # staging's posts into production's quiet and repost-loop alarms. Production keeps the original
+  # namespace so its metric history (and the quiet alarm's data) carries on.
+  metric_namespace = local.production ? "WeatherStoryBot" : "WeatherStoryBot/${var.environment}"
   logs_console_url = "https://${var.region}.console.aws.amazon.com/cloudwatch/home?region=${var.region}#logsV2:log-groups/log-group/${replace(aws_cloudwatch_log_group.lambda.name, "/", "$252F")}"
 }
 
@@ -47,10 +58,19 @@ resource "aws_cloudwatch_metric_alarm" "errors" {
   threshold           = 1
   treat_missing_data  = "notBreaching"
 
-  alarm_actions = [aws_sns_topic.alerts.arn]
-  ok_actions    = [aws_sns_topic.alerts.arn]
+  actions_enabled = true
+  alarm_actions   = [aws_sns_topic.alerts.arn]
+  ok_actions      = [aws_sns_topic.alerts.arn]
+
+  lifecycle {
+    ignore_changes = [actions_enabled]
+  }
 }
 
+# Every alarm is created with its actions on, so a new environment is loud until it is running:
+# missed_runs and quiet treat missing data as breaching and email while the schedule (created
+# DISABLED) is idle. make pause turns the actions off with the schedule and make start turns them
+# back on (scripts/set_run_state.py). ignore_changes keeps an apply from undoing either.
 resource "aws_cloudwatch_metric_alarm" "missed_runs" {
   alarm_name        = "${local.name}-missed-runs"
   alarm_description = "The bot was not invoked in the last hour, so the schedule is probably disabled, deleted or failing to invoke the function. Check the EventBridge Scheduler schedule ${aws_scheduler_schedule.bot.name}, then the logs for recent runs: ${local.logs_console_url}"
@@ -68,8 +88,13 @@ resource "aws_cloudwatch_metric_alarm" "missed_runs" {
   # A stopped schedule publishes no data points at all.
   treat_missing_data = "breaching"
 
-  alarm_actions = [aws_sns_topic.alerts.arn]
-  ok_actions    = [aws_sns_topic.alerts.arn]
+  actions_enabled = true
+  alarm_actions   = [aws_sns_topic.alerts.arn]
+  ok_actions      = [aws_sns_topic.alerts.arn]
+
+  lifecycle {
+    ignore_changes = [actions_enabled]
+  }
 }
 
 resource "aws_cloudwatch_metric_alarm" "quiet" {
@@ -86,8 +111,13 @@ resource "aws_cloudwatch_metric_alarm" "quiet" {
   # Nothing posted means no data points, not zeros.
   treat_missing_data = "breaching"
 
-  alarm_actions = [aws_sns_topic.alerts.arn]
-  ok_actions    = [aws_sns_topic.alerts.arn]
+  actions_enabled = true
+  alarm_actions   = [aws_sns_topic.alerts.arn]
+  ok_actions      = [aws_sns_topic.alerts.arn]
+
+  lifecycle {
+    ignore_changes = [actions_enabled]
+  }
 }
 
 resource "aws_cloudwatch_metric_alarm" "repost_loop" {
@@ -103,8 +133,13 @@ resource "aws_cloudwatch_metric_alarm" "repost_loop" {
   threshold           = var.repost_alarm_max_posts
   treat_missing_data  = "notBreaching"
 
-  alarm_actions = [aws_sns_topic.alerts.arn]
-  ok_actions    = [aws_sns_topic.alerts.arn]
+  actions_enabled = true
+  alarm_actions   = [aws_sns_topic.alerts.arn]
+  ok_actions      = [aws_sns_topic.alerts.arn]
+
+  lifecycle {
+    ignore_changes = [actions_enabled]
+  }
 }
 
 # One line per office per run while NWS lists ambiguous stories. Depends on the handler's exact
@@ -135,12 +170,20 @@ resource "aws_cloudwatch_metric_alarm" "nws_ambiguous" {
   # No rejections means no data points.
   treat_missing_data = "notBreaching"
 
-  alarm_actions = [aws_sns_topic.alerts.arn]
-  ok_actions    = [aws_sns_topic.alerts.arn]
+  actions_enabled = true
+  alarm_actions   = [aws_sns_topic.alerts.arn]
+  ok_actions      = [aws_sns_topic.alerts.arn]
+
+  lifecycle {
+    ignore_changes = [actions_enabled]
+  }
 }
 
 # Covers the whole account, not just this project. Emails directly rather than through SNS.
+# Production only: a copy per environment would send duplicate emails for the same spend.
 resource "aws_budgets_budget" "monthly" {
+  count = local.production ? 1 : 0
+
   name         = "${local.name}-monthly"
   budget_type  = "COST"
   limit_amount = tostring(var.monthly_budget_usd)

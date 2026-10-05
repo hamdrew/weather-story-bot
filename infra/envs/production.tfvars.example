@@ -11,8 +11,10 @@ nws_user_agent = "weather-story-bot (you@example.com)"
 
 alert_email = "you@example.com"
 
+# SecureString created by hand in SSM; must be under /<environment name>/.
+telegram_token_param_name = "/weather-story-bot/telegram-token"
+
 # Optional overrides:
-# telegram_token_param_name = "/weather-story-bot/telegram-token"
 # schedule_expression       = "rate(15 minutes)"
 # monthly_budget_usd        = 5
 # quiet_alarm_days          = 2 # 1-7

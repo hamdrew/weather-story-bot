@@ -1,5 +1,5 @@
 # Infracost project config for `make cost`. Read from the repo root by `infracost scan`.
-# Prices infra/ three times, once per scenario in scripts/infracost_usage.py, which `make cost`
+# Prices infra/ once per scenario in scripts/infracost_usage.py, which `make cost`
 # runs first to write the usage files into build/.
 version: 0.1
 projects:
@@ -9,6 +9,8 @@ projects:
     # Placeholders for variables without defaults, so the scan needs no terraform.tfvars.
     # None of them affect cost: every office shares one Lambda, table and bucket.
     terraform_vars: &vars
+      environment: production
+      telegram_token_param_name: /weather-story-bot/telegram-token
       offices: '{"MKX": {"chat_id": "-100", "name": "Milwaukee/Sullivan"}}'
       nws_user_agent: weather-story-bot (cost estimate)
       alert_email: cost-estimate@example.com
@@ -20,3 +22,13 @@ projects:
     name: all-us
     usage_file: build/infracost-usage-all-us.yml
     terraform_vars: *vars
+  # Staging differs in what Terraform creates (no budget, no `posted` table), which `environment`
+  # selects. The schedule is priced as on, the worst case.
+  # Its parameter lives under its own prefix, which a variable validation checks.
+  - path: infra
+    name: staging
+    usage_file: build/infracost-usage-staging.yml
+    terraform_vars:
+      <<: *vars
+      environment: staging
+      telegram_token_param_name: /weather-story-bot-staging/telegram-token

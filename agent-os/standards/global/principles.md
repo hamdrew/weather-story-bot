@@ -11,7 +11,7 @@ environment or a `scripts/` tool whose name says so. The dev CLI previews and ne
 - A preview that could act is a preview you stop trusting, and a flag away from posting to a live
   channel from a laptop
 - A `scripts/` tool that writes is dry-run by default and needs `--apply` (`backend/dynamodb-schema`)
-- To watch real behaviour, use a deployed environment, not a local flag
+- To watch real behaviour, use staging (`infra/environments`), not a local flag
 - Adding a write mode to a local tool needs a spec that changes `backend/cli` first
 
 ## Decide purely, then act

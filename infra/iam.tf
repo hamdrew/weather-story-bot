@@ -15,6 +15,8 @@ resource "aws_iam_role" "lambda" {
 }
 
 data "aws_iam_policy_document" "lambda" {
+  # No Environment tag condition: whether PutLogEvents evaluates log-group tags is unverified, and
+  # a wrong guess would lose logs quietly, taking the metric-filter alarms with them.
   statement {
     sid       = "Logs"
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
@@ -24,23 +26,50 @@ data "aws_iam_policy_document" "lambda" {
   # Only the state table. The MVP table is the rollback and the Lambda no longer touches it.
   # UpdateItem is history.py's last_seen_at on current-story items. DeleteItem is only the office
   # lease's release (state.OfficeLease); nothing else in the Lambda deletes.
+  #
+  # The Environment tag condition reads the table's own tag. DynamoDB supports aws:ResourceTag on
+  # item actions only while the account's DynamoDB ABAC setting is on ("enabled by default for most
+  # accounts", console Settings page only). If it's off, the table looks untagged and this Allow
+  # fails closed.
   statement {
     sid       = "State"
     actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem"]
     resources = [aws_dynamodb_table.state.arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = [var.environment]
+    }
   }
 
+  # PutObject on bucket/stories/* reads the bucket's tags, which S3 honours only with bucket ABAC on
+  # (aws_s3_bucket_abac.archive).
   statement {
     sid       = "Archive"
     actions   = ["s3:PutObject"]
     resources = ["${aws_s3_bucket.archive.arn}/stories/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = [var.environment]
+    }
   }
 
   # SecureString uses the AWS managed aws/ssm key, whose key policy already allows decryption.
+  # The Environment tag condition reads the parameter's own tags. Terraform doesn't manage the
+  # parameter (the token stays out of state), so it is tagged by hand when it's created.
   statement {
     sid       = "TelegramToken"
     actions   = ["ssm:GetParameter"]
     resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/${trimprefix(var.telegram_token_param_name, "/")}"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = [var.environment]
+    }
   }
 }
 

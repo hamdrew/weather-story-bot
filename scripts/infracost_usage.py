@@ -1,8 +1,8 @@
-"""Write Infracost usage files for `make cost`: one office, a handful, and every US office.
+"""Write Infracost usage files for `make cost`: one office, a handful, every US office, and staging.
 
 Infracost can't read usage from Terraform, so each scenario gets a usage file built from the same
 per-office monthly rates below, multiplied by its office count. Keeping the rates in one place
-means the three estimates can't drift apart. Values are estimates, not measurements, except where
+means the estimates can't drift apart. Values are estimates, not measurements, except where
 a comment says "measured".
 
     uv run python scripts/infracost_usage.py write build   # build/infracost-usage-<name>.yml
@@ -70,12 +70,15 @@ KB_PER_GB = 1024 * 1024
 class Scenario:
     name: str
     offices: int
+    environment: str = "production"
 
 
 SCENARIOS = (
     Scenario("1-office", 1),  # MKX today
     Scenario("6-offices", 6),  # MKX, GRB, ARX, DLH, MPX, LOT: Wisconsin and neighbours
     Scenario("all-us", 122),  # every NWS Weather Forecast Office
+    # Worst case: the schedule stays on, so staging runs as often as production does.
+    Scenario("staging", 1, environment="staging"),
 )
 
 
@@ -92,7 +95,7 @@ def usage(scenario: Scenario) -> dict[str, dict[str, Any]]:
     log_bytes = invocations * INVOCATION_LOG_BYTES + n * POSTS * POST_LOG_BYTES
     log_gb = round(log_bytes / 1024**3, 4)
 
-    return {
+    resources = {
         "aws_lambda_function.bot": {
             "monthly_requests": invocations,
             "request_duration_ms": round(RUN_SECONDS_PER_OFFICE * 1000),
@@ -103,13 +106,6 @@ def usage(scenario: Scenario) -> dict[str, dict[str, Any]]:
             # Infracost prices anything under 1 GB as $0 (the real cost is a fraction of a cent).
             "storage_gb": table_gb,
             "pitr_backup_storage_gb": table_gb,  # PITR is billed on table size
-        },
-        # The MVP table: no traffic since the flip, kept (a few KB) until it's removed.
-        "aws_dynamodb_table.posted": {
-            "monthly_read_request_units": 0,
-            "monthly_write_request_units": 0,
-            "storage_gb": 0.001,
-            "pitr_backup_storage_gb": 0.001,
         },
         "aws_s3_bucket.archive": {
             "standard": {
@@ -122,6 +118,16 @@ def usage(scenario: Scenario) -> dict[str, dict[str, Any]]:
             "storage_gb": log_gb,  # 30-day retention keeps about one month
         },
     }
+    if scenario.environment == "production":
+        # The MVP table: no traffic since the flip, kept (a few KB) until it's removed. Production
+        # only, so it has a count and Infracost matches it as [0].
+        resources["aws_dynamodb_table.posted[0]"] = {
+            "monthly_read_request_units": 0,
+            "monthly_write_request_units": 0,
+            "storage_gb": 0.001,
+            "pitr_backup_storage_gb": 0.001,
+        }
+    return resources
 
 
 def write_usage_files(out_dir: Path) -> None:

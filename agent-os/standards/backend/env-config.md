@@ -18,7 +18,7 @@ In one change:
 
 1. `Settings` field + `from_env` (`config.py`)
 2. `environment.variables` in `infra/lambda.tf`
-3. `infra/variables.tf` (with `validation` if constrained) + `terraform.tfvars.example`
+3. `infra/variables.tf` (with `validation` if constrained) + `infra/envs/*.tfvars.example`
 4. A test in `tests/test_config.py`, plus the `ENV` dict in the `lambda_handler` end-to-end test
 
 ## Office ids

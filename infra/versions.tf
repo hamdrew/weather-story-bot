@@ -4,25 +4,9 @@ terraform {
 
   required_providers {
     aws = {
-      source  = "hashicorp/aws"
-      version = "~> 6.0"
+      source = "hashicorp/aws"
+      # 6.23 moved bucket tagging to the S3 Control API, which bucket ABAC relies on (storage.tf).
+      version = "~> 6.23"
     }
   }
 }
-
-provider "aws" {
-  region = var.region
-
-  default_tags {
-    tags = {
-      Project   = local.name
-      ManagedBy = "terraform"
-    }
-  }
-}
-
-locals {
-  name = "weather-story-bot"
-}
-
-data "aws_caller_identity" "current" {}

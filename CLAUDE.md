@@ -7,11 +7,17 @@ Python 3.13 Lambda (arm64) that posts NWS Weather Stories to Telegram. Infra is 
 - `make coverage` - opt-in coverage; keep `--cov` out of pytest addopts (it breaks debugger breakpoints)
 - `make lint` / `make format` - ruff check + ruff format + `terraform fmt`; `lint` also runs `ty check` (fix type errors rather than adding `# ty: ignore`)
 - `make build` - vendors deps for aarch64-manylinux2014 / py3.13 (binary wheels only) into `build/lambda.zip`
-- `make plan` / `make deploy` - `plan` saves `infra/deploy.tfplan`; `deploy` applies exactly that file (no prompt) and deletes it, failing if there's none; ask before running `deploy`
+- `make plan ENV=<env>` / `make deploy ENV=<env>` - `ENV` is `production` or `staging` (required; selects `infra/envs/<env>.backend.hcl`, `envs/<env>.tfvars` and the data dir `infra/.terraform-<env>/`); `plan` saves `infra/deploy-<env>.tfplan`; `deploy` applies exactly that file (no prompt) and deletes it, failing if there's none; ask before running `deploy`
+- `make start ENV=<env>` / `make pause ENV=<env>` - start or pause an environment's schedule and alarm actions through the API (`scripts/set_run_state.py`; Terraform creates the schedule DISABLED and the alarms on, then ignores both); they change a live environment and need the MFA profile, so ask before running
+- Other Terraform commands need the env's data dir: `TF_DATA_DIR=.terraform-production terraform -chdir=infra output`
 - `uv run weather-story-bot --dry-run [--office MKX]` - live NWS fetch, prints each story's decision (`new-or-updated (state not read)` / `expired` / `rejected`) beside its caption; `--dry-run` is required, read-only, never posts
 
 ## Standards
 - Read `agent-os/standards/index.yml` and the relevant files before changing clients, error handling, retries, logging, config, state/archive, the CLI, tests or infra
+
+## Docs
+- Look up API details in Context7 with these library IDs (skip `resolve-library-id`):
+  NWS API (api.weather.gov) is `/websites/weather_gov`; Telegram Bot API is `/websites/core_telegram_bots_api`
 
 ## Skills
 - Planning lives in agent-os (shape-spec, spec plan.md, numbered tasks with deploy gates).
@@ -26,6 +32,6 @@ Python 3.13 Lambda (arm64) that posts NWS Weather Stories to Telegram. Infra is 
 - The dev group installs `boto3[crt]` so local scripts can use `aws login` credentials (the login provider needs `awscrt`). `make build` exports `--no-dev`, so it never reaches the Lambda zip.
 - boto3 client types come from the dev-only `types-boto3[...]` stubs, so import them under `if TYPE_CHECKING:` (e.g. `from types_boto3_s3 import S3Client`). A new AWS service needs its extra added.
 - New runtime deps must ship arm64 manylinux wheels, or `make build` fails
-- Keep the Telegram token in SSM (`/weather-story-bot/telegram-token`), never in Terraform vars or state
-- `infra/backend.hcl`, `*.tfvars` and `.env` are gitignored and local-only; the `*.example` files are the templates
+- Keep each environment's Telegram token in its own SSM parameter (`/weather-story-bot/telegram-token`, `/weather-story-bot-staging/telegram-token`), never in Terraform vars or state
+- `infra/envs/*.backend.hcl`, `*.tfvars` and `.env` are gitignored and local-only; the `*.example` files are the templates
 - Only mark a story as posted in DynamoDB after Telegram accepts it (a repost is OK, a missed story is not)

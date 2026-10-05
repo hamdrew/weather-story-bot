@@ -21,8 +21,9 @@ if TYPE_CHECKING:
 BY_NAME = {scenario.name: scenario for scenario in SCENARIOS}
 
 
-def test_scenarios_are_one_six_and_all_us_offices() -> None:
-    assert [scenario.offices for scenario in SCENARIOS] == [1, 6, 122]
+def test_scenarios_are_one_six_and_all_us_offices_then_staging() -> None:
+    assert [scenario.offices for scenario in SCENARIOS] == [1, 6, 122, 1]
+    assert BY_NAME["staging"].environment == "staging"
 
 
 def test_one_office_counts_every_dynamodb_request() -> None:
@@ -40,6 +41,14 @@ def test_one_office_counts_every_dynamodb_request() -> None:
     assert state["monthly_read_request_units"] == 2 * 2880  # GetItem per active story per run
 
 
+def test_staging_is_priced_like_production_at_one_office_minus_the_posted_table() -> None:
+    # Worst case: the schedule stays on, so staging runs as often as production does.
+    production = usage(BY_NAME["1-office"])
+    expected = {k: v for k, v in production.items() if k != "aws_dynamodb_table.posted[0]"}
+
+    assert usage(BY_NAME["staging"]) == expected
+
+
 def test_dynamodb_requests_scale_linearly_with_offices() -> None:
     one = usage(BY_NAME["1-office"])["aws_dynamodb_table.state"]
     six = usage(BY_NAME["6-offices"])["aws_dynamodb_table.state"]
@@ -54,6 +63,14 @@ def test_every_office_gets_its_own_invocation(scenario: Scenario) -> None:
 
     assert lam["monthly_requests"] == scenario.offices * RUNS
     assert lam["request_duration_ms"] == pytest.approx(RUN_SECONDS_PER_OFFICE * 1000)
+
+
+def test_mvp_table_is_keyed_by_its_counted_address() -> None:
+    # The table is production-only (count), so Infracost only matches usage keyed with [0].
+    resources = usage(BY_NAME["1-office"])
+
+    assert "aws_dynamodb_table.posted[0]" in resources
+    assert "aws_dynamodb_table.posted" not in resources
 
 
 def test_write_usage_files_writes_one_infracost_file_per_scenario(tmp_path: Path) -> None:

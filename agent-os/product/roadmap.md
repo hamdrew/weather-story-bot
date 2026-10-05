@@ -23,7 +23,7 @@ Fixes from the first days of running the MVP (spec `2026-09-15-1149-story-update
 
 ## Phase 1.2: Decide, Act, and Record
 
-In progress (spec `2026-09-20-1428-decide-act-and-record`). The refactor that makes the dry run
+Done (spec `2026-09-20-1428-decide-act-and-record`; all four stages deployed, recording live since 2026-09-26). The refactor that makes the dry run
 honest, plus the writes that start saving history. **Shaping moved the DynamoDB key redesign here
 from Phase 2.2**, since the table holds just 42 items today (measured 2026-09-20) and this phase
 starts writing append-only items that never expire.
@@ -113,30 +113,42 @@ Sources: `agent-os/notes/2026-09-16-standards-review.md` ("Suggested order" #1, 
 
 ## Phase 2.0: Staging and Production
 
-A place to watch a real post, now that the CLI can't send one. Source: standards review,
-"Environments".
+In progress (spec `2026-09-26-2319-staging-and-production`). A place to watch a real post, now
+that the CLI can't send one. Source: standards review, "Environments".
 
 - **Two named deployments from one `infra/`:** an environment name threaded through every resource,
-  a separate state key, and a tfvars file each.
+  a separate state key, and a tfvars file each. **Settled while shaping:** `infra/envs/<env>.backend.hcl`
+  and `<env>.tfvars` with a `TF_DATA_DIR` per environment, all selected by one required `ENV` in the
+  Makefile. Not workspaces, and not Terragrunt, which pays off with many dependent stacks or an
+  account per environment, not one module in one account.
 - **Production keeps the resource names it has.** Threading an environment name through everything
   would rename the posted-stories table and the archive bucket, and a rename is a *replace* — the
   table has deletion protection on, the bucket is versioned and not empty, and
   `infra/data-retention` says to stop and ask rather than apply a replace. So either production
   stays unsuffixed and only staging takes a suffix, or the names move behind a variable defaulting
   to today's values. Either way, shaping ends with a `terraform plan` showing zero replacements.
+  **Settled: production stays unsuffixed.**
+- **Things a second environment would silently share** (found while shaping). The log metric
+  filters' `WeatherStoryBot` namespace has no dimensions, so staging's posts would feed
+  production's `quiet` and `repost-loop`. Staging gets its own namespace, and production's
+  keeps its name and history. The budget covers the whole account, so it becomes
+  production-only, as does the MVP `posted` rollback table. `infra/terraform.tfvars` is
+  auto-loaded, so it moves to `envs/production.tfvars`. Otherwise anything missing from
+  staging's file would fall back to production's public chat ids.
 - **Staging** runs a subset of production's offices — at least one, and just MKX until Phase 2.2
   adds the others — into private test channels, with its schedule off by default and invoked by
   hand. **Production** runs the full set into the public channels.
 - **A separate Telegram bot for staging,** with its own SSM parameter, so a staging bug or a wrong
-  chat id physically cannot reach a public channel and a leaked staging token is worthless. (Open:
-  one bot with different chat ids is cheaper to manage — settle it while shaping.)
+  chat id physically cannot reach a public channel and a leaked staging token is worthless.
+  **Settled while shaping: a separate bot.** Staging's role can read only its own parameter.
 - **Staging stays near-free.** DynamoDB on-demand, S3, Lambda and the scheduler all cost nothing
-  when idle; the only real fixed additions are alarms past the free tier. Keep staging's alarm set
-  minimal and confirm with `make cost`.
-- **Two alarms have to be off or re-tuned in staging.** `missed-runs` and `quiet` both treat
+  when idle; the only real fixed additions are alarms past the free tier. Confirm with `make cost`.
+- **Two alarms can't be allowed to nag in staging.** `missed-runs` and `quiet` both treat
   missing data as breaching, and staging's schedule is off by default — so a staging stack would
-  sit permanently in ALARM on both, emailing the shared topic on every flap and training me to
-  ignore the alerts that matter in production.
+  sit permanently in ALARM on both, emailing on every flap and training me to ignore the alerts
+  that matter in production. **Settled (revised 2026-10-02):** staging has all five alarms on its
+  own topic, and `make start` / `make pause` switch their actions on and off with the schedule,
+  so a paused environment's alarms stay silent. Five per environment fills CloudWatch's 10 free.
 - **New standard `infra/budget`,** which a second environment makes concrete: fixed monthly cost
   stays O(1) in offices, per-office visibility comes from queries rather than metrics, prefer
   pay-per-use with no idle cost, every spec carries a cost section, retention is a cost decision,
@@ -155,9 +167,29 @@ Replaces `make deploy` from my laptop, before anything migrates the database or 
 - **One workflow that reuses the Makefile.** Pull requests run lint, test, build and
   `terraform plan`. Merges to `main` run the same steps plus `terraform apply` in a protected
   environment with a required review. Staging applies before production.
+- **Idea: static security checks on the Terraform,** with a scanner such as Trivy or Checkov,
+  run as a Makefile target so pull requests and my laptop run the same checks. (Open: which tool,
+  whether findings block the merge or just report at first, and how suppressions are recorded
+  so an ignored check always carries its reason — settle it while shaping.)
+- **Idea: Terraform unit tests** with `terraform test`, run offline from a Makefile target so pull
+  requests and my laptop run them the same way. Phase 2.0's hand checks in `terraform console` are
+  the first cases: names and namespaces per environment, the token parameter's validation refusing
+  another environment's path (including the slash-less form), the production-only `count`s, the
+  `Environment` tag, and Task 5's tag conditions staying attached to exact ARNs. (Open: a
+  `mock_provider` fills computed values with placeholders, including
+  `aws_iam_policy_document.json`, so asserting on policy conditions may need the real provider
+  with `command = plan` and no credentials, or assertions on the document's inputs. Settle it
+  while shaping.)
 - **AWS access through GitHub OIDC** with a narrowly scoped IAM role managed in Terraform, so
   there are no long-lived keys. Values that aren't committed come from Actions variables.
   **CI never holds Telegram credentials.**
+- **Tags and ABAC for the deploy roles** (from Phase 2.0, which enabled ABAC on the archive
+  buckets). The roles need `s3:TagResource`, `s3:UntagResource` and `s3:ListTagsForResource`;
+  without them the provider silently falls back to `PutBucketTagging`, and every bucket tag change
+  fails. Scoping the deploy roles themselves by tag (`aws:ResourceTag` + `aws:RequestTag` +
+  `aws:TagKeys`, a staging role that can't touch production) is the harder, more instructive half:
+  many of the actions Terraform calls don't support tag conditions. Settle how far to go while
+  shaping.
 - **Versioned zips in S3,** keyed by git SHA, so Terraform never needs a local file, plan and apply
   can be separate jobs with an approval between them, and a rollback is re-applying an older SHA.
 - **Decided against a cloud Terraform runner** (HCP Terraform, Spacelift and friends). It can't
