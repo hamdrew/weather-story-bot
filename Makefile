@@ -1,4 +1,4 @@
-.PHONY: test coverage lint format build check-env plan deploy check-plan cost start pause clean
+.PHONY: test coverage lint format build check-env plan deploy cost start pause clean
 
 BUILD_DIR := build
 PACKAGE_DIR := $(BUILD_DIR)/package
@@ -57,15 +57,6 @@ plan: check-env
 deploy: check-env
 	$(TF) apply $(PLAN_FILE)
 	rm infra/$(PLAN_FILE)
-
-# Fail unless the saved plan only moves resources, adds the Environment tag, enables bucket ABAC
-# and re-writes an unchanged deferred role policy (Phase 2.0 Gate 1). Read-only: it inspects the
-# plan file and changes nothing. bash for pipefail, which dash (Debian's /bin/sh) may lack.
-check-plan: SHELL := bash
-check-plan: check-env
-	@test -f infra/$(PLAN_FILE) || { echo "No infra/$(PLAN_FILE); run make plan ENV=$(ENV) first" >&2; exit 1; }
-	set -o pipefail; $(TF) show -json $(PLAN_FILE) | \
-		uv run python scripts/check_tag_plan.py --environment $(ENV) -
 
 # Estimated monthly cost of infra/ for 1 office, 6 offices and all 122 US offices (no AWS credentials).
 # scripts/infracost_usage.py writes one usage file per scenario, infracost.yml scans infra/ once per

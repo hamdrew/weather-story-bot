@@ -92,7 +92,7 @@ make plan ENV=production     # review changes; saves them to infra/deploy-produc
 make deploy ENV=production   # applies exactly that saved plan, then deletes it
 ```
 
-`ENV` (`production` or `staging`) is required and selects the backend config, var file, data dir and plan file together. `make check-plan ENV=production` fails unless the saved plan only moves resources, adds the `Environment` tag and enables the archive bucket's ABAC (Phase 2.0's first production deploy). The Lambda's role policy may also show `policy = (known after apply)`: its policy document takes ARNs from resources that are being retagged, so Terraform reads it at apply. The check passes that only when the document's statements match the live policy exactly.
+`ENV` (`production` or `staging`) is required and selects the backend config, var file, data dir and plan file together.
 
 To run other Terraform commands, point them at the same environment's data dir:
 
