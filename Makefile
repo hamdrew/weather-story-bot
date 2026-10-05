@@ -48,9 +48,11 @@ check-env:
 
 # Save the plan so deploy applies exactly what was reviewed. Terraform refuses a plan that has
 # gone stale (state changed since it was made), and deploy fails if there is no plan to apply.
+# -var environment comes last: the last value wins, so a stray line in a tfvars file can't
+# make the environment disagree with the backend.
 plan: check-env
 	$(TF) init -input=false -backend-config=envs/$(ENV).backend.hcl
-	$(TF) plan -var environment=$(ENV) -var-file=envs/$(ENV).tfvars -out=$(PLAN_FILE)
+	$(TF) plan -var-file=envs/$(ENV).tfvars -var environment=$(ENV) -out=$(PLAN_FILE)
 
 deploy: check-env
 	$(TF) apply $(PLAN_FILE)

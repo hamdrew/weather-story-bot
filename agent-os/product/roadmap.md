@@ -142,13 +142,13 @@ that the CLI can't send one. Source: standards review, "Environments".
   chat id physically cannot reach a public channel and a leaked staging token is worthless.
   **Settled while shaping: a separate bot.** Staging's role can read only its own parameter.
 - **Staging stays near-free.** DynamoDB on-demand, S3, Lambda and the scheduler all cost nothing
-  when idle; the only real fixed additions are alarms past the free tier. Keep staging's alarm set
-  minimal and confirm with `make cost`.
-- **Two alarms have to be off or re-tuned in staging.** `missed-runs` and `quiet` both treat
+  when idle; the only real fixed additions are alarms past the free tier. Confirm with `make cost`.
+- **Two alarms can't be allowed to nag in staging.** `missed-runs` and `quiet` both treat
   missing data as breaching, and staging's schedule is off by default — so a staging stack would
-  sit permanently in ALARM on both, emailing the shared topic on every flap and training me to
-  ignore the alerts that matter in production. **Settled:** those two exist only while the
-  schedule is enabled. Staging keeps `errors`, `repost-loop` and `nws-ambiguous` on its own topic.
+  sit permanently in ALARM on both, emailing on every flap and training me to ignore the alerts
+  that matter in production. **Settled (revised 2026-10-02):** staging has all five alarms on its
+  own topic, and `make start` / `make pause` switch their actions on and off with the schedule,
+  so a paused environment's alarms stay silent. Five per environment fills CloudWatch's 10 free.
 - **New standard `infra/budget`,** which a second environment makes concrete: fixed monthly cost
   stays O(1) in offices, per-office visibility comes from queries rather than metrics, prefer
   pay-per-use with no idle cost, every spec carries a cost section, retention is a cost decision,

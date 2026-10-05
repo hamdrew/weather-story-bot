@@ -4,8 +4,9 @@ terraform {
 
   required_providers {
     aws = {
-      source  = "hashicorp/aws"
-      version = "~> 6.0"
+      source = "hashicorp/aws"
+      # 6.23 moved bucket tagging to the S3 Control API, which bucket ABAC relies on (storage.tf).
+      version = "~> 6.23"
     }
   }
 }

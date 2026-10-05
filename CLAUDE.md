@@ -33,6 +33,6 @@ Python 3.13 Lambda (arm64) that posts NWS Weather Stories to Telegram. Infra is 
 - The dev group installs `boto3[crt]` so local scripts can use `aws login` credentials (the login provider needs `awscrt`). `make build` exports `--no-dev`, so it never reaches the Lambda zip.
 - boto3 client types come from the dev-only `types-boto3[...]` stubs, so import them under `if TYPE_CHECKING:` (e.g. `from types_boto3_s3 import S3Client`). A new AWS service needs its extra added.
 - New runtime deps must ship arm64 manylinux wheels, or `make build` fails
-- Keep the Telegram token in SSM (`/weather-story-bot/telegram-token`), never in Terraform vars or state
+- Keep each environment's Telegram token in its own SSM parameter (`/weather-story-bot/telegram-token`, `/weather-story-bot-staging/telegram-token`), never in Terraform vars or state
 - `infra/envs/*.backend.hcl`, `*.tfvars` and `.env` are gitignored and local-only; the `*.example` files are the templates
 - Only mark a story as posted in DynamoDB after Telegram accepts it (a repost is OK, a missed story is not)

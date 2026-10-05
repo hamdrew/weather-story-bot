@@ -35,6 +35,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from botocore.exceptions import BotoCoreError, ClientError
+
 if TYPE_CHECKING:
     import boto3
     from types_boto3_cloudwatch import CloudWatchClient
@@ -61,7 +63,7 @@ SCHEDULE_PARAMETERS = (
 
 
 class RunStateError(Exception):
-    """The Terraform outputs or the environment can't be toggled, and nothing was changed."""
+    """The environment can't be toggled. The message says what, if anything, already changed."""
 
 
 @dataclass(frozen=True)
@@ -95,18 +97,32 @@ def set_run_state(
     if not apply:
         return plan
 
-    def toggle_schedule() -> None:
+    def toggle_schedule() -> str | None:
         if plan.schedule_changes:
             _set_schedule(scheduler, schedule, wanted_state)
+            return f"schedule {schedule_name} {wanted_state}"
+        return None
 
-    def toggle_alarms() -> None:
+    def toggle_alarms() -> str | None:
         if plan.alarms_to_change:
             _set_alarms(cloudwatch, plan.alarms_to_change, running)
+            state = "on" if running else "off"
+            return f"alarm actions {state} for {', '.join(plan.alarms_to_change)}"
+        return None
 
     # Start: the schedule first, so the alarms are never live ahead of the runs they watch.
     # Pause: the alarms first, so the idleness the pause causes can't email.
+    changed: list[str] = []
     for step in (toggle_schedule, toggle_alarms) if running else (toggle_alarms, toggle_schedule):
-        step()
+        try:
+            done = step()
+        except (BotoCoreError, ClientError) as error:
+            already = "; ".join(changed) or "nothing"
+            raise RunStateError(
+                f"{error}. Already changed: {already}. It's idempotent, so rerun it to finish"
+            ) from error
+        if done:
+            changed.append(done)
     return plan
 
 
@@ -122,11 +138,13 @@ def _output(outputs: Mapping[str, Any], name: str) -> Any:
 def _alarm_actions(cloudwatch: CloudWatchClient, alarm_names: list[str]) -> dict[str, bool]:
     """ActionsEnabled per alarm; every named alarm must exist."""
     found: dict[str, bool] = {}
+    pages = cloudwatch.get_paginator("describe_alarms")
     for start in range(0, len(alarm_names), 100):
-        response = cloudwatch.describe_alarms(
+        # Paged: a request may name 100 alarms, but a response can hold fewer and a NextToken.
+        for page in pages.paginate(
             AlarmNames=alarm_names[start : start + 100], AlarmTypes=["MetricAlarm"]
-        )
-        found.update({a["AlarmName"]: a["ActionsEnabled"] for a in response["MetricAlarms"]})
+        ):
+            found.update({a["AlarmName"]: a["ActionsEnabled"] for a in page["MetricAlarms"]})
     if missing := [name for name in alarm_names if name not in found]:
         raise RunStateError(f"CloudWatch has no alarm named {', '.join(missing)}")
     return found

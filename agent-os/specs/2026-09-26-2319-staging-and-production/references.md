@@ -37,8 +37,8 @@
 
 - **Location:** `infracost.yml`, `scripts/infracost_usage.py`, `tests/test_infracost_usage.py`, and
   `agent-os/specs/2026-09-20-1428-decide-act-and-record/cost.md` for the format
-- **Relevance:** Scenarios are office counts over per-office rates. Staging needs a runs figure
-  (about 60 hand invocations a month rather than 2,880), and its own Infracost project with
+- **Relevance:** Scenarios are office counts over per-office rates. Staging is priced always-on,
+  as production's one office (revised 2026-10-02), with its own Infracost project with
   `environment: staging` so the budget and MVP table drop out.
 - **Address change:** the usage key for the MVP table becomes `aws_dynamodb_table.posted[0]`.
 

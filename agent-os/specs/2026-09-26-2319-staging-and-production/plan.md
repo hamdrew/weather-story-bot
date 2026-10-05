@@ -300,17 +300,20 @@ variable. It was replaced by one rule for every environment: **Terraform creates
 
 ## Task 6: Staging cost, and the `infra/budget` standard (before anything is created)
 
-- `scripts/infracost_usage.py`: `Scenario` gains a runs figure (and an environment). Add a
-  `staging` scenario: 1 office, about 60 hand invocations a month, posts scaled to match.
-  `infracost.yml` gets a `staging` project with `environment: staging`. Test in
-  `tests/test_infracost_usage.py`.
+Revised 2026-10-02 with Task 4: staging can be left running, so it is priced always-on with all
+five alarms.
+
+- `scripts/infracost_usage.py`: `Scenario` gains an environment. Add a `staging` scenario:
+  production's one-office usage at the same `rate(15 minutes)`, the worst case, without the
+  production-only `posted` table. `infracost.yml` gets a `staging` project with
+  `environment: staging`. Test in `tests/test_infracost_usage.py`.
 - **New `agent-os/standards/infra/budget.md`** + index: fixed monthly cost stays O(1) in offices;
   per-office visibility comes from queries, not metrics; prefer pay-per-use with no idle cost;
   every spec carries a `cost.md`; retention is a cost decision; the budget rises deliberately when
   a spec raises expected spend.
 - `cost.md` in the spec folder from `make cost`. Expected: production unchanged ($0.60 at one
-  office), staging about $0.30 at list price (three alarms, near-zero usage). The account then
-  has 8 alarms, inside CloudWatch's 10 free, so the real cost is about $0. The $5 budget holds,
+  office), staging $0.60 at list price (five alarms, one office's usage). The account then has
+  10 alarms, exactly CloudWatch's 10 free, so the real cost is about $0. The $5 budget holds,
   with no change.
 
 ## Task 7: Stand up staging
@@ -335,8 +338,8 @@ Staging is created with its tags, bucket ABAC, a hand-tagged token parameter and
 conditions all at once. That's safe only because nothing public depends on it, and its first run is
 the proof production needs at Gate 3.
 
-**Pass:** the staging plan creates only `-staging` resources (no budget, no `posted`, no
-`missed-runs` or `quiet`, the schedule `DISABLED`). `make start ENV=staging` fires a run at once that posts MKX's
+**Pass:** the staging plan creates only `-staging` resources (no budget, no `posted`, all five
+alarms with their actions on, the schedule `DISABLED`). `make start ENV=staging` fires a run at once that posts MKX's
 active stories to the private channel, and the next scheduled run (15 min) logs them all
 `skipped`; then `make pause ENV=staging`. The first run
 also proves the conditions in this account: the lease proves DynamoDB (and so the account's
@@ -386,4 +389,4 @@ post have both happened without it firing.
 - Gate 3: production keeps posting under the tag conditions through a cold start and a post,
   with the `errors` alarm quiet.
 - `make cost` shows the staging column. `aws cloudwatch describe-alarms` (readonly profile) lists
-  5 production alarms and 3 staging ones.
+  5 production alarms and 5 staging ones.

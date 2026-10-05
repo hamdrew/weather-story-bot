@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from scripts.set_run_state import RunStateError, main, set_run_state
@@ -165,6 +166,48 @@ def test_an_alarm_missing_from_cloudwatch_fails_before_changing_anything(
 
     assert schedule_state(scheduler) == "DISABLED"
     assert actions_enabled(cloudwatch) == {ALARMS[0]: False}
+
+
+def expired_token(*args: Any, **kwargs: Any) -> None:
+    raise ClientError(
+        {"Error": {"Code": "ExpiredTokenException", "Message": "The security token expired"}},
+        "Update",
+    )
+
+
+def test_a_pause_that_fails_at_the_schedule_names_the_alarms_it_already_silenced(
+    paused: None,
+    scheduler: EventBridgeSchedulerClient,
+    cloudwatch: CloudWatchClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_run_state(scheduler, cloudwatch, OUTPUTS, running=True, apply=True)
+    monkeypatch.setattr(scheduler, "update_schedule", expired_token)
+
+    with pytest.raises(RunStateError, match="ExpiredToken") as failure:
+        set_run_state(scheduler, cloudwatch, OUTPUTS, running=False, apply=True)
+
+    # Alarms go first on a pause, so they are already off when the schedule update fails.
+    assert actions_enabled(cloudwatch) == {name: False for name in ALARMS}
+    assert schedule_state(scheduler) == "ENABLED"
+    assert all(name in str(failure.value) for name in ALARMS)
+
+
+def test_a_start_that_fails_at_the_alarms_names_the_schedule_it_already_enabled(
+    paused: None,
+    scheduler: EventBridgeSchedulerClient,
+    cloudwatch: CloudWatchClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cloudwatch, "enable_alarm_actions", expired_token)
+
+    with pytest.raises(RunStateError, match="ExpiredToken") as failure:
+        set_run_state(scheduler, cloudwatch, OUTPUTS, running=True, apply=True)
+
+    # The schedule goes first on a start, so it is already on when the alarm update fails.
+    assert schedule_state(scheduler) == "ENABLED"
+    assert actions_enabled(cloudwatch) == {name: False for name in ALARMS}
+    assert SCHEDULE in str(failure.value)
 
 
 def test_main_reads_terraform_outputs_from_a_file_and_toggles_when_applied(
