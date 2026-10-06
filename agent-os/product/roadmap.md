@@ -113,7 +113,7 @@ Sources: `agent-os/notes/2026-09-16-standards-review.md` ("Suggested order" #1, 
 
 ## Phase 2.0: Staging and Production
 
-In progress (spec `2026-09-26-2319-staging-and-production`). A place to watch a real post, now
+Done (spec `2026-09-26-2319-staging-and-production`). A place to watch a real post, now
 that the CLI can't send one. Source: standards review, "Environments".
 
 - **Two named deployments from one `infra/`:** an environment name threaded through every resource,
@@ -159,7 +159,8 @@ that the CLI can't send one. Source: standards review, "Environments".
 
 ## Phase 2.1: Deploy from GitHub Actions
 
-Replaces `make deploy` from my laptop, before anything migrates the database or adds offices.
+In progress (spec `2026-10-05-1123-deploy-from-github-actions`). Replaces `make deploy` from my
+laptop, before anything migrates the database or adds offices.
 
 - **Two fixes first:** make the Lambda zip reproducible, or every plan shows a change that isn't
   one; and make `plan`/`deploy` build first or fail outright when the zip is missing, so neither
@@ -171,6 +172,10 @@ Replaces `make deploy` from my laptop, before anything migrates the database or 
   run as a Makefile target so pull requests and my laptop run the same checks. (Open: which tool,
   whether findings block the merge or just report at first, and how suppressions are recorded
   so an ignored check always carries its reason — settle it while shaping.)
+  **Settled while shaping: Checkov, through a pinned `uvx`, blocking from day one.** Every
+  suppression is an inline `checkov:skip=ID:reason`, and `make scan` fails on a skip without a
+  reason. Not Trivy: its GitHub Action tags were hijacked in March 2026 (CVE-2026-33634) to steal
+  CI secrets, and a pinned Python package runs identically on the laptop and in CI.
 - **Idea: Terraform unit tests** with `terraform test`, run offline from a Makefile target so pull
   requests and my laptop run them the same way. Phase 2.0's hand checks in `terraform console` are
   the first cases: names and namespaces per environment, the token parameter's validation refusing
@@ -179,7 +184,9 @@ Replaces `make deploy` from my laptop, before anything migrates the database or 
   `mock_provider` fills computed values with placeholders, including
   `aws_iam_policy_document.json`, so asserting on policy conditions may need the real provider
   with `command = plan` and no credentials, or assertions on the document's inputs. Settle it
-  while shaping.)
+  while shaping.) **Settled: a `mock_provider` and assertions on the documents' inputs.** The real
+  provider would need credentials or skip flags in `providers.tf`, and the laptop's
+  `override.tf` pins an MFA profile.
 - **AWS access through GitHub OIDC** with a narrowly scoped IAM role managed in Terraform, so
   there are no long-lived keys. Values that aren't committed come from Actions variables.
   **CI never holds Telegram credentials.**
@@ -189,16 +196,28 @@ Replaces `make deploy` from my laptop, before anything migrates the database or 
   fails. Scoping the deploy roles themselves by tag (`aws:ResourceTag` + `aws:RequestTag` +
   `aws:TagKeys`, a staging role that can't touch production) is the harder, more instructive half:
   many of the actions Terraform calls don't support tag conditions. Settle how far to go while
-  shaping.
-- **Versioned zips in S3,** keyed by git SHA, so Terraform never needs a local file, plan and apply
-  can be separate jobs with an approval between them, and a rollback is re-applying an older SHA.
+  shaping. **Settled: names, tags and a boundary.** Four roles in a separate bootstrap stack that
+  only I apply (MFA), so the pipeline can't widen its own permissions: a read-only PR plan role, a
+  `main`-only plan role, and an apply role per environment, each assumable only from its GitHub
+  environment. Apply roles use exact production names or the `-staging` prefix, tag conditions
+  wherever an action supports them (the gaps written down), and a per-environment permissions
+  boundary on every role they create. An explicit Deny means even a bad plan can't delete the table
+  or the archive. Not `ReadOnlyAccess` for plans: it can read the Telegram token.
+- **Versioned zips in S3,** so Terraform never needs a local file, plan and apply can be separate
+  jobs with an approval between them, and a rollback is a revert. **Changed while shaping:** keyed
+  by the zip's content hash rather than the git SHA, so a docs-only merge plans as a no-op and a
+  revert rebuilds byte-identical bytes. Production's saved plan travels through a private S3
+  bucket, not a GitHub artifact, since the repo is public and the plan holds tfvars values.
+  Dependabot can't get OIDC tokens, so the plan I approve is made on `main`, not in the PR.
 - **Decided against a cloud Terraform runner** (HCP Terraform, Spacelift and friends). It can't
   build the zip, so GitHub Actions would still do the build, test and upload — the runner would
   only replace plan and apply. State stays in the S3 backend, which already handles locking at this
   size. If the approval and drift-detection story ever gets painful, the S3-zip seam means swapping
   a runner in is a config change, not a rewrite.
 - **Production becomes pipeline-only from here.** Manual `make deploy` stays as the documented
-  break-glass path — used deliberately, not routinely.
+  break-glass path — used deliberately, not routinely. **Settled:** `make plan`/`make deploy`
+  refuse `ENV=production` without `BREAK_GLASS=1`. Staging applies on every merge to `main`, and
+  production waits for my approval.
 
 ## Phase 2.2: Wisconsin and Minneapolis Offices
 
