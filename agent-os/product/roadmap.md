@@ -327,7 +327,41 @@ which the S3 archive plus a derived dataset already cover.
   - `infra/budget`'s rule still holds: inference is batch and capped, each run prints a cost
     estimate and needs confirmation above a threshold, and labels are cached so nothing is paid
     for twice. Expect roughly 18M input tokens for a full year at four offices and ~1.3M for
-    Season One — a one-time, cacheable job, not a recurring line item.
+    Season One in total, whether it runs once or in small pieces (see the next item).
+- **Idea: label as things are archived, not all at once in December.** Spread the inference over
+  the season instead of one big job at the end. A scheduled job picks up archived revisions that
+  have no label for the current model and prompt version and labels them, so the same cache fills
+  steadily. It stays after the fact: a separate job reads the archive, and the posting Lambda
+  still never calls a model. Beyond the December bill, two reasons:
+  - **A real cost line to watch** before the Year in Review depends on it. The estimate above is
+    a guess until a few weeks of actual spend replace it.
+  - **The feedback loop again.** A bad prompt or a mislabelled story shows up in October, while
+    it can still be fixed, instead of in the week the PDF is due.
+
+  This turns "a one-time job" into a small recurring pay-per-use line, capped and confirmed like
+  the rest under `infra/budget`. (Open: nightly or weekly; **Bedrock batch jobs run
+  asynchronously and have a minimum job size, so check at spec time whether a scheduled batch
+  or on-demand calls from an S3-event consumer is the better fit.** Batch is the more
+  instructive option and the cheaper one, if the minimum doesn't get in the way. Lands after
+  Phase 2.1, so the new job deploys through the pipeline.)
+- **Idea: the story within a story — what changed when a story was updated.** Every story folder
+  holding more than one revision pair is a candidate. Deterministic first, inferred second:
+  - **Computed facts per consecutive pair:** which raw JSON fields changed (`endTime` extended,
+    description edited, image replaced), how big the text edit was, the gap between the revisions
+    (from the ledger's `posted`/`updated` events), and how far the new image is from the old
+    (the same perceptual-hash or embedding distance planned for design flair).
+  - **Inferred, labeled as such:** a small model describes what differs between the two images and
+    texts in plain words ("the Sunday graphic gave way to a Monday forecast table"). Any guess at
+    *why* stays gentle and secondary. The narrative gets only the computed facts and the
+    descriptions, and the grounding check applies.
+  - **Tone guardrails hold:** appreciation, not diagnosis, and never anyone's name. A text
+    fix reads as care ("caught in 4 minutes"), not as a mistake.
+  - **First test case, found 2026-10-05:** MKX "Pleasant Fall Weather This Week" (start
+    2026-10-04T19:00Z). The title, description and start time were identical, but NWS replaced
+    the whole graphic overnight (Sunday's template with a patchy-frost bullet, then a Monday
+    farm-field table), and the bot posted it as an update. Archived at
+    `stories/MKX/2026/10/04/1900Z-pleasant-fall-weather-this-week-d6753582/`, revisions
+    `8cbb9eb8f9557422` and `7a890d33d35abe3b`.
 - **2026 is "Season One: September to December."** The bot went live on 2026-09-13 and NWS only
   lists *active* stories — there's no history to backfill. A full-year edition is 2027, which is
   exactly why Phase 1.2 starts recording now.
