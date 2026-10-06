@@ -50,6 +50,12 @@ It might be shared with the NWS offices themselves, so the tone is appreciation.
 - Per story: hazard type, season, a drama rating, a one-line image description
 - Per year: narrative text written *from computed facts*
 - Candidates: "most dramatic story", "calmest week", recurring themes, a friendly look at title wordplay
+- **The story within a story** (added 2026-10-05): what changed when a story was updated. Computed
+  facts come first (changed JSON fields, text edit size, time between revisions, image distance),
+  then a labeled description of the difference. Triaged into Phase 3 of the roadmap together with
+  labeling revisions as they're archived instead of in one December batch. First test case: MKX
+  "Pleasant Fall Weather This Week", where the graphic was replaced overnight and the text stayed
+  the same. The same calm framing as the "fastest fix" fact applies: describe, don't diagnose.
 - **Design flair** (added 2026-09-25): stories where someone at the office had fun with the graphic.
   Prompted by MKX's "Nice Weekend on Tap!" (start 2026-09-25T19:28Z, Telegram message 62, archived
   at `stories/MKX/2026/09/25/1928Z-nice-weekend-on-tap-36b1559a/2d1c64f41d0a986c`): a 70s
