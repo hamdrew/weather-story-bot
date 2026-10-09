@@ -133,6 +133,21 @@ and nothing else. An immediate second `make plan` shows **No changes**, which pr
 reproducible. The next production run logs `Run complete`.
 **Rollback:** revert. The old zip simply plans as another code update.
 
+**Passed 2026-10-08** (staging applied 9:17 PM CDT, production 9:20 PM CDT). Staging: 3 in-place
+changes. Production: 4. Both second plans read **No changes**, and every rebuild from `rm -rf
+build` printed the same `lLRsXkEy8eZ2kMPI928VVclO5y9jLQLq4Z4HtLBEvPE=`. Lambda's own `CodeSha256`
+equals it in both environments, so the hash handed to Terraform is the one AWS computes for the
+package. Reserved concurrency reads back as 10. Production's 9:30 PM CDT run, the first on the new
+code, logged `Run complete` (MKX: skipped 1, nothing failed). Staging's schedule is `DISABLED`, so
+it had no run to watch.
+**Found at Gate 1:** the plan also updated two resources the criteria above didn't list, both
+because `alert_email` became `sensitive`: `aws_sns_topic_subscription.alerts_email` (its
+`endpoint`) and, in production only, `aws_budgets_budget.monthly[0]` (the `notification` blocks'
+`subscriber_email_addresses`). In both the value is unchanged and only the sensitive marking is
+new. For the budget the saved plan's JSON showed it: no differing keys, equal notifications,
+`after_sensitive` true. A later gate's "nothing else" should count every resource that reads a
+newly `sensitive` variable.
+
 ---
 
 # Stage 2: Bootstrap (additive: nothing uses it yet)

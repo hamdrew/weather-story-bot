@@ -160,7 +160,8 @@ that the CLI can't send one. Source: standards review, "Environments".
 ## Phase 2.1: Deploy from GitHub Actions
 
 In progress (spec `2026-10-05-1123-deploy-from-github-actions`). Replaces `make deploy` from my
-laptop, before anything migrates the database or adds offices.
+laptop, before anything migrates the database or adds offices. Stage 1 (reproducible zip,
+`terraform test`, Checkov) is deployed to both environments (Gate 1 passed 2026-10-08).
 
 - **Two fixes first:** make the Lambda zip reproducible, or every plan shows a change that isn't
   one; and make `plan`/`deploy` build first or fail outright when the zip is missing, so neither
