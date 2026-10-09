@@ -11,6 +11,8 @@ locals it drives (`production`, `name`) live in `infra/locals.tf`.
 - **What exists outside Terraform is a required variable** with no default, set in that
   environment's tfvars: the Telegram token parameter, chat ids, the alert email. Never hard-code
   one environment's value in a local, a default or a conditional
+- A variable whose value would print in a public log (`offices`, `alert_email`, `nws_user_agent`)
+  is `sensitive = true`. The repo is public, and a plan prints variable values
 - Validate such a variable against the environment where you can (the token parameter must sit
   under `/${local.name}/`), so one environment's value can't be pasted into another's tfvars
 
@@ -106,6 +108,10 @@ they can't disagree:
 
 - `ENV` has no default and must be given on the command line (an exported `ENV` is refused).
   `check-env` fails with exit 2 on anything else
+- `plan` builds first and passes the zip's hash as `-var lambda_zip_sha256=<base64>`, so a plan is
+  made for one exact build. `deploy` rebuilds and refuses to apply when the zip's hash isn't the
+  planned one. The zip is reproducible (`scripts/build_zip.py`), so an unchanged build plans as
+  No changes
 - `environment` is passed as `-var environment=$(ENV)`, never kept in a tfvars file, so it can't
   disagree with the backend
 - A data dir per environment, because `.terraform/` remembers the backend it was initialized

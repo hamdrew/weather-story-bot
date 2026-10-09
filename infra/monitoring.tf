@@ -17,6 +17,7 @@ locals {
 # Left unencrypted on purpose: CloudWatch alarms can't publish to a topic encrypted
 # with the AWS managed aws/sns key.
 resource "aws_sns_topic" "alerts" {
+  #checkov:skip=CKV_AWS_26:CloudWatch alarms cannot publish to a topic encrypted with the AWS managed aws/sns key, and a customer managed key costs $1/month
   name = "${local.name}-alerts"
 }
 

@@ -12,6 +12,17 @@ updates:
     # Major versions are excluded from the group above, so they still get
     # their own dedicated PRs.
 
+  # Checkov has its own project: it pins boto3 exactly, so it can't share the root lockfile.
+  - package-ecosystem: "uv"
+    directory: "/tools/checkov"
+    schedule:
+      interval: "weekly"
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
   - package-ecosystem: "terraform"
     directory: "/infra"
     schedule:

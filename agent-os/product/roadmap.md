@@ -113,7 +113,7 @@ Sources: `agent-os/notes/2026-09-16-standards-review.md` ("Suggested order" #1, 
 
 ## Phase 2.0: Staging and Production
 
-In progress (spec `2026-09-26-2319-staging-and-production`). A place to watch a real post, now
+Done (spec `2026-09-26-2319-staging-and-production`). A place to watch a real post, now
 that the CLI can't send one. Source: standards review, "Environments".
 
 - **Two named deployments from one `infra/`:** an environment name threaded through every resource,
@@ -159,7 +159,9 @@ that the CLI can't send one. Source: standards review, "Environments".
 
 ## Phase 2.1: Deploy from GitHub Actions
 
-Replaces `make deploy` from my laptop, before anything migrates the database or adds offices.
+In progress (spec `2026-10-05-1123-deploy-from-github-actions`). Replaces `make deploy` from my
+laptop, before anything migrates the database or adds offices. Stage 1 (reproducible zip,
+`terraform test`, Checkov) is deployed to both environments (Gate 1 passed 2026-10-08).
 
 - **Two fixes first:** make the Lambda zip reproducible, or every plan shows a change that isn't
   one; and make `plan`/`deploy` build first or fail outright when the zip is missing, so neither
@@ -171,6 +173,10 @@ Replaces `make deploy` from my laptop, before anything migrates the database or 
   run as a Makefile target so pull requests and my laptop run the same checks. (Open: which tool,
   whether findings block the merge or just report at first, and how suppressions are recorded
   so an ignored check always carries its reason — settle it while shaping.)
+  **Settled while shaping: Checkov, locked in its own uv project (`tools/checkov/`, since it pins `boto3` exactly), blocking from day one.** Every
+  suppression is an inline `checkov:skip=ID:reason`, and `make scan` fails on a skip without a
+  reason. Not Trivy: its GitHub Action tags were hijacked in March 2026 (CVE-2026-33634) to steal
+  CI secrets, and a locked Python package runs identically on the laptop and in CI.
 - **Idea: Terraform unit tests** with `terraform test`, run offline from a Makefile target so pull
   requests and my laptop run them the same way. Phase 2.0's hand checks in `terraform console` are
   the first cases: names and namespaces per environment, the token parameter's validation refusing
@@ -179,7 +185,9 @@ Replaces `make deploy` from my laptop, before anything migrates the database or 
   `mock_provider` fills computed values with placeholders, including
   `aws_iam_policy_document.json`, so asserting on policy conditions may need the real provider
   with `command = plan` and no credentials, or assertions on the document's inputs. Settle it
-  while shaping.)
+  while shaping.) **Settled: a `mock_provider` and assertions on the documents' inputs.** The real
+  provider would need credentials or skip flags in `providers.tf`, and the laptop's
+  `override.tf` pins an MFA profile.
 - **AWS access through GitHub OIDC** with a narrowly scoped IAM role managed in Terraform, so
   there are no long-lived keys. Values that aren't committed come from Actions variables.
   **CI never holds Telegram credentials.**
@@ -189,16 +197,28 @@ Replaces `make deploy` from my laptop, before anything migrates the database or 
   fails. Scoping the deploy roles themselves by tag (`aws:ResourceTag` + `aws:RequestTag` +
   `aws:TagKeys`, a staging role that can't touch production) is the harder, more instructive half:
   many of the actions Terraform calls don't support tag conditions. Settle how far to go while
-  shaping.
-- **Versioned zips in S3,** keyed by git SHA, so Terraform never needs a local file, plan and apply
-  can be separate jobs with an approval between them, and a rollback is re-applying an older SHA.
+  shaping. **Settled: names, tags and a boundary.** Four roles in a separate bootstrap stack that
+  only I apply (MFA), so the pipeline can't widen its own permissions: a read-only PR plan role, a
+  `main`-only plan role, and an apply role per environment, each assumable only from its GitHub
+  environment. Apply roles use exact production names or the `-staging` prefix, tag conditions
+  wherever an action supports them (the gaps written down), and a per-environment permissions
+  boundary on every role they create. An explicit Deny means even a bad plan can't delete the table
+  or the archive. Not `ReadOnlyAccess` for plans: it can read the Telegram token.
+- **Versioned zips in S3,** so Terraform never needs a local file, plan and apply can be separate
+  jobs with an approval between them, and a rollback is a revert. **Changed while shaping:** keyed
+  by the zip's content hash rather than the git SHA, so a docs-only merge plans as a no-op and a
+  revert rebuilds byte-identical bytes. Production's saved plan travels through a private S3
+  bucket, not a GitHub artifact, since the repo is public and the plan holds tfvars values.
+  Dependabot can't get OIDC tokens, so the plan I approve is made on `main`, not in the PR.
 - **Decided against a cloud Terraform runner** (HCP Terraform, Spacelift and friends). It can't
   build the zip, so GitHub Actions would still do the build, test and upload — the runner would
   only replace plan and apply. State stays in the S3 backend, which already handles locking at this
   size. If the approval and drift-detection story ever gets painful, the S3-zip seam means swapping
   a runner in is a config change, not a rewrite.
 - **Production becomes pipeline-only from here.** Manual `make deploy` stays as the documented
-  break-glass path — used deliberately, not routinely.
+  break-glass path — used deliberately, not routinely. **Settled:** `make plan`/`make deploy`
+  refuse `ENV=production` without `BREAK_GLASS=1`. Staging applies on every merge to `main`, and
+  production waits for my approval.
 
 ## Phase 2.2: Wisconsin and Minneapolis Offices
 
@@ -308,7 +328,41 @@ which the S3 archive plus a derived dataset already cover.
   - `infra/budget`'s rule still holds: inference is batch and capped, each run prints a cost
     estimate and needs confirmation above a threshold, and labels are cached so nothing is paid
     for twice. Expect roughly 18M input tokens for a full year at four offices and ~1.3M for
-    Season One — a one-time, cacheable job, not a recurring line item.
+    Season One in total, whether it runs once or in small pieces (see the next item).
+- **Idea: label as things are archived, not all at once in December.** Spread the inference over
+  the season instead of one big job at the end. A scheduled job picks up archived revisions that
+  have no label for the current model and prompt version and labels them, so the same cache fills
+  steadily. It stays after the fact: a separate job reads the archive, and the posting Lambda
+  still never calls a model. Beyond the December bill, two reasons:
+  - **A real cost line to watch** before the Year in Review depends on it. The estimate above is
+    a guess until a few weeks of actual spend replace it.
+  - **The feedback loop again.** A bad prompt or a mislabelled story shows up in October, while
+    it can still be fixed, instead of in the week the PDF is due.
+
+  This turns "a one-time job" into a small recurring pay-per-use line, capped and confirmed like
+  the rest under `infra/budget`. (Open: nightly or weekly; **Bedrock batch jobs run
+  asynchronously and have a minimum job size, so check at spec time whether a scheduled batch
+  or on-demand calls from an S3-event consumer is the better fit.** Batch is the more
+  instructive option and the cheaper one, if the minimum doesn't get in the way. Lands after
+  Phase 2.1, so the new job deploys through the pipeline.)
+- **Idea: the story within a story — what changed when a story was updated.** Every story folder
+  holding more than one revision pair is a candidate. Deterministic first, inferred second:
+  - **Computed facts per consecutive pair:** which raw JSON fields changed (`endTime` extended,
+    description edited, image replaced), how big the text edit was, the gap between the revisions
+    (from the ledger's `posted`/`updated` events), and how far the new image is from the old
+    (the same perceptual-hash or embedding distance planned for design flair).
+  - **Inferred, labeled as such:** a small model describes what differs between the two images and
+    texts in plain words ("the Sunday graphic gave way to a Monday forecast table"). Any guess at
+    *why* stays gentle and secondary. The narrative gets only the computed facts and the
+    descriptions, and the grounding check applies.
+  - **Tone guardrails hold:** appreciation, not diagnosis, and never anyone's name. A text
+    fix reads as care ("caught in 4 minutes"), not as a mistake.
+  - **First test case, found 2026-10-05:** MKX "Pleasant Fall Weather This Week" (start
+    2026-10-04T19:00Z). The title, description and start time were identical, but NWS replaced
+    the whole graphic overnight (Sunday's template with a patchy-frost bullet, then a Monday
+    farm-field table), and the bot posted it as an update. Archived at
+    `stories/MKX/2026/10/04/1900Z-pleasant-fall-weather-this-week-d6753582/`, revisions
+    `8cbb9eb8f9557422` and `7a890d33d35abe3b`.
 - **2026 is "Season One: September to December."** The bot went live on 2026-09-13 and NWS only
   lists *active* stories — there's no history to backfill. A full-year edition is 2027, which is
   exactly why Phase 1.2 starts recording now.
