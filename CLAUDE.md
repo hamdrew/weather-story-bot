@@ -5,9 +5,11 @@ Python 3.13 Lambda (arm64) that posts NWS Weather Stories to Telegram. Infra is 
 ## Commands
 - `make test` - pytest; offline (respx mocks HTTP, moto mocks AWS)
 - `make coverage` - opt-in coverage; keep `--cov` out of pytest addopts (it breaks debugger breakpoints)
-- `make lint` / `make format` - ruff check + ruff format + `terraform fmt`; `lint` also runs `ty check` (fix type errors rather than adding `# ty: ignore`)
-- `make build` - vendors deps for aarch64-manylinux2014 / py3.13 (binary wheels only) into `build/lambda.zip`
-- `make plan ENV=<env>` / `make deploy ENV=<env>` - `ENV` is `production` or `staging` (required; selects `infra/envs/<env>.backend.hcl`, `envs/<env>.tfvars` and the data dir `infra/.terraform-<env>/`); `plan` saves `infra/deploy-<env>.tfplan`; `deploy` applies exactly that file (no prompt) and deletes it, failing if there's none; ask before running `deploy`
+- `make tftest` - `terraform test` on `infra/tests/`; offline against a mock AWS provider, no credentials (see `testing/terraform-tests`)
+- `make scan` - Checkov, blocking; it is its own uv project in `tools/checkov/` (it pins boto3 exactly), locked in `tools/checkov/uv.lock` and bumped by Dependabot; fix a finding or suppress it inline with `#checkov:skip=<ID>:<reason>` (a skip with no reason fails the scan)
+- `make lint` / `make format` - ruff check + ruff format + `terraform fmt -recursive`; `lint` also runs `ty check` (fix type errors rather than adding `# ty: ignore`)
+- `make build` - vendors deps for aarch64-manylinux2014 / py3.13 (binary wheels only) into `build/lambda.zip`; `scripts/build_zip.py` makes it reproducible and writes its base64 sha256 to `build/lambda.zip.sha256`
+- `make plan ENV=<env>` / `make deploy ENV=<env>` - `ENV` is `production` or `staging` (required; selects `infra/envs/<env>.backend.hcl`, `envs/<env>.tfvars` and the data dir `infra/.terraform-<env>/`); `plan` builds first, passes the zip's hash as `lambda_zip_sha256` and saves `infra/deploy-<env>.tfplan`; `deploy` rebuilds, refuses if the zip isn't the planned one, applies exactly that file (no prompt) and deletes it, failing if there's none; ask before running `deploy`
 - `make start ENV=<env>` / `make pause ENV=<env>` - start or pause an environment's schedule and alarm actions through the API (`scripts/set_run_state.py`; Terraform creates the schedule DISABLED and the alarms on, then ignores both); they change a live environment and need the MFA profile, so ask before running
 - Other Terraform commands need the env's data dir: `TF_DATA_DIR=.terraform-production terraform -chdir=infra output`
 - `uv run weather-story-bot --dry-run [--office MKX]` - live NWS fetch, prints each story's decision (`new-or-updated (state not read)` / `expired` / `rejected`) beside its caption; `--dry-run` is required, read-only, never posts

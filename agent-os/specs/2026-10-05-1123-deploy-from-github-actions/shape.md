@@ -42,7 +42,8 @@ the roadmap), separate AWS accounts, managing GitHub settings from Terraform.
   prefix for staging, `Environment` tag conditions wherever an action supports them, and a
   per-environment permissions boundary required on every role the pipeline creates or changes.
   The gaps (actions without tag support) are written down in `infra/iam`.
-- **Checkov via `uvx`, blocking from day one.** It's pinned, needs no third-party action, and
+- **Checkov in its own uv project, blocking from day one.** It's locked in `tools/checkov/uv.lock` (a separate
+  project because it pins `boto3` exactly) and bumped by Dependabot, needs no third-party action, and
   every suppression is an inline `checkov:skip=ID:reason`. `make scan` fails on a skip with no
   reason. Today's findings are triaged in the task that adds the scan.
 - **Staging applies automatically, production waits for approval.** Staging deploys only from

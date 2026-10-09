@@ -3,6 +3,8 @@
 global:
   principles:
     description: Local tools are read-only; decide purely then act; sources of truth vs derived data; the office is the unit of isolation
+  launch-configs:
+    description: Every executable script (scripts/*.py with a __main__ block, and the package CLI) gets a launch.json entry in the same change; never --apply, readonly profile for AWS tools, scratch output paths
 
 backend:
   archive-layout:
@@ -40,7 +42,7 @@ infra:
   data-retention:
     description: Archive and state table kept forever (no TTL) with matched 35-day undo windows; stop and ask before replacing a table or bucket
   environments:
-    description: Production unsuffixed, others weather-story-bot-<env>; differences via variables or local.production, never forked files; created things derived from environment, outside things are required variables; production-only budget and posted table; one Makefile ENV selects backend, var file, data dir and plan; lowercase Environment tag on everything via default_tags, bucket ABAC on; staging is where real posts get watched; schedule created DISABLED and alarms created on, toggled by make start/pause; a bot and token parameter per environment; per-environment metric namespaces
+    description: Production unsuffixed, others weather-story-bot-<env>; differences via variables or local.production, never forked files; created things derived from environment, outside things are required variables; production-only budget and posted table; one Makefile ENV selects backend, var file, data dir and plan; lowercase Environment tag on everything via default_tags, bucket ABAC on; values that print in public logs are sensitive; plan builds first and passes the zip hash, deploy refuses a different zip; staging is where real posts get watched; schedule created DISABLED and alarms created on, toggled by make start/pause; a bot and token parameter per environment; per-environment metric namespaces
   iam:
     description: Exact actions on narrowest ARNs via policy documents; the only delete is item-level DeleteItem for the lease; Environment tag conditions (Allow + StringEquals, on exact ARNs, no tag-write actions, live a deploy before the condition; Logs has none); SourceAccount guard on service trust policies
 
@@ -51,5 +53,7 @@ testing:
     description: Pin metric-filter/runbook log messages with tests; rename log, test and monitoring.tf together
   offline-tests:
     description: Tests never reach NWS/Telegram/AWS; fake failures at the wire, monkeypatch last, no MagicMock
+  terraform-tests:
+    description: make tftest runs offline against a mock aws provider; assert on policy document inputs, not .json; one expect_failures run per validation; see a new test fail before trusting it; make scan (Checkov) is blocking and every inline skip needs a reason
   test-data:
     description: make_story camelCase overrides and mkx_payload; production NWS quirks become dated parametrized cases

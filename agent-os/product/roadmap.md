@@ -172,10 +172,10 @@ laptop, before anything migrates the database or adds offices.
   run as a Makefile target so pull requests and my laptop run the same checks. (Open: which tool,
   whether findings block the merge or just report at first, and how suppressions are recorded
   so an ignored check always carries its reason — settle it while shaping.)
-  **Settled while shaping: Checkov, through a pinned `uvx`, blocking from day one.** Every
+  **Settled while shaping: Checkov, locked in its own uv project (`tools/checkov/`, since it pins `boto3` exactly), blocking from day one.** Every
   suppression is an inline `checkov:skip=ID:reason`, and `make scan` fails on a skip without a
   reason. Not Trivy: its GitHub Action tags were hijacked in March 2026 (CVE-2026-33634) to steal
-  CI secrets, and a pinned Python package runs identically on the laptop and in CI.
+  CI secrets, and a locked Python package runs identically on the laptop and in CI.
 - **Idea: Terraform unit tests** with `terraform test`, run offline from a Makefile target so pull
   requests and my laptop run them the same way. Phase 2.0's hand checks in `terraform console` are
   the first cases: names and namespaces per environment, the token parameter's validation refusing

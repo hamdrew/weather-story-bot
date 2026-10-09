@@ -23,6 +23,48 @@
             "args": [],
             // The ReadOnly role can't write, so this stays a dry run even if --apply is added.
             "env": {"AWS_PROFILE": "readonly"}
+        },
+        {
+            "name": "Migrate Story Keys: Dry Run",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/migrate_story_keys.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "args": [],
+            // The ReadOnly role can't write, so this stays a dry run even if --apply is added.
+            "env": {"AWS_PROFILE": "readonly"}
+        },
+        {
+            "name": "Infracost Usage: Write",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/infracost_usage.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            // Writes to build/debug-usage, not build/, which infracost.yml reads.
+            "args": ["write", "build/debug-usage"]
+        },
+        {
+            "name": "Infracost Usage: Report",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/infracost_usage.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            // Run `make cost` first so build/infracost.json exists.
+            "args": ["report", "build/infracost.json"]
+        },
+        {
+            "name": "Build Zip: Hash Package",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/build_zip.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            // Run `make build` first so build/package exists. This writes build/debug.zip, not
+            // build/lambda.zip, so a debug session can't change the zip `make plan` hashes.
+            "args": ["build/package", "build/debug.zip"]
         }
     ]
 }

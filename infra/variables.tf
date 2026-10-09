@@ -22,6 +22,8 @@ variable "offices" {
     chat_id = string
     name    = string
   }))
+  # The repo is public and so are its Actions logs, and a plan prints variable values.
+  sensitive = true
 
   validation {
     condition     = length(var.offices) > 0 && alltrue([for id in keys(var.offices) : can(regex("^[A-Z]{3}$", id))])
@@ -45,6 +47,7 @@ variable "telegram_token_param_name" {
 variable "nws_user_agent" {
   description = "User-Agent sent to api.weather.gov. NWS asks for app name plus contact info."
   type        = string
+  sensitive   = true # Contact info, and plans print in public logs.
 }
 
 # Keep the interval longer than state.LEASE_DURATION (360s), or a crashed run's lease blocks the next run.
@@ -57,6 +60,7 @@ variable "schedule_expression" {
 variable "alert_email" {
   description = "Email address for CloudWatch alarm and AWS Budget alerts."
   type        = string
+  sensitive   = true # Plans print in public logs.
 }
 
 variable "monthly_budget_usd" {
@@ -83,8 +87,34 @@ variable "repost_alarm_max_posts" {
   default     = 8
 }
 
+variable "lambda_max_concurrency" {
+  description = "Most runs of the function at once (reserved concurrency). A ceiling on spend from a retry storm or a runaway invoker, not mutual exclusion: the office lease does that."
+  type        = number
+  default     = 10
+
+  validation {
+    # Reserved concurrency of 0 throttles every invocation, which switches the function off.
+    condition     = var.lambda_max_concurrency >= 1 && floor(var.lambda_max_concurrency) == var.lambda_max_concurrency
+    error_message = "lambda_max_concurrency must be a whole number of at least 1; 0 would switch the function off."
+  }
+}
+
 variable "lambda_zip_path" {
   description = "Path to the deployment package built by `make build`."
   type        = string
   default     = "../build/lambda.zip"
+}
+
+# Passed by `make plan` from the zip it just built (build/lambda.zip.sha256), never set in a tfvars
+# file. Terraform takes it as a plain input instead of hashing the file itself, so a plan is
+# made for one exact build, and `make deploy` refuses to apply it if the rebuilt zip differs.
+variable "lambda_zip_sha256" {
+  description = "Base64 sha256 of the zip at lambda_zip_path, as printed by scripts/build_zip.py."
+  type        = string
+
+  validation {
+    # 32 bytes in base64 is 43 characters and one "=", so an empty or truncated value is refused.
+    condition     = can(regex("^[A-Za-z0-9+/]{43}=$", var.lambda_zip_sha256))
+    error_message = "lambda_zip_sha256 must be a base64 sha256, as printed by scripts/build_zip.py."
+  }
 }

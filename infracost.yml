@@ -10,6 +10,7 @@ projects:
     # None of them affect cost: every office shares one Lambda, table and bucket.
     terraform_vars: &vars
       environment: production
+      lambda_zip_sha256: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       telegram_token_param_name: /weather-story-bot/telegram-token
       offices: '{"MKX": {"chat_id": "-100", "name": "Milwaukee/Sullivan"}}'
       nws_user_agent: weather-story-bot (cost estimate)

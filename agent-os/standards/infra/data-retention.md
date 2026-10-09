@@ -9,7 +9,8 @@ The S3 archive permanently records every story revision. The DynamoDB state tabl
 | `aws_s3_bucket.archive` | versioning, public access blocked | `noncurrent_days = 35` |
 
 - Every environment's table and bucket carry the same protections and undo windows as production's (`infra/environments`). Reset staging by deleting items, never the table
-- Never expire current archive objects. No `expiration { days/date }` in the lifecycle rule
+- Never expire current archive objects. No `expiration { days/date }` in the lifecycle rule. Aborting
+  incomplete multipart uploads (`abort_incomplete_multipart_upload`) is allowed: it removes no stored object
 - Never add a `ttl` block to the state table. Records are permanent by decision
 - If you change one undo window, change the others to match
 - A change that force-replaces or destroys a table or the bucket (key schema, name) needs a stop. Don't disable protection or apply a replace yourself. Propose a migration (new resource + script like `scripts/migrate_story_keys.py`) and ask first

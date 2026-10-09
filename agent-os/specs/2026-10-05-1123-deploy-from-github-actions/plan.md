@@ -21,8 +21,8 @@ and no Telegram credentials anywhere in CI. `make deploy` stays as a deliberate 
   production plan you approve has to be made on `main`. That is what puts the saved plan and the
   approval between separate jobs.
 - **Trivy's GitHub Action tags were hijacked in March 2026** (TeamPCP, CVE-2026-33634) and
-  rewritten to steal CI secrets. Checkov runs through `uvx`, pinned, the same way on the laptop
-  and in CI, with no third-party action.
+  rewritten to steal CI secrets. Checkov is its own locked uv project (`tools/checkov/`), run the
+  same way on the laptop and in CI, with no third-party action.
 - **`ReadOnlyAccess` would leak the Telegram token.** It includes `ssm:GetParameter`, and the
   `aws/ssm` key lets any principal in the account decrypt. The plan roles get a hand-written
   read policy instead. Granting `s3:Get*` on the bucket ARN (not `bucket/*`) reads
@@ -52,7 +52,7 @@ and no Telegram credentials anywhere in CI. `make deploy` stays as a deliberate 
 | Zips | `s3://<artifacts>/<env>/lambda/<sha256>.zip`. Each apply role writes only its own prefix. Writes must send `If-None-Match` (bucket policy), so an object is never overwritten |
 | Saved plan | Production's plan goes to `s3://<artifacts>/plans/production/<run_id>.tfplan` (`ci-plan`) and is read by `ci-apply-production` |
 | Public logs | `offices`, `alert_email`, `nws_user_agent` are `sensitive = true` |
-| Scanner | Checkov via `uvx checkov@<pin>`, blocking. Inline `#checkov:skip=ID:reason`, and `make scan` fails on a skip with no reason |
+| Scanner | Checkov in its own uv project, `tools/checkov/` (it pins `boto3` exactly, so it can't share the root lock), version in its `uv.lock`, bumped by Dependabot. Blocking. Inline `#checkov:skip=ID:reason`, and `make scan` fails on a skip with no reason |
 | Staging / production | Staging applies on merge (main only, no reviewer). Production waits for your approval after staging succeeds |
 | Break-glass | `make plan`/`make deploy` refuse `ENV=production` unless `BREAK_GLASS=1` is on the command line (or `GITHUB_ACTIONS=true`) |
 | Locks | Plan roles plan with `-lock=false` (a stale saved plan is refused at apply anyway). Apply roles lock on their own exact `.tflock` key |
@@ -114,7 +114,7 @@ recorded where the roadmap left them open (scanner, `terraform test` approach, r
 
 ## Task 4: Checkov, blocking
 
-- `make scan`: `uvx checkov@<pinned> -d infra --framework terraform` (and `infra/bootstrap` once
+- `make scan`: `uv run --locked --project tools/checkov checkov -d infra --framework terraform` (and `infra/bootstrap` once
   it exists), compact output, non-zero on any failure. A grep step fails on any
   `checkov:skip=ID` with no `:reason`.
 - Triage today's findings in this task. Fix the ones that are free and safe. Skip the rest
@@ -128,7 +128,8 @@ recorded where the roadmap left them open (scanner, `terraform test` approach, r
 
 `make plan ENV=staging` → `make deploy ENV=staging`, then production. **Pass:** each plan shows a
 Lambda code update (the first reproducible zip has new bytes), the Checkov fixes listed in Task
-4, and nothing else. An immediate second `make plan` shows **No changes**, which proves the zip is
+4 (the multipart-abort lifecycle rule and the Lambda's reserved concurrency of 10, both in-place),
+and nothing else. An immediate second `make plan` shows **No changes**, which proves the zip is
 reproducible. The next production run logs `Run complete`.
 **Rollback:** revert. The old zip simply plans as another code update.
 
@@ -171,7 +172,9 @@ reproducible. The next production run logs `Run complete`.
   `AttachRolePolicy` require `iam:PermissionsBoundary` = the own environment's boundary, with no
   way to change or delete a boundary. `iam:PassRole` is scoped with `iam:PassedToService`. State:
   the environment's exact keys, plus its `.tflock`. Zips: `PutObject`/`GetObject` on
-  `<env>/lambda/*`. Production also reads `plans/production/*`. Explicit Deny on `DeleteTable`,
+  `<env>/lambda/*`. Production also reads `plans/production/*`. The Lambda statement includes
+  `lambda:PutFunctionConcurrency` (the function's reserved concurrency, Task 4) on the
+  environment's own function. Explicit Deny on `DeleteTable`,
   `DeleteBucket` and `DeleteObject*` for the table and archive (`infra/data-retention`, now
   enforced by IAM).
 - Tests: the staging role names no production ARN or state key, boundaries differ per

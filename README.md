@@ -65,8 +65,10 @@ Prerequisites: [uv](https://docs.astral.sh/uv/), Terraform ≥ 1.11, and the AWS
 
 ```sh
 make test     # unit tests (respx + moto; no network, no AWS)
+make tftest   # terraform test on infra/tests (offline, mock AWS provider, no credentials)
+make scan     # Checkov security scan of infra/ (blocking; Checkov lives in tools/checkov/)
 make coverage # tests with a coverage report (terminal + htmlcov/index.html)
-make lint     # ruff + terraform fmt
+make lint     # ruff + ty + terraform fmt
 make format   # apply ruff/terraform formatting
 
 # Print each live story's decision beside its caption (read-only: no AWS, no Telegram):
@@ -84,13 +86,19 @@ uv run python -m weather_story_bot --dry-run --office MKX
 
 Variables already set in your shell take precedence over `.env`.
 
+`make scan` fails on any Checkov finding. Fix it, or suppress it inline inside the resource block with a reason: `#checkov:skip=CKV_AWS_50:the structured JSON logs are the trace`. A skip with no reason fails the scan too. Checkov is its own small uv project in `tools/checkov/` (it pins `boto3` exactly, which the main project's dev tools can't share). Its version is in `tools/checkov/uv.lock`, and Dependabot proposes bumps. Run `uv lock --upgrade --project tools/checkov` to bump it by hand.
+
 ## Deploy
 
 ```sh
 make build                   # vendors deps for python3.13/arm64 into build/lambda.zip
-make plan ENV=production     # review changes; saves them to infra/deploy-production.tfplan
-make deploy ENV=production   # applies exactly that saved plan, then deletes it
+make plan ENV=production     # builds first; review changes; saves them to infra/deploy-production.tfplan
+make deploy ENV=production   # rebuilds, checks the zip, applies exactly that saved plan, then deletes it
 ```
+
+The zip is reproducible: `scripts/build_zip.py` sorts the entries and fixes their timestamps, modes and compression, so the same source and lockfile give the same bytes. `make build` prints the zip's base64 sha256 (also in `build/lambda.zip.sha256`), `make plan` passes it to Terraform as `lambda_zip_sha256`, and a build that changes nothing plans as **No changes**. `make deploy` rebuilds and refuses to apply if the new zip isn't the one the plan was made for. Run `make plan` again after any source change.
+
+`offices`, `alert_email` and `nws_user_agent` are `sensitive`, so a plan prints `(sensitive value)` for them. This repository is public, and its CI logs will be too.
 
 `ENV` (`production` or `staging`) is required and selects the backend config, var file, data dir and plan file together.
 
@@ -128,7 +136,6 @@ Staging is where real posts get watched: its own bot, a private channel, its own
    ```
 4. **Deploy.** The plan should create only `-staging` resources, with no budget, the schedule `DISABLED` and all five alarms on:
    ```sh
-   make build
    make plan ENV=staging
    make deploy ENV=staging
    ```
