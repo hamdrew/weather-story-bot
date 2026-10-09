@@ -185,3 +185,5 @@ infra/.terraform-*/
 *.tfplan
 # Local Lambda invoke output
 out.json
+# Claude Code worktrees (isolated checkouts for PR review and experiments)
+.claude/worktrees/
