@@ -117,6 +117,57 @@ aws lambda invoke --function-name weather-story-bot out.json && cat out.json
 
 Invoke it again and every story should show as `skipped`. Logs are structured JSON in the CloudWatch log group `/aws/lambda/weather-story-bot`.
 
+## Bootstrap (CI access)
+
+`infra/bootstrap/` is a second Terraform stack that holds what the GitHub Actions pipeline signs in with: the GitHub OIDC provider, four CI roles, a permissions boundary per environment and the private artifacts bucket (Lambda zips and saved production plans). It is applied **by hand with MFA**, never by the pipeline, so the pipeline can't widen its own permissions. Nothing deploys through it until Phase 2.1's pipeline (Stage 4) exists, and `terraform destroy` removes it with no effect on either environment.
+
+```sh
+cp infra/bootstrap/backend.hcl.example infra/bootstrap/backend.hcl             # your state bucket
+cp infra/bootstrap/bootstrap.tfvars.example infra/bootstrap/bootstrap.tfvars   # your repository and state bucket
+cp infra/override.tf infra/bootstrap/override.tf                               # profile = "weather-deploy"
+aws iam list-open-id-connect-providers --profile readonly   # is there already a GitHub provider?
+make bootstrap-plan                                          # review it
+```
+
+Before applying it, create the GitHub side (below): a workflow that names an environment that doesn't exist yet creates it with no protection, and could then assume that environment's apply role. Then `make bootstrap-deploy`, which applies exactly that saved plan.
+
+The account has one GitHub OIDC provider at most. If the listing shows `token.actions.githubusercontent.com`, import it before planning, so the stack doesn't try to create a duplicate:
+
+```sh
+TF_DATA_DIR=.terraform-bootstrap terraform -chdir=infra/bootstrap init -backend-config=backend.hcl
+TF_DATA_DIR=.terraform-bootstrap terraform -chdir=infra/bootstrap import -var-file=bootstrap.tfvars \
+  aws_iam_openid_connect_provider.github arn:aws:iam::<account>:oidc-provider/token.actions.githubusercontent.com
+```
+
+| Role | Assumable from | Can |
+|---|---|---|
+| `weather-story-bot-ci-pr-plan` | pull requests in this repository | read both environments' configuration and state (no objects, items or parameters) |
+| `weather-story-bot-ci-plan` | `main` | the same, and write `plans/production/*` in the artifacts bucket |
+| `weather-story-bot-ci-apply-staging` | the `staging` GitHub environment | apply staging, and nothing named for production |
+| `weather-story-bot-ci-apply-production` | the `production` GitHub environment | apply production, and read the saved plan |
+
+An apply role creates or changes IAM roles only under its own environment's boundary (`weather-story-bot-staging-boundary`, `weather-story-bot-boundary`, which the main stack takes as `permissions_boundary_arn` in Phase 2.1 Stage 3) and can never delete a table, the archive bucket or an object in either bucket. The outputs (`terraform output`, with the same `TF_DATA_DIR`) give the bucket name and the boundary ARNs.
+
+The GitHub side, by hand (Settings, or `gh api`), before `make bootstrap-deploy`. The workflows read these. `AWS_ACCOUNT_ID` and `TF_STATE_BUCKET` are plain repository variables. `STAGING_TFVARS` and `PRODUCTION_TFVARS` hold your chat ids and email, so they are **secrets**: the repository is public, and Actions masks secrets in its logs but prints variables as they are.
+
+```sh
+REPO=<owner>/weather-story-bot
+# Environments: staging deploys from main only; production also needs your approval (self-review allowed).
+gh api -X PUT repos/$REPO/environments/staging \
+  -F 'deployment_branch_policy[protected_branches]=false' -F 'deployment_branch_policy[custom_branch_policies]=true'
+gh api -X POST repos/$REPO/environments/staging/deployment-branch-policies -f name=main
+USER_ID=$(gh api user --jq .id)
+gh api -X PUT repos/$REPO/environments/production \
+  -F 'deployment_branch_policy[protected_branches]=false' -F 'deployment_branch_policy[custom_branch_policies]=true' \
+  -F "reviewers[][type]=User" -F "reviewers[][id]=$USER_ID" -F prevent_self_review=false
+gh api -X POST repos/$REPO/environments/production/deployment-branch-policies -f name=main
+# What the workflows read: two variables, and the tfvars as secrets.
+gh variable set AWS_ACCOUNT_ID --repo $REPO --body <account id>
+gh variable set TF_STATE_BUCKET --repo $REPO --body <state bucket>
+gh secret set STAGING_TFVARS --repo $REPO < infra/envs/staging.tfvars
+gh secret set PRODUCTION_TFVARS --repo $REPO < infra/envs/production.tfvars
+```
+
 ## Staging
 
 Staging is where real posts get watched: its own bot, a private channel, its own state and archive, and a schedule that starts off. Create it once:

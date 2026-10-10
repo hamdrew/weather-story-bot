@@ -200,16 +200,31 @@ newly `sensitive` variable.
 ### Gate 2: apply the bootstrap
 
 First, with `readonly`: `aws iam list-open-id-connect-providers`. If a GitHub provider already
-exists, import it rather than create a duplicate. Then `make bootstrap-plan` → `bootstrap-deploy`
-(MFA). **Pass:** only bootstrap resources are created, and the production and staging plans
-still show No changes. Spot checks with `aws iam simulate-principal-policy` (readonly):
-`ci-apply-staging` is denied production's table, state key and token; `ci-apply-production` is
-allowed its own table; both are denied `DeleteTable`; `ci-pr-plan` is denied `ssm:GetParameter`
-and `GetObject` on the archive. Then, by hand in GitHub: environments `staging` (main only) and
-`production` (main only, required reviewer: you, self-review allowed), and repo variables
-`AWS_ACCOUNT_ID`, `TF_STATE_BUCKET`, `STAGING_TFVARS`, `PRODUCTION_TFVARS` (README gets the
-exact `gh api` commands).
+exists, import it rather than create a duplicate. Then, by hand in GitHub and **before the
+apply** (a workflow naming a missing environment creates it unprotected): environments `staging`
+(main only) and `production` (main only, required reviewer: you, self-review allowed), repo
+variables `AWS_ACCOUNT_ID` and `TF_STATE_BUCKET`, and repo **secrets** `STAGING_TFVARS` and
+`PRODUCTION_TFVARS` (the repo is public and Actions prints variables unmasked; README gets the
+exact `gh` commands). Then `make bootstrap-plan` → `bootstrap-deploy` (MFA). **Pass:** only
+bootstrap resources are created, and the production and staging plans still show No changes.
+Spot checks with `aws iam simulate-principal-policy` (readonly): `ci-apply-staging` is denied
+production's table, state key and token; `ci-apply-production` is allowed its own table; both
+are denied `DeleteTable`, `UpdateContinuousBackups` and the archive's `PutLifecycleConfiguration`;
+`ci-pr-plan` is denied `ssm:GetParameter` and `GetObject` on **both** environments' archives;
+`ci-apply-staging` is allowed `iam:TagRole` on a staging role with only `aws:RequestTag` context
+(a create, no `aws:ResourceTag`); `ci-apply-production` is allowed `cloudwatch:PutMetricAlarm` on
+its errors alarm with only `aws:ResourceTag` context (an update).
 **Rollback:** `terraform destroy` the bootstrap. Nothing depends on it.
+
+**As built (Stage 2, 2026-10-09):** the roles are named `weather-story-bot-ci-<pr-plan|plan|apply-staging|apply-production>`
+so `aws iam list-roles` groups them. The bootstrap's variables live in a gitignored
+`infra/bootstrap/bootstrap.tfvars` (`.example` committed). An apply role's permissions came to
+8.7 KB (staging) and 11 KB (production), over IAM's 10,240-character inline limit, so each apply role
+holds three customer managed policies (`access`, `roles-tags`, `writes`) instead of one inline
+policy. Per-service statements are merged into one statement per kind of access, which grants the
+same access because an action only matches its own service's ARNs. The tag conditions on log
+groups, SNS, CloudWatch alarms and S3 bucket actions, and the action name `s3:PutBucketABAC`, can't
+be verified offline: Gate 4a (the first plan and apply under these roles) is where they are proven.
 
 ---
 
@@ -249,7 +264,7 @@ next cold start (role credentials refresh then).
 - `checks` job (every event, **no `id-token`**): `make lint test tftest scan`, and `make build`
   twice with the hashes compared.
 - `plan` job (PRs from this repo, not Dependabot; matrix staging/production; `id-token: write`
-  only here): writes `envs/<env>.backend.hcl` and `.tfvars` from variables, then
+  only here): writes `envs/<env>.backend.hcl` from variables and `.tfvars` from the `<ENV>_TFVARS` secret, then
   `make plan ENV=<env> LOCK=false` with `ci-pr-plan`. It runs no project tests, so third-party
   code never shares a job with AWS credentials.
 - `Makefile`: `LOCK ?= true` → `-lock=$(LOCK)`.
@@ -272,7 +287,9 @@ it: the first pipeline apply will then show one code update). An `AccessDenied` 
   `GITHUB_ACTIONS=true`.
 - New standard **`infra/pipeline`**: roles and trusts, staging before production, saved plans
   in S3, `id-token` only in jobs that run no project code, a new AWS service means a bootstrap
-  change applied first, rollback is a revert, and break-glass is used deliberately. Amend
+  change applied first, rollback is a revert, and break-glass is used deliberately (including
+  for a new table or archive: the apply roles' retention Deny blocks the PITR, versioning and
+  lifecycle settings Terraform applies right after creating one, `infra/iam`). Amend
   `infra/environments` (pipeline-only is now enforced). README Deploy rewritten (pipeline,
   approval, rollback, break-glass). CLAUDE.md commands.
 

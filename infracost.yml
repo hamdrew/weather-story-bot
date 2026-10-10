@@ -33,3 +33,10 @@ projects:
       <<: *vars
       environment: staging
       telegram_token_param_name: /weather-story-bot-staging/telegram-token
+  # The bootstrap stack (infra/bootstrap): the OIDC provider, IAM roles and policies (free) and the
+  # artifacts bucket, which holds a few small zips and plans. No usage file, so it is priced at rest.
+  - path: infra/bootstrap
+    name: bootstrap
+    terraform_vars:
+      github_repository: owner/weather-story-bot
+      state_bucket: example-terraform-state
