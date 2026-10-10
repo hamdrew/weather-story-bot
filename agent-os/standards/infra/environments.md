@@ -82,7 +82,7 @@ name = local.production ? "weather-story-bot" : "weather-story-bot-${var.environ
 - Each environment has its own Telegram bot, and its token lives in its own SSM parameter under
   that environment's name: `/weather-story-bot/telegram-token` in production,
   `/weather-story-bot-<env>/telegram-token` elsewhere. `var.telegram_token_param_name` is required
-  and validated to start with `/${local.name}/`. The prefixes differ in the first path segment,
+  and validated to equal `/${local.name}/telegram-token`, the one name the boundary allows. The prefixes differ in the first path segment,
   so no environment's parameter (or IAM grant) can land inside another's
 - A bot is never made an admin in another environment's channels, so a staging bug can't post
   to a public channel even with the wrong chat id
@@ -112,6 +112,13 @@ they can't disagree:
   made for one exact build. `deploy` rebuilds and refuses to apply when the zip's hash isn't the
   planned one. The zip is reproducible (`scripts/build_zip.py`), so an unchanged build plans as
   No changes
+- The Lambda's code comes from S3, never a local file in Terraform: `s3_key` is
+  `<env>/lambda/<base64url of the zip's hash, unpadded>.zip` (`local.lambda_s3_key`, also an output).
+  After the hash check, `deploy` reads the bucket and key from the saved plan and uploads with
+  `If-None-Match: *`. A 412 means those bytes are already there, since the key is the content
+- `artifacts_bucket` and `permissions_boundary_arn` are required variables (both created by
+  `infra/bootstrap`). The boundary is validated to be this environment's own, and both the Lambda
+  and Scheduler roles are created under it
 - `environment` is passed as `-var environment=$(ENV)`, never kept in a tfvars file, so it can't
   disagree with the backend
 - A data dir per environment, because `.terraform/` remembers the backend it was initialized

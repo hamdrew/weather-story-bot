@@ -98,6 +98,8 @@ make deploy ENV=production   # rebuilds, checks the zip, applies exactly that sa
 
 The zip is reproducible: `scripts/build_zip.py` sorts the entries and fixes their timestamps, modes and compression, so the same source and lockfile give the same bytes. `make build` prints the zip's base64 sha256 (also in `build/lambda.zip.sha256`), `make plan` passes it to Terraform as `lambda_zip_sha256`, and a build that changes nothing plans as **No changes**. `make deploy` rebuilds and refuses to apply if the new zip isn't the one the plan was made for. Run `make plan` again after any source change.
 
+The Lambda's code comes from S3, not from a file Terraform reads. After the hash check, `make deploy` uploads the zip to `s3://<artifacts bucket>/<env>/lambda/<hash>.zip` with `If-None-Match: *` (the bucket policy refuses a write without it, so an object is never replaced), then applies. The key is the zip's hash, so a 412 on upload just means those bytes are already there, and reverting a commit rebuilds the same bytes at the same key. Each environment's tfvars needs two values from the bootstrap stack, `artifacts_bucket` and `permissions_boundary_arn` (its `artifacts_bucket` and `boundary_arns` outputs; the `.example` files show the shape). Both Lambda roles are created under that environment's permissions boundary.
+
 `offices`, `alert_email` and `nws_user_agent` are `sensitive`, so a plan prints `(sensitive value)` for them. This repository is public, and its CI logs will be too.
 
 `ENV` (`production` or `staging`) is required and selects the backend config, var file, data dir and plan file together.

@@ -62,6 +62,8 @@ variables {
   nws_user_agent            = "weather-story-bot (test@example.com)"
   alert_email               = "test@example.com"
   lambda_zip_sha256         = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  artifacts_bucket          = "weather-story-bot-artifacts-123456789012"
+  permissions_boundary_arn  = "arn:aws:iam::123456789012:policy/weather-story-bot-boundary"
 }
 
 run "values_that_print_in_public_logs_are_sensitive" {
@@ -92,6 +94,7 @@ run "staging_accepts_its_own_token_parameter" {
 
   variables {
     environment               = "staging"
+    permissions_boundary_arn  = "arn:aws:iam::123456789012:policy/weather-story-bot-staging-boundary"
     telegram_token_param_name = "/weather-story-bot-staging/telegram-token"
   }
 }
@@ -111,6 +114,7 @@ run "staging_refuses_productions_token_parameter" {
 
   variables {
     environment               = "staging"
+    permissions_boundary_arn  = "arn:aws:iam::123456789012:policy/weather-story-bot-staging-boundary"
     telegram_token_param_name = "/weather-story-bot/telegram-token"
   }
 
@@ -132,7 +136,18 @@ run "staging_refuses_the_slashless_token_parameter" {
 
   variables {
     environment               = "staging"
+    permissions_boundary_arn  = "arn:aws:iam::123456789012:policy/weather-story-bot-staging-boundary"
     telegram_token_param_name = "weather-story-bot-staging/telegram-token"
+  }
+
+  expect_failures = [var.telegram_token_param_name]
+}
+
+run "a_token_parameter_other_than_telegram_token_is_refused" {
+  command = plan
+
+  variables {
+    telegram_token_param_name = "/weather-story-bot/token-v2"
   }
 
   expect_failures = [var.telegram_token_param_name]

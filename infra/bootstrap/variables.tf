@@ -14,7 +14,7 @@ variable "state_bucket" {
 }
 
 variable "region" {
-  description = "AWS region of the main stack's resources (and of this stack)."
+  description = "AWS region of the main stack's resources (and of this stack). The boundaries' ARNs use it, so it must equal the main stack's region."
   type        = string
   default     = "us-east-2"
 }

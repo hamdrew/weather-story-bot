@@ -11,6 +11,8 @@ projects:
     terraform_vars: &vars
       environment: production
       lambda_zip_sha256: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      artifacts_bucket: weather-story-bot-artifacts-123456789012
+      permissions_boundary_arn: arn:aws:iam::123456789012:policy/weather-story-bot-boundary
       telegram_token_param_name: /weather-story-bot/telegram-token
       offices: '{"MKX": {"chat_id": "-100", "name": "Milwaukee/Sullivan"}}'
       nws_user_agent: weather-story-bot (cost estimate)
@@ -33,6 +35,7 @@ projects:
       <<: *vars
       environment: staging
       telegram_token_param_name: /weather-story-bot-staging/telegram-token
+      permissions_boundary_arn: arn:aws:iam::123456789012:policy/weather-story-bot-staging-boundary
   # The bootstrap stack (infra/bootstrap): the OIDC provider, IAM roles and policies (free) and the
   # artifacts bucket, which holds a few small zips and plans. No usage file, so it is priced at rest.
   - path: infra/bootstrap

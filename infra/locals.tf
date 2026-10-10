@@ -12,6 +12,11 @@ locals {
     # case-sensitively, so it's always the lowercase var.environment, never a display name.
     Environment = var.environment
   }
+
+  # Where make deploy uploads the zip and Lambda reads it: <env>/lambda/<sha256>.zip, so an apply
+  # role writes only its own prefix and a key never holds two different zips. The hash is base64url
+  # without padding, since "/" would nest the key and "+" and "=" are awkward in URLs and logs.
+  lambda_s3_key = "${var.environment}/lambda/${replace(replace(trimsuffix(var.lambda_zip_sha256, "="), "+", "-"), "/", "_")}.zip"
 }
 
 data "aws_caller_identity" "current" {}

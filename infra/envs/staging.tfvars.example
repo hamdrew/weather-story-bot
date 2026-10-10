@@ -14,3 +14,8 @@ alert_email = "you@example.com"
 
 # The staging bot's token, a SecureString created by hand in SSM; must be under /weather-story-bot-staging/.
 telegram_token_param_name = "/weather-story-bot-staging/telegram-token"
+
+# From the bootstrap stack (infra/bootstrap): `terraform output` there prints both. The boundary
+# must be this environment's own, policy/weather-story-bot-staging-boundary.
+artifacts_bucket         = "weather-story-bot-artifacts-123456789012"
+permissions_boundary_arn = "arn:aws:iam::123456789012:policy/weather-story-bot-staging-boundary"

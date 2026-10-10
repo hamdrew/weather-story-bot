@@ -11,7 +11,7 @@ variable "environment" {
 }
 
 variable "region" {
-  description = "AWS region for all resources."
+  description = "AWS region for all resources. Must match the bootstrap stack's region: the permissions boundary's ARNs are built from that one, so a different region here puts the workload outside its boundary at runtime."
   type        = string
   default     = "us-east-2"
 }
@@ -37,10 +37,12 @@ variable "telegram_token_param_name" {
 
   # Each environment has its own bot, and its parameter lives under that environment's name. The
   # prefixes can't overlap (/weather-story-bot/ vs /weather-story-bot-staging/), so no
-  # environment's role can be granted another's token.
+  # environment's role can be granted another's token. The name is exact because the bootstrap
+  # stack's boundary allows only /<name>/telegram-token, so any other name would plan and apply
+  # but fail with AccessDenied at runtime.
   validation {
-    condition     = startswith(var.telegram_token_param_name, "/${local.name}/")
-    error_message = "telegram_token_param_name must be under this environment's own prefix, /${local.name}/."
+    condition     = var.telegram_token_param_name == "/${local.name}/telegram-token"
+    error_message = "telegram_token_param_name must be exactly /${local.name}/telegram-token, the one parameter this environment's permissions boundary allows."
   }
 }
 
@@ -99,17 +101,35 @@ variable "lambda_max_concurrency" {
   }
 }
 
-variable "lambda_zip_path" {
-  description = "Path to the deployment package built by `make build`."
+# Outside things (infra/environments): both are created by infra/bootstrap, which the pipeline can't
+# change, so they are inputs here. Its outputs of the same names print the values.
+variable "artifacts_bucket" {
+  description = "Bucket holding the Lambda zips (<environment>/lambda/<hash>.zip), created by infra/bootstrap."
   type        = string
-  default     = "../build/lambda.zip"
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.artifacts_bucket))
+    error_message = "artifacts_bucket must be an S3 bucket name."
+  }
+}
+
+variable "permissions_boundary_arn" {
+  description = "This environment's permissions boundary for the Lambda and Scheduler roles, created by infra/bootstrap."
+  type        = string
+
+  # Each environment has its own boundary, so a role can't be created under another's. The apply
+  # role's iam:PermissionsBoundary condition enforces the same thing.
+  validation {
+    condition     = endswith(var.permissions_boundary_arn, "policy/${local.name}-boundary")
+    error_message = "permissions_boundary_arn must be this environment's boundary, policy/${local.name}-boundary."
+  }
 }
 
 # Passed by `make plan` from the zip it just built (build/lambda.zip.sha256), never set in a tfvars
 # file. Terraform takes it as a plain input instead of hashing the file itself, so a plan is
 # made for one exact build, and `make deploy` refuses to apply it if the rebuilt zip differs.
 variable "lambda_zip_sha256" {
-  description = "Base64 sha256 of the zip at lambda_zip_path, as printed by scripts/build_zip.py."
+  description = "Base64 sha256 of the zip make build produces, as printed by scripts/build_zip.py."
   type        = string
 
   validation {

@@ -87,18 +87,34 @@ plan: check-env build
 	$(TF) plan -var-file=envs/$(ENV).tfvars -var lambda_zip_sha256=$$(cat $(ZIP_SHA)) \
 		-var environment=$(ENV) -out=$(PLAN_FILE)
 
+# The AWS CLI, as the identity Terraform applies with: the weather-deploy profile on a laptop, and
+# the environment's role credentials in Actions (which set GITHUB_ACTIONS).
+AWS := aws$(if $(GITHUB_ACTIONS),, --profile weather-deploy)
+
 # deploy rebuilds and refuses to apply if the new zip isn't the one the plan was made for (source
 # changed since the plan), so the plan and the code can't disagree. It also runs init, so a fresh
-# machine can apply a plan it only downloaded.
+# machine can apply a plan it only downloaded. The zip is then uploaded to the key the plan holds
+# (Lambda reads its code from S3, and the bucket and key come from the plan so they are derived
+# once, in Terraform). If-None-Match makes the write refuse to replace an object, which the bucket
+# policy requires: the key is the zip's hash, so a 412 means these exact bytes are already there.
+# bash for pipefail.
+deploy: SHELL := bash
 deploy: check-env check-plan build
 	$(TF) init -input=false -backend-config=envs/$(ENV).backend.hcl
-	@planned=$$($(TF) show -json $(PLAN_FILE) | uv run --no-project python -c \
-		'import json, sys; print(json.load(sys.stdin)["variables"]["lambda_zip_sha256"]["value"])') \
-		|| exit 1; \
+	@set -o pipefail; plan=$$($(TF) show -json $(PLAN_FILE)) || exit 1; \
+	field() { printf '%s' "$$plan" | uv run --no-project python -c "import json, sys; d = json.load(sys.stdin); print($$1)"; }; \
+	planned=$$(field 'd["variables"]["lambda_zip_sha256"]["value"]') || exit 1; \
 	built=$$(cat $(ZIP_SHA)); \
 	[ "$$planned" = "$$built" ] || { \
 		echo "The zip just built ($$built) is not the one planned ($$planned). Run make plan ENV=$(ENV) again." >&2; \
-		exit 1; }
+		exit 1; }; \
+	bucket=$$(field 'd["variables"]["artifacts_bucket"]["value"]') || exit 1; \
+	key=$$(field 'd["planned_values"]["outputs"]["lambda_s3_key"]["value"]') || exit 1; \
+	region=$$(field 'd["variables"]["region"]["value"]') || exit 1; \
+	err=$$($(AWS) s3api put-object --region "$$region" --bucket "$$bucket" --key "$$key" --body $(ZIP) \
+		--if-none-match '*' --output text --query ETag 2>&1 >/dev/null) \
+		|| { case "$$err" in *PreconditionFailed*) echo "s3://$$bucket/$$key is already there (same bytes)";; \
+			*) echo "$$err" >&2; exit 1;; esac; }
 	$(TF) apply $(PLAN_FILE)
 	rm infra/$(PLAN_FILE)
 

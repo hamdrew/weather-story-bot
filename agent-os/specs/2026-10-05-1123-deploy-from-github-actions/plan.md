@@ -259,7 +259,7 @@ so it doesn't prove the services honor the tag conditions: that stays with Gate 
 ### Gate 3: staging, then production, from the laptop
 
 **Pass:** each plan shows the Lambda moving to S3 code and two in-place role updates (the
-boundary), nothing else. On staging, `make start ENV=staging` runs complete without
+boundary) and the new `lambda_s3_key` output, nothing else. On staging, `make start ENV=staging` runs complete without
 `AccessDenied` (a post, if MKX has a story, proves `PutObject` under the boundary), then
 `make pause`. Production: `Run complete` on the next run, and the `errors` alarm quiet through the
 next cold start (role credentials refresh then).
