@@ -245,6 +245,24 @@ run "the_undo_windows_cannot_be_turned_off" {
   }
 }
 
+run "no_iam_pattern_reaches_a_ci_role" {
+  # IAM's * also matches /, so a role pattern is read as a prefix. Neither environment's apply role
+  # may be able to edit, pass or retag a CI role (including its own), or it could rewrite its own trust.
+  assert {
+    condition = alltrue(flatten([
+      for k, doc in data.aws_iam_policy_document.apply : [
+        for s in doc.statement : [
+          for r in s.resources : [
+            for name in ["weather-story-bot-ci-pr-plan", "weather-story-bot-ci-plan", "weather-story-bot-ci-apply-staging", "weather-story-bot-ci-apply-production"] :
+            !(endswith(r, "*") ? startswith("arn:aws:iam::123456789012:role/${name}", trimsuffix(r, "*")) : r == "arn:aws:iam::123456789012:role/${name}")
+          ] if strcontains(r, ":role/")
+        ] if s.effect == "Allow"
+      ]
+    ]))
+    error_message = "An apply role's IAM role pattern matches a CI role."
+  }
+}
+
 run "no_bucket_pattern_can_reach_an_object" {
   assert {
     condition = alltrue(flatten([

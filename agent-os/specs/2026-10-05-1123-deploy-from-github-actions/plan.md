@@ -214,6 +214,9 @@ are denied `DeleteTable`, `UpdateContinuousBackups` and the archive's `PutLifecy
 `ci-apply-staging` is allowed `iam:TagRole` on a staging role with only `aws:RequestTag` context
 (a create, no `aws:ResourceTag`); `ci-apply-production` is allowed `cloudwatch:PutMetricAlarm` on
 its errors alarm with only `aws:ResourceTag` context (an update).
+Neither apply role can touch a CI role: `iam:PutRolePolicy`, `iam:UpdateAssumeRolePolicy` and
+`iam:PassRole` on `role/weather-story-bot-ci-apply-staging` and `-production` are `implicitDeny` for
+both, as is `iam:DeleteRolePermissionsBoundary` on a staging role.
 **Rollback:** `terraform destroy` the bootstrap. Nothing depends on it.
 
 **As built (Stage 2, 2026-10-09):** the roles are named `weather-story-bot-ci-<pr-plan|plan|apply-staging|apply-production>`
@@ -225,6 +228,15 @@ policy. Per-service statements are merged into one statement per kind of access,
 same access because an action only matches its own service's ARNs. The tag conditions on log
 groups, SNS, CloudWatch alarms and S3 bucket actions, and the action name `s3:PutBucketABAC`, can't
 be verified offline: Gate 4a (the first plan and apply under these roles) is where they are proven.
+
+**Gate 2 passed (applied 2026-10-09 23:42 CDT):** no GitHub OIDC provider existed, so none was imported. The `staging` and
+`production` environments (main only; production with you as reviewer, self-review allowed), the
+two variables and the two `*_TFVARS` secrets existed before the apply. `bootstrap-deploy` added 29
+resources, changed and destroyed none, and the production and staging plans both show No changes.
+Every `simulate-principal-policy` spot check above came out as written: the CI roles and the
+boundaries are `implicitDeny` for both apply roles, the retention Denies are `explicitDeny`, the
+own-environment table and both tag-condition cases are `allowed`. The simulator reads the policies,
+so it doesn't prove the services honor the tag conditions: that stays with Gate 4a.
 
 ---
 

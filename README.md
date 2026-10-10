@@ -168,6 +168,34 @@ gh secret set STAGING_TFVARS --repo $REPO < infra/envs/staging.tfvars
 gh secret set PRODUCTION_TFVARS --repo $REPO < infra/envs/production.tfvars
 ```
 
+### Spot checks
+
+After `bootstrap-deploy`, ask IAM what each CI role may do, with the readonly profile (`ACCT` is your account id). Expect `implicitDeny` or `allowed` as noted:
+
+```sh
+sim() { aws iam simulate-principal-policy --profile readonly \
+  --policy-source-arn "arn:aws:iam::$ACCT:role/weather-story-bot-ci-$1" \
+  --action-names "$2" --resource-arns "$3" "${@:4}" \
+  --query 'EvaluationResults[0].EvalDecision' --output text; }
+
+# Neither apply role may edit, pass or retag a CI role: implicitDeny, for staging and production.
+for r in apply-staging apply-production; do
+  for a in iam:PutRolePolicy iam:UpdateAssumeRolePolicy iam:PassRole; do
+    sim $r $a "arn:aws:iam::$ACCT:role/weather-story-bot-ci-apply-staging"
+    sim $r $a "arn:aws:iam::$ACCT:role/weather-story-bot-ci-apply-production"
+  done
+done
+
+# No pipeline role can remove a boundary: implicitDeny.
+sim apply-staging iam:DeleteRolePermissionsBoundary "arn:aws:iam::$ACCT:role/weather-story-bot-staging-lambda"
+
+# The plan role reads configuration, never objects: implicitDeny on both environments' archives.
+sim pr-plan s3:GetObject "arn:aws:s3:::weather-story-bot-staging-archive-$ACCT/stories/x"
+sim pr-plan s3:GetObject "arn:aws:s3:::weather-story-bot-archive-$ACCT/stories/x"
+```
+
+The rest of the checks (`DeleteTable`, `UpdateContinuousBackups`, tagging at create time, `PutMetricAlarm` on an update) are in the spec's Gate 2.
+
 ## Staging
 
 Staging is where real posts get watched: its own bot, a private channel, its own state and archive, and a schedule that starts off. Create it once:
