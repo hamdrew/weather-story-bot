@@ -63,6 +63,8 @@ variables {
   nws_user_agent            = "weather-story-bot (test@example.com)"
   alert_email               = "test@example.com"
   lambda_zip_sha256         = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  artifacts_bucket          = "weather-story-bot-artifacts-123456789012"
+  permissions_boundary_arn  = "arn:aws:iam::123456789012:policy/weather-story-bot-boundary"
 }
 
 run "production_keeps_the_unsuffixed_names" {
@@ -100,6 +102,7 @@ run "production_keeps_the_unsuffixed_names" {
 run "staging_is_suffixed_everywhere" {
   variables {
     environment               = "staging"
+    permissions_boundary_arn  = "arn:aws:iam::123456789012:policy/weather-story-bot-staging-boundary"
     telegram_token_param_name = "/weather-story-bot-staging/telegram-token"
   }
 
@@ -154,6 +157,7 @@ run "production_keeps_the_original_metric_namespace" {
 run "staging_has_its_own_metric_namespace" {
   variables {
     environment               = "staging"
+    permissions_boundary_arn  = "arn:aws:iam::123456789012:policy/weather-story-bot-staging-boundary"
     telegram_token_param_name = "/weather-story-bot-staging/telegram-token"
   }
 
@@ -188,6 +192,7 @@ run "production_has_the_budget_and_the_mvp_table" {
 run "staging_has_neither_the_budget_nor_the_mvp_table" {
   variables {
     environment               = "staging"
+    permissions_boundary_arn  = "arn:aws:iam::123456789012:policy/weather-story-bot-staging-boundary"
     telegram_token_param_name = "/weather-story-bot-staging/telegram-token"
   }
 
@@ -217,6 +222,7 @@ run "production_tags_everything_with_the_lowercase_environment" {
 run "staging_tags_everything_with_the_lowercase_environment" {
   variables {
     environment               = "staging"
+    permissions_boundary_arn  = "arn:aws:iam::123456789012:policy/weather-story-bot-staging-boundary"
     telegram_token_param_name = "/weather-story-bot-staging/telegram-token"
   }
 

@@ -40,11 +40,11 @@ infra:
   budget:
     description: Fixed monthly cost O(1) in offices; per-office visibility from queries, not metrics; pay-per-use with no idle cost; every spec has a cost.md from make cost; retention is a cost decision; the budget rises deliberately
   data-retention:
-    description: Archive and state table kept forever (no TTL) with matched 35-day undo windows; stop and ask before replacing a table or bucket
+    description: Archive and state table kept forever (no TTL) with matched 35-day undo windows; only the artifacts bucket (derived zips and plans) may expire; stop and ask before replacing a table or bucket
   environments:
     description: Production unsuffixed, others weather-story-bot-<env>; differences via variables or local.production, never forked files; created things derived from environment, outside things are required variables; production-only budget and posted table; one Makefile ENV selects backend, var file, data dir and plan; lowercase Environment tag on everything via default_tags, bucket ABAC on; values that print in public logs are sensitive; plan builds first and passes the zip hash, deploy refuses a different zip; staging is where real posts get watched; schedule created DISABLED and alarms created on, toggled by make start/pause; a bot and token parameter per environment; per-environment metric namespaces
   iam:
-    description: Exact actions on narrowest ARNs via policy documents; the only delete is item-level DeleteItem for the lease; Environment tag conditions (Allow + StringEquals, on exact ARNs, no tag-write actions, live a deploy before the condition; Logs has none); SourceAccount guard on service trust policies
+    description: Exact actions on narrowest ARNs via policy documents; the only delete is item-level DeleteItem for the lease; Environment tag conditions (Allow + StringEquals, on exact ARNs, no tag-write actions, live a deploy before the condition; Logs has none); SourceAccount guard on service trust policies; CI roles in infra/bootstrap (exact OIDC sub, plan roles read configuration never data, apply roles by name + tag + per-environment boundary, Deny on deletes)
 
 testing:
   handler-tests:

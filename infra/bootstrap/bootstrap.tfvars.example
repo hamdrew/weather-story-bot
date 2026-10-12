@@ -1,0 +1,7 @@
+# The GitHub repository whose workflows may assume the CI roles, as owner/name.
+github_repository = "OWNER/weather-story-bot"
+
+# The bucket that holds every stack's Terraform state (the same one as envs/*.backend.hcl).
+state_bucket = "REPLACE-ME-terraform-state"
+
+# region = "us-east-2"

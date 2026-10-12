@@ -9,6 +9,8 @@ checks by hand in Phase 2.0. Now a pull request and a laptop run them the same w
   so it never touches an environment's state or its `.terraform-<env>/` dir
 - Tests live in `infra/tests/*.tftest.hcl`: `environments` (names, namespaces, production-only
   `count`s, tags), `variables` (sensitivity and validations) and `iam` (policy conditions)
+- The bootstrap stack has its own tests in `infra/bootstrap/tests/` (`trust`, `plan_roles`,
+  `apply_roles`, `artifacts`), run by the same `make tftest` after the main stack's
 - They need no AWS credentials. `mock_provider "aws"` replaces the provider, so the laptop's
   gitignored `override.tf` (`profile = "weather-deploy"`) is never configured
 
@@ -28,6 +30,13 @@ checks by hand in Phase 2.0. Now a pull request and a laptop run them the same w
   fails the run, so put one bad value in each
 - Anything a test needs to read, such as the provider's `default_tags`, is a local
   (`local.default_tags`) that the production code uses too. Never add a local only for a test
+- **Compare collections with `jsonencode(a) == jsonencode(b)`** (or `toset(a) == toset(b)` for
+  unordered lists). Terraform's `==` is false for a list against a tuple or a map against an
+  object, and a failed comparison of mocked values can crash the test runner while it prints the
+  diff ("value has marks"). A crash like that means an assertion is false, not a Terraform bug:
+  bisect it one assert at a time
+- Build an ARN a test reads from names (`"arn:aws:s3:::${local.bucket}"`), not from a mocked
+  resource's `.arn`, which is a random string
 - A new test must be seen to fail: break the rule it guards (a capitalised tag, a wildcard ARN, a
   removed `sensitive`), run `make tftest`, and put it back
 
@@ -39,12 +48,17 @@ checks by hand in Phase 2.0. Now a pull request and a laptop run them the same w
 - Every `sensitive` variable (`issensitive`)
 - Every IAM statement's exact ARN and its `Environment` tag condition. `Logs` has none, and
   that is asserted too
-- Every trust policy, boundary and tag condition added later (Phase 2.1's bootstrap stack) gets
-  a test in the task that adds it
+- Every trust policy, boundary and tag condition gets a test in the task that adds it. The
+  bootstrap stack's: each role's `aud` and exact `sub`, the plan roles reading no object, item or
+  parameter, each apply role naming only its own environment's ARNs and state key, the Deny, the
+  boundary conditions, tag writes pinning the request tag but never the resource tag, the
+  retention Deny, and no allowed bucket ARN with a wildcard
+- Policy documents built from a `for_each` or a `dynamic` block are asserted per environment the
+  same way: collect an environment's statements across its documents, then filter by `sid`
 
 ## Security scan (Checkov)
 
-`make scan` runs Checkov on `infra/` (which will include `infra/bootstrap/`) from its own uv project,
+`make scan` runs Checkov on `infra/` (which includes `infra/bootstrap/`) from its own uv project,
 `tools/checkov/`, the same on a laptop and in CI, so no third-party GitHub Action ever runs beside CI credentials.
 It is blocking: any failed check exits non-zero.
 

@@ -10,8 +10,9 @@ data "aws_iam_policy_document" "lambda_assume" {
 }
 
 resource "aws_iam_role" "lambda" {
-  name               = "${local.name}-lambda"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
+  name                 = "${local.name}-lambda"
+  assume_role_policy   = data.aws_iam_policy_document.lambda_assume.json
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 data "aws_iam_policy_document" "lambda" {
@@ -97,8 +98,9 @@ data "aws_iam_policy_document" "scheduler_assume" {
 }
 
 resource "aws_iam_role" "scheduler" {
-  name               = "${local.name}-scheduler"
-  assume_role_policy = data.aws_iam_policy_document.scheduler_assume.json
+  name                 = "${local.name}-scheduler"
+  assume_role_policy   = data.aws_iam_policy_document.scheduler_assume.json
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 # Built from local.name rather than aws_lambda_function.bot.arn: a reference to the function

@@ -181,6 +181,9 @@ terraform.rc
 infra/envs/*.backend.hcl
 # Per-environment Terraform data dirs (TF_DATA_DIR=.terraform-<env>)
 infra/.terraform-*/
+infra/bootstrap/.terraform-*/
+# The bootstrap stack's backend config (bucket name); bootstrap.tfvars is covered by *.tfvars
+infra/bootstrap/backend.hcl
 # Saved Terraform plans (contain real config values)
 *.tfplan
 # Local Lambda invoke output

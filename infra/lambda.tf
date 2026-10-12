@@ -17,7 +17,8 @@ resource "aws_lambda_function" "bot" {
   runtime          = "python3.13"
   architectures    = ["arm64"]
   handler          = "weather_story_bot.handler.lambda_handler"
-  filename         = var.lambda_zip_path
+  s3_bucket        = var.artifacts_bucket
+  s3_key           = local.lambda_s3_key
   source_code_hash = var.lambda_zip_sha256
   memory_size      = 256
   # A ceiling for runaway spend, well above what runs overlap (staggered schedules, a handful of

@@ -29,3 +29,8 @@ output "bucket_name" {
 output "alert_topic_arn" {
   value = aws_sns_topic.alerts.arn
 }
+
+# What make deploy uploads the zip to, read back from the saved plan so the key is derived once.
+output "lambda_s3_key" {
+  value = local.lambda_s3_key
+}

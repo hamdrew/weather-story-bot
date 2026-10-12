@@ -14,6 +14,11 @@ alert_email = "you@example.com"
 # SecureString created by hand in SSM; must be under /<environment name>/.
 telegram_token_param_name = "/weather-story-bot/telegram-token"
 
+# From the bootstrap stack (infra/bootstrap): `terraform output` there prints both. The boundary
+# must be this environment's own, policy/weather-story-bot-boundary.
+artifacts_bucket         = "weather-story-bot-artifacts-123456789012"
+permissions_boundary_arn = "arn:aws:iam::123456789012:policy/weather-story-bot-boundary"
+
 # Optional overrides:
 # schedule_expression       = "rate(15 minutes)"
 # monthly_budget_usd        = 5

@@ -1,4 +1,4 @@
-.PHONY: test tftest scan coverage lint format build check-env check-plan plan deploy cost start pause clean
+.PHONY: test tftest scan coverage lint format build check-env check-plan plan deploy bootstrap-plan bootstrap-deploy cost start pause clean
 
 BUILD_DIR := build
 PACKAGE_DIR := $(BUILD_DIR)/package
@@ -10,14 +10,16 @@ ZIP_SHA := $(BUILD_DIR)/lambda.zip.sha256
 test:
 	uv run pytest
 
-# Terraform's own tests (infra/tests/): offline, against a mock AWS provider, so they need no
-# credentials. -backend=false and a data dir of their own keep them away from every environment's
-# state and from the .terraform-<env> dirs.
+# Terraform's own tests (infra/tests/ and infra/bootstrap/tests/): offline, against a mock AWS
+# provider, so they need no credentials. -backend=false and a data dir of their own keep them away
+# from every environment's state and from the .terraform-<env> dirs.
 tftest:
 	TF_DATA_DIR=.terraform-test terraform -chdir=infra init -backend=false -input=false
 	TF_DATA_DIR=.terraform-test terraform -chdir=infra test
+	TF_DATA_DIR=.terraform-test terraform -chdir=infra/bootstrap init -backend=false -input=false
+	TF_DATA_DIR=.terraform-test terraform -chdir=infra/bootstrap test
 
-# Security scan of infra/ (and infra/bootstrap once it exists), blocking: any failed check exits
+# Security scan of infra/ (which includes infra/bootstrap/), blocking: any failed check exits
 # non-zero. A finding is fixed or suppressed inline with a reason, #checkov:skip=<ID>:<reason>, and
 # the first step fails any skip that has no reason.
 # Checkov is its own uv project (tools/checkov/) because it pins boto3 exactly, which the main
@@ -85,20 +87,55 @@ plan: check-env build
 	$(TF) plan -var-file=envs/$(ENV).tfvars -var lambda_zip_sha256=$$(cat $(ZIP_SHA)) \
 		-var environment=$(ENV) -out=$(PLAN_FILE)
 
+# The AWS CLI, as the identity Terraform applies with: the weather-deploy profile on a laptop, and
+# the environment's role credentials in Actions (which set GITHUB_ACTIONS).
+AWS := aws$(if $(GITHUB_ACTIONS),, --profile weather-deploy)
+
 # deploy rebuilds and refuses to apply if the new zip isn't the one the plan was made for (source
 # changed since the plan), so the plan and the code can't disagree. It also runs init, so a fresh
-# machine can apply a plan it only downloaded.
+# machine can apply a plan it only downloaded. The zip is then uploaded to the key the plan holds
+# (Lambda reads its code from S3, and the bucket and key come from the plan so they are derived
+# once, in Terraform). If-None-Match makes the write refuse to replace an object, which the bucket
+# policy requires: the key is the zip's hash, so a 412 means these exact bytes are already there.
+# bash for pipefail.
+deploy: SHELL := bash
 deploy: check-env check-plan build
 	$(TF) init -input=false -backend-config=envs/$(ENV).backend.hcl
-	@planned=$$($(TF) show -json $(PLAN_FILE) | uv run --no-project python -c \
-		'import json, sys; print(json.load(sys.stdin)["variables"]["lambda_zip_sha256"]["value"])') \
-		|| exit 1; \
+	@set -o pipefail; plan=$$($(TF) show -json $(PLAN_FILE)) || exit 1; \
+	field() { printf '%s' "$$plan" | uv run --no-project python -c "import json, sys; d = json.load(sys.stdin); print($$1)"; }; \
+	planned=$$(field 'd["variables"]["lambda_zip_sha256"]["value"]') || exit 1; \
 	built=$$(cat $(ZIP_SHA)); \
 	[ "$$planned" = "$$built" ] || { \
 		echo "The zip just built ($$built) is not the one planned ($$planned). Run make plan ENV=$(ENV) again." >&2; \
-		exit 1; }
+		exit 1; }; \
+	bucket=$$(field 'd["variables"]["artifacts_bucket"]["value"]') || exit 1; \
+	key=$$(field 'd["planned_values"]["outputs"]["lambda_s3_key"]["value"]') || exit 1; \
+	region=$$(field 'd["variables"]["region"]["value"]') || exit 1; \
+	err=$$($(AWS) s3api put-object --region "$$region" --bucket "$$bucket" --key "$$key" --body $(ZIP) \
+		--if-none-match '*' --output text --query ETag 2>&1 >/dev/null) \
+		|| { case "$$err" in *PreconditionFailed*) echo "s3://$$bucket/$$key is already there (same bytes)";; \
+			*) echo "$$err" >&2; exit 1;; esac; }
 	$(TF) apply $(PLAN_FILE)
 	rm infra/$(PLAN_FILE)
+
+# The bootstrap stack (infra/bootstrap/): the GitHub OIDC provider, the CI roles, their permissions
+# boundaries and the artifacts bucket. It is applied by hand with the weather-deploy profile's MFA,
+# never by the pipeline, so the pipeline can't widen its own permissions. The same saved-plan
+# pattern as ENV, with one stack: backend.hcl and bootstrap.tfvars (copy the .example files)
+# and a data dir of its own, infra/bootstrap/.terraform-bootstrap/.
+BS := TF_DATA_DIR=.terraform-bootstrap terraform -chdir=infra/bootstrap
+BS_PLAN_FILE := deploy-bootstrap.tfplan
+
+bootstrap-plan:
+	@test -f infra/bootstrap/override.tf || { echo "No infra/bootstrap/override.tf: without it the plan would use whatever credentials are ambient. cp infra/override.tf infra/bootstrap/override.tf" >&2; exit 1; }
+	$(BS) init -input=false -backend-config=backend.hcl
+	$(BS) plan -input=false -var-file=bootstrap.tfvars -out=$(BS_PLAN_FILE)
+
+bootstrap-deploy:
+	@test -f infra/bootstrap/$(BS_PLAN_FILE) || { echo "No saved plan (infra/bootstrap/$(BS_PLAN_FILE)). Run make bootstrap-plan first." >&2; exit 1; }
+	$(BS) init -input=false -backend-config=backend.hcl
+	$(BS) apply $(BS_PLAN_FILE)
+	rm infra/bootstrap/$(BS_PLAN_FILE)
 
 # Estimated monthly cost of infra/ for 1 office, 6 offices and all 122 US offices (no AWS credentials).
 # scripts/infracost_usage.py writes one usage file per scenario, infracost.yml scans infra/ once per

@@ -86,6 +86,8 @@ variables {
   nws_user_agent            = "weather-story-bot (test@example.com)"
   alert_email               = "test@example.com"
   lambda_zip_sha256         = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  artifacts_bucket          = "weather-story-bot-artifacts-123456789012"
+  permissions_boundary_arn  = "arn:aws:iam::123456789012:policy/weather-story-bot-boundary"
 }
 
 run "production_lambda_policy_conditions_stay_on_exact_arns" {
@@ -152,6 +154,7 @@ run "staging_lambda_policy_conditions_stay_on_exact_arns" {
 
   variables {
     environment               = "staging"
+    permissions_boundary_arn  = "arn:aws:iam::123456789012:policy/weather-story-bot-staging-boundary"
     telegram_token_param_name = "/weather-story-bot-staging/telegram-token"
   }
 
