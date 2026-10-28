@@ -73,3 +73,8 @@ It is blocking: any failed check exits non-zero.
   can't share. Its version lives in `tools/checkov/uv.lock`, never in `mise.toml`, and Dependabot proposes
   bumps
 - A Checkov bump can add rules. Triage what the new rules find in the same PR that bumps it
+- **Checkov scans Terraform only; workflows are `mise run lint-actions`** (actionlint + zizmor).
+  Checkov's GitHub Actions framework silently drops any workflow its bundled schema rejects, and
+  reports `passed 0, failed 0, resource_count 0` with no error. It did that to `pipeline.yml` over
+  `cancel-in-progress: ${{ ... }}` (Checkov 3.3.29), so a clean Checkov result for a workflow means
+  nothing. Do not point `scan` at `.github`

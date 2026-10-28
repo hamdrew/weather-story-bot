@@ -344,8 +344,15 @@ proves the same tasks in CI.
 - **`mise.lock` (added the same day).** `mise lock --platform linux-x64,macos-arm64` recorded Terraform 1.16.6 and uv 0.13.4 with checksums for both platforms (Terraform's match HashiCorp's published `SHA256SUMS`; uv's carry a GitHub attestation verified at lock time), and `lockfile = true` keeps it current. mise-action adds `--locked` when the file exists. See `global/tooling`.
 - **`:::` runs the tasks in parallel** (mise's `jobs` defaults to 8; `make` ran them in order), on the laptop too. Two cold-start runs (no `.venv`, no `.terraform-test`) passed with no lock contention. If Gate 4a flakes, `--jobs 1` on the `checks` command is the first thing to try.
 - **No `mise trust` step:** the action exports `MISE_TRUSTED_CONFIG_PATHS` for the workspace.
-- **`:::` is a YAML trap.** An unquoted `run: mise run lint ::: test` is a parse error (a colon followed by a space starts a mapping), so the `checks` command is in a `run: |` block. Found by parsing the file; nothing in this repo lints workflows (no actionlint or zizmor in `mise.toml`), so the first real validation is Gate 4a.
+- **`:::` is a YAML trap.** An unquoted `run: mise run lint ::: test` is a parse error (a colon followed by a space starts a mapping), so the `checks` command is in a `run: |` block. Found by parsing the file; `mise run lint-actions` (below) now lints it.
 - **Terraform 1.17.0 becomes eligible at 2026-10-28 12:32 CDT** (released 2026-10-21) and the lock holds 1.16.6, so CI stays on 1.16.6 until someone upgrades the lock. That upgrade is its own deliberate change (`mise upgrade`, `mise lock --platform linux-x64,macos-arm64`, then the PR plans), not something Gate 4a absorbs by accident.
+- **Workflow linting (2026-10-27).** `actionlint`, `zizmor` and `shellcheck` are locked mise tools; `mise run lint-actions` runs actionlint and zizmor and `lint` includes it. First run: one real nit fixed in `pipeline.yml` (`tr a-z A-Z` became character classes, SC2018/SC2019), otherwise clean. Both tools were shown to bite on a deliberately bad workflow (zizmor: `dangerous-triggers`, `template-injection`, `unpinned-uses`, `artipacked`; actionlint: SC2086 and a mistyped `github.evnt`).
+  - **Checkov does not scan workflows, by decision.** It silently skips any workflow its bundled schema rejects (it reported 0 resources for `pipeline.yml` because of `cancel-in-progress: ${{ ... }}`), and zizmor covers its useful checks. `scan` stays Terraform-only (`testing/terraform-tests`).
+  - **actionlint is given `.github/workflows/*.yml`** rather than finding workflows itself: with no `.git` root it checks nothing and exits 0. Name workflows `.yml`.
+  - **CI.** `checks` has a separate step, `mise run lint-actions` with `GH_TOKEN: ${{ github.token }}`, which turns on zizmor's online audits (impostor commits, known-vulnerable actions); the `lint` step runs it again offline. `plan` installs only `terraform uv` (`install_args: --locked terraform uv`). Only Gate 4a shows these two working on a runner.
+  - **`mise run lint-actions-online`** is the laptop version: the same checks with zizmor's online audits, token read from `gh auth token` per run (tested: it fails loudly when `gh` fails or prints nothing). `CLAUDE.md` tells agents to prefer it over `lint-actions`.
+  - **zizmor's "(2 suppressed)" on `pipeline.yml`** is the two `secrets-outside-env` findings on the `TFVARS` line (`secrets.STAGING_TFVARS` and `secrets.PRODUCTION_TFVARS`). That audit belongs to the `auditor` persona, so the default `regular` persona hides them whatever the comment says, and `--no-ignores` changes nothing. Under `--persona=auditor` they surface: 2 medium findings, or "2 ignored" with the `# zizmor: ignore[secrets-outside-env]` comment on that line (the only ignore in the repo, no config file). They are not online-only: the auditor run was offline. The ignore is deliberate (secrets stay outside a GitHub environment because an environment would change the OIDC subject `ci-pr-plan` trusts), and it is inert until someone runs with the auditor persona.
+  - **Gate 4a pre-check:** `mise run lint` is green before the PR is opened.
 
 ### Gate 4a: the PR for Task 9 shows its own plans
 
@@ -372,6 +379,12 @@ difference means the lock misses a platform: record it and re-lock). An `AccessD
   lifecycle settings Terraform applies right after creating one, `infra/iam`). Amend
   `infra/environments` (pipeline-only is now enforced). README Deploy rewritten (pipeline,
   approval, rollback, break-glass). CLAUDE.md commands.
+- **One-off auditor review of the deploy workflow.** Once the deploy jobs are written, run
+  `zizmor --persona=auditor .github/workflows` by hand and read the findings. This is the first
+  workflow that holds apply credentials, so it is worth the stricter persona's false positives
+  once. It is a review, not a gate: the default `regular` persona stays in `lint-actions` (the
+  auditor persona only adds findings we accept, such as `secrets-outside-env` on the repo-level
+  tfvars secrets), and no `--persona` flag is added to the task.
 
 ### Gate 4b: the first pipeline deploy
 

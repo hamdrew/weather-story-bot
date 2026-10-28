@@ -66,9 +66,11 @@ Prerequisites: [mise](https://mise.jdx.dev/) and the AWS CLI with credentials fo
 ```sh
 mise run test       # unit tests (respx + moto; no network, no AWS)
 mise run tftest     # terraform test on infra/tests (offline, mock AWS provider, no credentials)
-mise run scan       # Checkov security scan of infra/ (blocking; Checkov lives in tools/checkov/)
+mise run scan       # Checkov security scan of infra/ (Terraform only; blocking; Checkov lives in tools/checkov/)
 mise run coverage   # tests with a coverage report (terminal + htmlcov/index.html)
-mise run lint       # ruff + ty + terraform fmt
+mise run lint       # ruff + ty + terraform fmt + lint-actions
+mise run lint-actions # actionlint + zizmor on .github/workflows (zizmor offline unless a token is set)
+mise run lint-actions-online # the same with zizmor's online audits, using your gh login (prefer this locally)
 mise run format     # apply ruff/terraform formatting
 
 # Print each live story's decision beside its caption (read-only: no AWS, no Telegram):

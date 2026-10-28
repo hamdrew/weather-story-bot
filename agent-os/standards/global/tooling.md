@@ -25,6 +25,12 @@ is a mise task. There is no `Makefile`, and no per-tool setup action in a workfl
   `"~> 1.11"` (1.11 or later, below 2.0) and `mise.toml` says `"1"`. Each carries a comment saying
   the two move together. `terraform init` refuses a version outside the range, so a mismatch fails
   loudly instead of drifting
+- **The workflow linters are mise tools** (`actionlint`, `zizmor`, `shellcheck`), run by
+  `mise run lint-actions` and locked like the rest, but never installed into a job that holds AWS
+  credentials (the `plan` job installs `terraform uv` only). actionlint's and zizmor's lock entries
+  carry GitHub attestations; shellcheck's checksum comes from `mise-versions` because upstream
+  publishes none, so that entry is the weaker one. shellcheck is there so actionlint checks `run:`
+  scripts the same on the laptop and the runners
 - **Python comes from uv** (`requires-python`) and Checkov from `tools/checkov/uv.lock`, so neither
   is in `mise.toml`
 - **`[settings] minimum_release_age = "7d"`.** A range resolves to whatever is newest, so a release
@@ -42,6 +48,11 @@ is a mise task. There is no `Makefile`, and no per-tool setup action in a workfl
 - An environment is a required positional argument with `choices "staging" "production"`
   (`mise run plan staging`), never an environment variable, so a stray export can't pick a target
 - Hidden helper tasks (`#MISE hide=true`) hold shared checks, like `check-plan`
+- **A task that needs a token reads it itself, per run.** `lint-actions-online` takes it from
+  `gh auth token` into a variable (so a failed `gh` stops the task instead of running with an empty
+  token), passes it to one command as `ZIZMOR_GITHUB_TOKEN`, and never prints it. Nothing is
+  exported in a shell profile or set in `mise.toml` `[env]`. Locally, use the `-online` task, not
+  the offline one
 - **Several tasks need `:::`**: `mise run lint ::: test`. Without it, mise passes the second name to
   the first task as an argument, and the second never runs
 - Flags go after the task name and belong to the task (`mise run plan staging --no-lock`). mise's

@@ -51,6 +51,14 @@ jobs:
           install_args: --locked
           cache_key: "mise-{{platform}}-p{{cache_period}}-${{ hashFiles('mise.toml', 'mise.lock') }}"
 
+      # zizmor's online audits (impostor commits, known-vulnerable actions) need a token. Only this
+      # step gets it: the job's read-only token, which never reaches the lint, test or scan code
+      # below. Those run lint-actions again without it, offline, as they do on a laptop.
+      - name: Lint workflows (zizmor online)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: mise run lint-actions
+
       - name: Lint, tests, Terraform tests, scan
         run: |
           mise run lint ::: test ::: tftest ::: scan
@@ -100,11 +108,12 @@ jobs:
 
       # No cache in a job that holds AWS credentials. --locked is explicit: the action adds it on
       # its own only when it detects the lock file, and otherwise installs from the ranges without
-      # saying so. Here a missing or incomplete mise.lock must fail the job.
+      # saying so. Here a missing or incomplete mise.lock must fail the job. Only the two tools the
+      # plan needs are installed: the workflow linters have no place in a credentialed job.
       - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
         with:
           minimum_release_age: 7d
-          install_args: --locked
+          install_args: --locked terraform uv
           cache: false
 
       # The same two local-only files a laptop has (infra/environments): one ENV selects them.
@@ -119,7 +128,7 @@ jobs:
           TFVARS: ${{ matrix.environment == 'staging' && secrets.STAGING_TFVARS || matrix.environment == 'production' && secrets.PRODUCTION_TFVARS || '' }} # zizmor: ignore[secrets-outside-env]
         run: |
           [ -n "$STATE_BUCKET" ] && [ -n "$REGION" ] || { echo "::error::Set the TF_STATE_BUCKET and AWS_REGION variables"; exit 1; }
-          [ -n "$TFVARS" ] || { echo "::error::Set the $(echo "$ENVIRONMENT" | tr a-z A-Z)_TFVARS secret"; exit 1; }
+          [ -n "$TFVARS" ] || { echo "::error::Set the $(echo "$ENVIRONMENT" | tr '[:lower:]' '[:upper:]')_TFVARS secret"; exit 1; }
           cat > "infra/envs/$ENVIRONMENT.backend.hcl" <<EOF
           bucket       = "$STATE_BUCKET"
           key          = "$STATE_KEY"
