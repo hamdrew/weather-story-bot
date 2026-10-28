@@ -1,0 +1,116 @@
+# The one source of tool versions for the laptop and every CI job, and of every task (agent-os
+# standard global/tooling). Ranges, not exact pins: Dependabot can't bump this file, so a pin would
+# only ever move by hand. `mise upgrade` moves the laptop within the ranges.
+min_version = { hard = "2026.10.0" }
+
+[settings]
+# A range installs whatever release is newest, in jobs that hold AWS credentials, so a release
+# must be a week old before it's picked up (mise's default is 24h).
+minimum_release_age = "7d"
+
+[tools]
+# The same range as `required_version` in infra/versions.tf and infra/bootstrap/versions.tf
+# ("~> 1.11"). Change them together.
+terraform = "1"
+# Pre-1.0, so the minor is the breaking boundary. Python comes from uv (requires-python) and
+# Checkov stays in tools/checkov/uv.lock.
+uv = "0.13"
+
+# The file tasks (plan, deploy, bootstrap-plan, bootstrap-deploy, start, pause) are in mise-tasks/.
+# Run several with `:::` between them: `mise run lint ::: test`. Without it, mise hands the second
+# name to the first task as an argument.
+
+[tasks.test]
+description = "pytest (offline: respx mocks HTTP, moto mocks AWS)"
+run = "uv run pytest"
+
+# Terraform's own tests (infra/tests/ and infra/bootstrap/tests/): offline, against a mock AWS
+# provider, so they need no credentials. -backend=false and a data dir of their own keep them away
+# from every environment's state and from the .terraform-<env> dirs.
+[tasks.tftest]
+description = "terraform test on infra/ and infra/bootstrap/"
+env = { TF_DATA_DIR = ".terraform-test" }
+run = [
+  "terraform -chdir=infra init -backend=false -input=false",
+  "terraform -chdir=infra test",
+  "terraform -chdir=infra/bootstrap init -backend=false -input=false",
+  "terraform -chdir=infra/bootstrap test",
+]
+
+# Security scan of infra/ (which includes infra/bootstrap/), blocking: any failed check exits
+# non-zero. A finding is fixed or suppressed inline with a reason, #checkov:skip=<ID>:<reason>, and
+# the first step fails any skip that has no reason.
+# Checkov is its own uv project (tools/checkov/) because it pins boto3 exactly, which the main
+# project's dev tools can't share. Its version is in tools/checkov/uv.lock and Dependabot bumps
+# it. --locked fails on a stale lock, and --project keeps the main .venv out of it.
+[tasks.scan]
+description = "Checkov on infra/, blocking"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+if grep -rnE --include='*.tf' --exclude-dir='.terraform*' 'checkov:skip=' infra \
+  | grep -vE 'checkov:skip=[A-Za-z0-9_]+:[[:space:]]*[^[:space:]]'; then
+  echo "Every checkov:skip needs a reason, as #checkov:skip=<ID>:<reason>" >&2
+  exit 1
+fi
+uv run --locked --project tools/checkov checkov -d infra --framework terraform --compact --quiet --skip-download
+'''
+
+[tasks.coverage]
+description = "pytest with a terminal report and an HTML report in htmlcov/"
+run = "uv run pytest --cov --cov-report=term-missing --cov-report=html"
+
+[tasks.lint]
+description = "ruff check, ruff format --check, ty check, terraform fmt -check"
+run = [
+  "uv run ruff check .",
+  "uv run ruff format --check .",
+  "uv run ty check",
+  "terraform -chdir=infra fmt -check -recursive",
+]
+
+[tasks.format]
+description = "ruff check --fix, ruff format, terraform fmt"
+run = [
+  "uv run ruff check --fix .",
+  "uv run ruff format .",
+  "terraform -chdir=infra fmt -recursive",
+]
+
+[tasks.clean]
+description = "Remove build/"
+run = "rm -rf build"
+
+# Vendor runtime dependencies for Lambda (python3.13, arm64) and zip them with the package.
+# scripts/build_zip.py makes the zip reproducible: the same source and lockfile give the same
+# bytes, so an unchanged build plans as "No changes". It writes the zip's base64 sha256 to
+# build/lambda.zip.sha256, which plan passes to Terraform and deploy checks the rebuilt zip against.
+[tasks.build]
+description = "Build build/lambda.zip reproducibly (arm64, py3.13)"
+depends = ["clean"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p build/package
+uv export --no-dev --no-emit-project --frozen -o build/requirements.txt
+uv pip install -r build/requirements.txt --target build/package \
+  --python-platform aarch64-manylinux2014 --python-version 3.13 --only-binary :all:
+cp -R src/weather_story_bot build/package/
+find build/package -name '__pycache__' -type d -prune -exec rm -rf {} +
+uv run --no-project python scripts/build_zip.py build/package build/lambda.zip > build/lambda.zip.sha256
+echo "Built build/lambda.zip ($(cat build/lambda.zip.sha256))"
+'''
+
+# Estimated monthly cost of infra/ for 1 office, 6 offices and all 122 US offices (no AWS credentials).
+# scripts/infracost_usage.py writes one usage file per scenario, infracost.yml scans infra/ once per
+# file, and the report prints full-precision costs side by side (Infracost's tables round to dollars).
+[tasks.cost]
+description = "Estimate monthly cost at 1, 6 and 122 offices (needs infracost)"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+command -v infracost >/dev/null || { echo "infracost not found; see 'Cost estimate' in README.md for setup" >&2; exit 1; }
+uv run python scripts/infracost_usage.py write build
+infracost scan --json > build/infracost.json
+uv run python scripts/infracost_usage.py report build/infracost.json
+'''

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#MISE description="Fail unless the environment has a saved plan"
+#MISE hide=true
+#USAGE arg "<environment>" help="The environment whose plan to look for" {
+#USAGE   choices "staging" "production"
+#USAGE }
+set -euo pipefail
+
+env=${usage_environment?}
+[[ -f infra/deploy-$env.tfplan ]] || {
+  echo "No saved plan (infra/deploy-$env.tfplan). Run mise run plan $env first." >&2
+  exit 1
+}

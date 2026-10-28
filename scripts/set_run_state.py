@@ -21,7 +21,7 @@ updated with its current definition, because `update-schedule` replaces the whol
     TF_DATA_DIR=.terraform-staging terraform -chdir=infra output -json | \\
         uv run python scripts/set_run_state.py start --apply -
 
-`make start ENV=<env>` and `make pause ENV=<env>` run exactly that. Credentials come from the
+`mise run start <env>` and `mise run pause <env>` run exactly that. Credentials come from the
 weather-deploy profile Terraform uses (MFA), which prompts for a code in a real terminal.
 """
 

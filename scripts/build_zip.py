@@ -1,6 +1,6 @@
 """Zip a directory into bytes that depend only on the files' names and contents.
 
-`make build` uses this so the same source and lockfile always give the same zip, and so the same
+`mise run build` uses this so the same source and lockfile always give the same zip, and so the same
 sha256. Terraform's `source_code_hash` and the artifacts bucket key (Phase 2.1) are that hash, so a
 rebuild that changes nothing plans as "No changes". Entries are sorted, carry no directory entries,
 and have a fixed timestamp and mode, so mtimes, the order the files were written in and their modes

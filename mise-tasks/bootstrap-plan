@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+#MISE description="Save a plan for the bootstrap stack (infra/bootstrap/)"
+set -euo pipefail
+
+# The bootstrap stack: the GitHub OIDC provider, the CI roles, their permissions boundaries and the
+# artifacts bucket. It is applied by hand with the weather-deploy profile's MFA, never by the
+# pipeline, so the pipeline can't widen its own permissions. The same saved-plan pattern as an
+# environment, with one stack: backend.hcl and bootstrap.tfvars (copy the .example files) and a
+# data dir of its own, infra/bootstrap/.terraform-bootstrap/.
+export TF_DATA_DIR=.terraform-bootstrap
+
+[[ -f infra/bootstrap/override.tf ]] || {
+  echo "No infra/bootstrap/override.tf: without it the plan would use whatever credentials are ambient. cp infra/override.tf infra/bootstrap/override.tf" >&2
+  exit 1
+}
+terraform -chdir=infra/bootstrap init -input=false -backend-config=backend.hcl
+terraform -chdir=infra/bootstrap plan -input=false -var-file=bootstrap.tfvars -out=deploy-bootstrap.tfplan

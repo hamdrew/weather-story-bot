@@ -1,5 +1,5 @@
-# Infracost project config for `make cost`. Read from the repo root by `infracost scan`.
-# Prices infra/ once per scenario in scripts/infracost_usage.py, which `make cost`
+# Infracost project config for `mise run cost`. Read from the repo root by `infracost scan`.
+# Prices infra/ once per scenario in scripts/infracost_usage.py, which `mise run cost`
 # runs first to write the usage files into build/.
 version: 0.1
 projects:
@@ -41,5 +41,5 @@ projects:
   - path: infra/bootstrap
     name: bootstrap
     terraform_vars:
-      github_repository: owner/weather-story-bot
+      github_subject_prefix: repo:owner@1/weather-story-bot@2
       state_bucket: example-terraform-state

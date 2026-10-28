@@ -55,6 +55,27 @@ the roadmap), separate AWS accounts, managing GitHub settings from Terraform.
 - **Gated in four stages,** like Phases 1.2 and 2.0: local fixes deployed from the laptop,
   bootstrap (additive), Lambda code from S3 plus the workload boundary (laptop), then the
   pipeline itself.
+- **mise instead of make** (added 2026-10-13, Task 8). `mise.toml` defines the tasks and the tool
+  versions, and every CI job installs its tools through `jdx/mise-action`, so the laptop and the
+  runners read one file. Versions are ranges, not exact pins: the major by default, and
+  Terraform's from the stacks' `required_version`.
+
+### Found while adding mise
+
+- **Dependabot has no mise ecosystem.** GitHub's supported-ecosystems list (checked 2026-10-13)
+  has `terraform`, `uv`, `github-actions` and others, but no `mise`, `asdf` or `.tool-versions`.
+  Renovate has a mise manager that reads `mise.toml` and updates `mise.lock`, but switching
+  update bots is out of scope. Ranges remain the choice: nothing in `mise.toml` needs bumping.
+- **mise has no `>=` ranges.** A version is exact, a prefix (`"1"` is the newest 1.x) or
+  `latest`. It doesn't read `required_version` from `.tf` files either (Terraform's idiomatic
+  file is `.terraform-version`). So the stacks' `">= 1.11"` becomes `"~> 1.11"`, whose major is
+  exactly `"1"`, and `terraform init` enforces the match.
+- **Major-only is no pin for a 0.x tool.** uv is 0.x, where a minor release can break things, so
+  it takes `"0.13"`.
+- **A range installs new releases into credentialed jobs unreviewed.** That is the cost of not
+  pinning. `minimum_release_age = "7d"` (mise's default is 24h) and the same setting on the
+  action's own mise version keep a brand-new release out until it has had a week in the wild.
+  An exact pin plus `mise.lock` would be stricter but is declined: nothing would bump it.
 
 ### Found while shaping
 
@@ -119,7 +140,10 @@ New with this spec:
 - `testing/terraform-tests` (Tasks 3 and 4) — offline `terraform test` with a mock provider,
   assertions on policy inputs, `expect_failures` for validations, every trust policy and boundary
   tested, and Checkov suppressions with reasons
-- `infra/pipeline` (Task 9) — the CI roles and their trusts, staging before production, saved
+- `global/tooling` (Task 8) — `mise.toml` is the one source of tool versions for the laptop and
+  CI, every task is a mise task, and versions are ranges (the major, the minor for 0.x,
+  Terraform's from `required_version`)
+- `infra/pipeline` (Task 10) — the CI roles and their trusts, staging before production, saved
   plans in S3, `id-token` only in jobs that run no project code, a bootstrap change before a new
   AWS service, rollback by revert, and break-glass used deliberately
 
@@ -127,8 +151,10 @@ Amended by this spec:
 
 - `infra/iam` (Tasks 5 and 6) — CI roles, the scoped read exception, the deploy-role tag-write
   rule, per-environment boundaries, and the list of actions without tag support
-- `infra/environments` (Tasks 2, 7 and 9) — sensitive tfvars, artifacts bucket and boundary as
-  required variables, production pipeline-only now enforced
+- `infra/environments` (Tasks 2, 7, 8 and 10) — sensitive tfvars, artifacts bucket and boundary as
+  required variables, `mise run <task> <env>` replaces `make ENV=`, production pipeline-only now
+  enforced
+- Every standard that names a `make` target (Task 8) — renamed to its mise task
 - `infra/data-retention` (Task 5) — the artifacts bucket is derived data, so its expiry is allowed
 
 Constraining but unchanged:

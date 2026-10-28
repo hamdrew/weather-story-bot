@@ -1,7 +1,7 @@
 [project]
 name = "checkov-scan"
 version = "0.0.0"
-description = "Checkov, for `make scan`. Its own project because it pins boto3 exactly, which the main project's dev tools can't share."
+description = "Checkov, for `mise run scan`. Its own project because it pins boto3 exactly, which the main project's dev tools can't share."
 requires-python = ">=3.13"
 dependencies = [
     "checkov>=3.3.19",

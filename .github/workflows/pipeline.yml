@@ -1,0 +1,146 @@
+# Checks every change, and plans both environments for pull requests (infra/pipeline).
+#
+# The repository is public, so every log here is world-readable. Tfvars come from secrets and the
+# values that would print are sensitive in Terraform (infra/environments). Saved plans hold them in
+# plain text, so a plan file never becomes a GitHub artifact.
+#
+# AWS access is GitHub OIDC into the roles infra/bootstrap creates, each assumable from one exact
+# subject. id-token: write is granted only to jobs that run no project tests, so third-party test
+# and lint code never shares a job with AWS credentials.
+#
+# Repository settings it needs (Settings > Secrets and variables > Actions):
+#   variables  AWS_ACCOUNT_ID, AWS_REGION, TF_STATE_BUCKET
+#   secrets    STAGING_TFVARS, PRODUCTION_TFVARS (each environment's whole .tfvars file)
+# Repository-level, not environment-level: a job that names a GitHub environment gets a different
+# OIDC subject, and the pull-request role trusts only <sub_claim_prefix>:pull_request.
+
+name: pipeline
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A newer push to a pull request replaces its running checks. Anything else gets a group of its
+# own, so nothing on main is ever cancelled or superseded.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  TERRAFORM_VERSION: "1.16.5"
+  UV_VERSION: "0.13.0"
+
+jobs:
+  checks:
+    name: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Lint, tests, Terraform tests, scan
+        run: make lint test tftest scan
+
+      # The zip is content-addressed (its sha256 is the S3 key), so an unchanged build must be
+      # byte-identical or every merge would upload and deploy new code.
+      - name: Build twice, compare
+        run: |
+          make build
+          cp build/lambda.zip.sha256 "$RUNNER_TEMP/first.sha256"
+          make build
+          echo "first:  $(cat "$RUNNER_TEMP/first.sha256")"
+          echo "second: $(cat build/lambda.zip.sha256)"
+          cmp "$RUNNER_TEMP/first.sha256" build/lambda.zip.sha256
+
+  # Pull requests from branches of this repository. Dependabot's can't get an OIDC token, and a
+  # fork's must never assume a role; both still get checks.
+  plan:
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.user.login != 'dependabot[bot]'
+    name: plan (${{ matrix.environment }})
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write # OIDC token for ci-pr-plan; this job runs no project tests
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - environment: staging
+            state_key: weather-story-bot/staging/terraform.tfstate
+          - environment: production
+            state_key: weather-story-bot/terraform.tfstate
+    env:
+      ENVIRONMENT: ${{ matrix.environment }}
+      # A variable missing from the tfvars secret fails instead of waiting for input.
+      TF_INPUT: "0"
+      TF_IN_AUTOMATION: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      # No cache in a job that holds AWS credentials.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      # The same two local-only files a laptop has (infra/environments): one ENV selects them.
+      - name: Write backend config and tfvars
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          STATE_KEY: ${{ matrix.state_key }}
+          REGION: ${{ vars.AWS_REGION }}
+          # Repository secrets: an environment would change the OIDC subject (see the top).
+          # Each leg names its own secret, so an empty one fails the check below instead of falling
+          # through to the other environment's file.
+          TFVARS: ${{ matrix.environment == 'staging' && secrets.STAGING_TFVARS || matrix.environment == 'production' && secrets.PRODUCTION_TFVARS || '' }} # zizmor: ignore[secrets-outside-env]
+        run: |
+          [ -n "$STATE_BUCKET" ] && [ -n "$REGION" ] || { echo "::error::Set the TF_STATE_BUCKET and AWS_REGION variables"; exit 1; }
+          [ -n "$TFVARS" ] || { echo "::error::Set the $(echo "$ENVIRONMENT" | tr a-z A-Z)_TFVARS secret"; exit 1; }
+          cat > "infra/envs/$ENVIRONMENT.backend.hcl" <<EOF
+          bucket       = "$STATE_BUCKET"
+          key          = "$STATE_KEY"
+          region       = "$REGION"
+          encrypt      = true
+          use_lockfile = true
+          EOF
+          printf '%s\n' "$TFVARS" > "infra/envs/$ENVIRONMENT.tfvars"
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/weather-story-bot-ci-pr-plan
+          role-session-name: pr-plan-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+          # Masks the account ID in later output (bucket names in the plan). It isn't a secret: the
+          # role ARN above and the state bucket name still print it.
+          mask-aws-account-id: true
+
+      # Read-only: ci-pr-plan can't write the state lock, so the plan runs unlocked.
+      - name: Plan
+        run: make plan ENV="$ENVIRONMENT" LOCK=false

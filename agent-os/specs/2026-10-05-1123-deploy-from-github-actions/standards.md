@@ -9,11 +9,18 @@
   validations are tested with `expect_failures`, one checkable object per run. Every trust policy,
   boundary and tag condition has a test. Checkov suppressions are inline
   `#checkov:skip=<ID>:<reason>`, the reason is mandatory and `make scan` enforces it.
-- **infra/pipeline** (Task 9) — The four CI roles and their exact OIDC subjects. Staging applies
+- **global/tooling** (Task 8) — `mise.toml` is the one source of tool versions for the laptop
+  and every CI job, and every project task is a mise task (`mise run <task>`). Versions are
+  ranges, not exact pins, because Dependabot can't bump `mise.toml`. A tool takes its major, or
+  its minor while it's 0.x. Terraform takes the major of the stacks' `required_version`
+  (`~> 1.11` ↔ `"1"`), and the two move together. `minimum_release_age = "7d"`. CI installs
+  through `jdx/mise-action` (SHA-pinned), never per-tool setup actions. `mise.toml` has no
+  `[env]` sourcing or hooks.
+- **infra/pipeline** (Task 10) — The four CI roles and their exact OIDC subjects. Staging applies
   before production, and production applies only after approval, from a plan made on `main` and
   stored in the private artifacts bucket. `id-token: write` only in jobs that run no project code.
   The bootstrap stack is applied by hand, so a new AWS service in the main stack means a bootstrap
-  change applied first. Rollback is a revert. `make deploy ENV=production` is break-glass and
+  change applied first. Rollback is a revert. `mise run deploy production` is break-glass and
   needs `BREAK_GLASS=1`.
 
 ## Amended by this spec
@@ -25,9 +32,13 @@
   pin its own environment. Every role the pipeline creates or changes must carry its own
   environment's permissions boundary, and nothing in CI can change a boundary. Explicit Deny on
   table, bucket and object deletion. The list of actions that support no tag condition.
-- **infra/environments** (Tasks 2, 7 and 9) — Values that would print in public logs are
+- **infra/environments** (Tasks 2, 7, 8 and 10) — Values that would print in public logs are
   `sensitive`. The artifacts bucket and the boundary ARN come from outside the main stack, so they
-  are required variables. Production pipeline-only goes from written to enforced.
+  are required variables. One positional `<env>` on the mise tasks replaces the Makefile's `ENV`.
+  Production pipeline-only goes from written to enforced.
+- **Every standard that names a `make` target** (Task 8) — `infra/alarms`, `infra/budget`,
+  `infra/data-retention`, `infra/iam`, `backend/cli`, `global/launch-configs`,
+  `testing/terraform-tests` and `index.yml` name the mise task instead.
 - **infra/data-retention** (Task 5) — The artifacts bucket holds derived, rebuildable data (zips,
   saved plans), so lifecycle expiry is allowed there and nowhere else.
 

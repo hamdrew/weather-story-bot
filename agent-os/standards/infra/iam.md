@@ -34,13 +34,17 @@ The `State`, `TelegramToken` and `Archive` statements add `aws:ResourceTag/Envir
 
 ## CI roles (`infra/bootstrap/`)
 
-The pipeline's roles live in their own stack, applied by hand with MFA (`make bootstrap-plan` /
+The pipeline's roles live in their own stack, applied by hand with MFA (`mise run bootstrap-plan` /
 `bootstrap-deploy`), so the pipeline can never widen its own permissions. The rules above hold, with
 these scoped exceptions and additions:
 
 - **Trust:** `StringEquals` on `aud` (`sts.amazonaws.com`) and an exact `sub`, never `StringLike`.
-  `ci-pr-plan` is `repo:<repo>:pull_request`, `ci-plan` is `...:ref:refs/heads/main`, and each
-  `ci-apply-<env>` is `...:environment:<env>`
+  Subjects are built from the repository's immutable `sub_claim_prefix`
+  (`repo:<owner>@<owner id>/<name>@<repository id>`, from
+  `gh api repos/<repo>/actions/oidc/customization/sub`), never the name-only form, which this
+  repository's tokens don't carry and a recreated repository could match. `ci-pr-plan` is
+  `<prefix>:pull_request`, `ci-plan` is `<prefix>:ref:refs/heads/main`, and each `ci-apply-<env>`
+  is `<prefix>:environment:<env>`
 - **Plan roles may use `Get*`/`List*`/`Describe*` per service**, but only on the project's resource
   ARNs and never on objects, items or parameters: bucket ARNs and never `bucket/*`, no `GetItem`,
   `Query` or `Scan`, nothing in `ssm` or `kms`. `ReadOnlyAccess` would include `ssm:GetParameter`,
