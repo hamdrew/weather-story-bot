@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -522,7 +522,7 @@ wheels = [
 
 [[package]]
 name = "checkov"
-version = "3.3.26"
+version = "3.3.29"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiodns" },
@@ -570,9 +570,9 @@ dependencies = [
     { name = "urllib3" },
     { name = "yarl" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4f/03/9f32d0c767abcf56a4c3d51694a4190e70e0ec48ff0d09150acda4d8d2ea/checkov-3.3.26.tar.gz", hash = "sha256:90df926e9acf102452ba28bebe910738d76d84b5ce5974475fadae4bc319ddcf", size = 1015557, upload-time = "2026-10-07T12:44:31.109Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7b/2b/9bc703006199045a2f2b148731e563e62c97be67ef009330ed0843cccb73/checkov-3.3.29.tar.gz", hash = "sha256:ad9f8606a6de0756be93edd5588e3365486eb53a3f68247396a68b02929353ce", size = 1016122, upload-time = "2026-10-13T11:40:05.009Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fd/66/257c5a8ddd215d8feaa6b905fcc6dda6ad648076f06f3de861d060b2cf7c/checkov-3.3.26-py3-none-any.whl", hash = "sha256:3b4157e4a308ed72e86352b65331045d7b8172f7a4492741db85de6cf1a49b42", size = 2329667, upload-time = "2026-10-07T12:44:29.13Z" },
+    { url = "https://files.pythonhosted.org/packages/63/4a/26ecbf2abac34993b7dba06379c6b8a03f078323856a917ed47370610a67/checkov-3.3.29-py3-none-any.whl", hash = "sha256:9a8b3918788faf8e18b181d826d284744b22b9d99c53cf1b67a2e84f0596796f", size = 2330210, upload-time = "2026-10-13T11:40:02.495Z" },
 ]
 
 [[package]]
