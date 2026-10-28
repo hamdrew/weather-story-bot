@@ -48,6 +48,7 @@ jobs:
       - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
         with:
           minimum_release_age: 7d
+          install_args: --locked
           cache_key: "mise-{{platform}}-p{{cache_period}}-${{ hashFiles('mise.toml', 'mise.lock') }}"
 
       - name: Lint, tests, Terraform tests, scan
@@ -97,10 +98,13 @@ jobs:
         with:
           persist-credentials: false
 
-      # No cache in a job that holds AWS credentials.
+      # No cache in a job that holds AWS credentials. --locked is explicit: the action adds it on
+      # its own only when it detects the lock file, and otherwise installs from the ranges without
+      # saying so. Here a missing or incomplete mise.lock must fail the job.
       - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
         with:
           minimum_release_age: 7d
+          install_args: --locked
           cache: false
 
       # The same two local-only files a laptop has (infra/environments): one ENV selects them.

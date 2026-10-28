@@ -11,8 +11,10 @@ is a mise task. There is no `Makefile`, and no per-tool setup action in a workfl
   resolved to, with a URL and checksum per platform (and a verified attestation where the project
   publishes one, as uv does). The laptop and every CI job install from it, so they run the same
   tools, and a tool change is a reviewed diff that goes through the PR plans before it deploys
-- **CI installs locked.** `jdx/mise-action` adds `--locked` when a lock file exists, so a tool or
-  platform missing from the lock fails the job instead of resolving fresh. Keep `lockfile = true`
+- **CI installs locked.** Every `jdx/mise-action` step sets `install_args: --locked` itself. The
+  action adds the flag on its own only when it detects the lock file, and otherwise installs from
+  the ranges without saying so. A tool or platform missing from the lock must fail the job instead
+  of resolving fresh. Keep `lockfile = true`
   in `mise.toml`, and lock both platforms: `linux-x64` (the runners) and `macos-arm64` (the laptop)
 - **Nothing bumps the lock for you.** Dependabot has no mise ecosystem, so a tool moves only when
   you run `mise upgrade` and then `mise lock --platform linux-x64,macos-arm64` (to fill both
