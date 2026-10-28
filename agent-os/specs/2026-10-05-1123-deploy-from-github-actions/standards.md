@@ -11,7 +11,9 @@
   `#checkov:skip=<ID>:<reason>`, the reason is mandatory and `make scan` enforces it.
 - **global/tooling** (Task 8) — `mise.toml` is the one source of tool versions for the laptop
   and every CI job, and every project task is a mise task (`mise run <task>`). Versions are
-  ranges, not exact pins, because Dependabot can't bump `mise.toml`. A tool takes its major, or
+  ranges in `mise.toml`, resolved by a committed `mise.lock` (locked for `linux-x64` and
+  `macos-arm64`, installed `--locked` in CI). Dependabot can't bump either, so `mise upgrade`
+  then `mise lock --platform ...` is a deliberate, hand-run step. A tool takes its major, or
   its minor while it's 0.x. Terraform takes the major of the stacks' `required_version`
   (`~> 1.11` ↔ `"1"`), and the two move together. `minimum_release_age = "7d"`. CI installs
   through `jdx/mise-action` (SHA-pinned), never per-tool setup actions. `mise.toml` has no

@@ -30,10 +30,6 @@ concurrency:
   group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-env:
-  TERRAFORM_VERSION: "1.16.5"
-  UV_VERSION: "0.13.0"
-
 jobs:
   checks:
     name: checks
@@ -44,25 +40,27 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+      # Tool versions come from mise.toml (global/tooling). The action installs mise itself from
+      # the newest release at least 7 days old, the same rule mise.toml applies to the tools.
+      # mise.lock fixes the tool versions and the action installs --locked, so a stale cache can't
+      # change what runs; the key follows both files so a changed lock is a miss. The plan job,
+      # which holds credentials, has no cache.
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
         with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
-          terraform_wrapper: false
-
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: ${{ env.UV_VERSION }}
+          minimum_release_age: 7d
+          cache_key: "mise-{{platform}}-p{{cache_period}}-${{ hashFiles('mise.toml', 'mise.lock') }}"
 
       - name: Lint, tests, Terraform tests, scan
-        run: make lint test tftest scan
+        run: |
+          mise run lint ::: test ::: tftest ::: scan
 
       # The zip is content-addressed (its sha256 is the S3 key), so an unchanged build must be
       # byte-identical or every merge would upload and deploy new code.
       - name: Build twice, compare
         run: |
-          make build
+          mise run build
           cp build/lambda.zip.sha256 "$RUNNER_TEMP/first.sha256"
-          make build
+          mise run build
           echo "first:  $(cat "$RUNNER_TEMP/first.sha256")"
           echo "second: $(cat build/lambda.zip.sha256)"
           cmp "$RUNNER_TEMP/first.sha256" build/lambda.zip.sha256
@@ -99,16 +97,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
-        with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
-          terraform_wrapper: false
-
       # No cache in a job that holds AWS credentials.
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
         with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: false
+          minimum_release_age: 7d
+          cache: false
 
       # The same two local-only files a laptop has (infra/environments): one ENV selects them.
       - name: Write backend config and tfvars
@@ -143,4 +136,4 @@ jobs:
 
       # Read-only: ci-pr-plan can't write the state lock, so the plan runs unlocked.
       - name: Plan
-        run: make plan ENV="$ENVIRONMENT" LOCK=false
+        run: mise run plan "$ENVIRONMENT" --no-lock

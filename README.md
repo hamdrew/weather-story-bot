@@ -25,7 +25,7 @@ EventBridge Scheduler ──► Lambda ──► api.weather.gov
 
 ## One-time setup
 
-Prerequisites: [mise](https://mise.jdx.dev/) and the AWS CLI with credentials for the target account. `mise.toml` pins the tool versions as ranges (Terraform 1.x, uv 0.13.x) and `mise install` fetches them (a release must be a week old first). Every task below is a mise task, listed by `mise tasks`. To run several, put `:::` between them (`mise run lint ::: test`), or mise hands the second name to the first as an argument.
+Prerequisites: [mise](https://mise.jdx.dev/) and the AWS CLI with credentials for the target account. `mise.toml` holds the tool versions as ranges (Terraform 1.x, uv 0.13.x) and the committed `mise.lock` pins what they resolve to, so `mise install` fetches the same versions on every machine and in CI. To move them, run `mise upgrade` and then `mise lock --platform linux-x64,macos-arm64`, and commit both files (a release must be a week old first). Every task below is a mise task, listed by `mise tasks`. To run several, put `:::` between them (`mise run lint ::: test`), or mise hands the second name to the first as an argument.
 
 1. **Create the bot.** Message [@BotFather](https://t.me/BotFather), send `/newbot`, and copy the token.
 2. **Create the channel.** Create a private Telegram channel and add the bot as an administrator that can post messages.

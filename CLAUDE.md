@@ -3,7 +3,7 @@
 Python 3.13 Lambda (arm64) that posts NWS Weather Stories to Telegram. Infra is Terraform in `infra/`. Specs and roadmap are in `agent-os/`.
 
 ## Commands
-Every task is a mise task (`mise.toml`, and bash file tasks in `mise-tasks/`); `mise tasks` lists them and `mise.toml` is the one source of tool versions (standard `global/tooling`). Run several with `:::` (`mise run lint ::: test`): without it, mise hands the second name to the first as an argument.
+Every task is a mise task (`mise.toml`, and bash file tasks in `mise-tasks/`); `mise tasks` lists them and `mise.toml` holds the tool version ranges and the committed `mise.lock` the exact versions (standard `global/tooling`; move them with `mise upgrade`, then `mise lock --platform linux-x64,macos-arm64`). Run several with `:::` (`mise run lint ::: test`): without it, mise hands the second name to the first as an argument.
 - `mise run test` - pytest; offline (respx mocks HTTP, moto mocks AWS)
 - `mise run coverage` - opt-in coverage; keep `--cov` out of pytest addopts (it breaks debugger breakpoints)
 - `mise run tftest` - `terraform test` on `infra/tests/`; offline against a mock AWS provider, no credentials (see `testing/terraform-tests`)

@@ -58,24 +58,33 @@ the roadmap), separate AWS accounts, managing GitHub settings from Terraform.
 - **mise instead of make** (added 2026-10-13, Task 8). `mise.toml` defines the tasks and the tool
   versions, and every CI job installs its tools through `jdx/mise-action`, so the laptop and the
   runners read one file. Versions are ranges, not exact pins: the major by default, and
-  Terraform's from the stacks' `required_version`.
+  Terraform's from the stacks' `required_version`. Amended 2026-10-27 (Task 9): a committed
+  `mise.lock` records what the ranges resolve to, so every job and the laptop install the same
+  versions.
 
 ### Found while adding mise
 
 - **Dependabot has no mise ecosystem.** GitHub's supported-ecosystems list (checked 2026-10-13)
   has `terraform`, `uv`, `github-actions` and others, but no `mise`, `asdf` or `.tool-versions`.
   Renovate has a mise manager that reads `mise.toml` and updates `mise.lock`, but switching
-  update bots is out of scope. Ranges remain the choice: nothing in `mise.toml` needs bumping.
+  update bots is out of scope. `mise.toml` keeps ranges, which are still the right shape for it.
+  `mise.lock` is hand-moved (see the last bullet below).
 - **mise has no `>=` ranges.** A version is exact, a prefix (`"1"` is the newest 1.x) or
   `latest`. It doesn't read `required_version` from `.tf` files either (Terraform's idiomatic
   file is `.terraform-version`). So the stacks' `">= 1.11"` becomes `"~> 1.11"`, whose major is
   exactly `"1"`, and `terraform init` enforces the match.
 - **Major-only is no pin for a 0.x tool.** uv is 0.x, where a minor release can break things, so
   it takes `"0.13"`.
-- **A range installs new releases into credentialed jobs unreviewed.** That is the cost of not
-  pinning. `minimum_release_age = "7d"` (mise's default is 24h) and the same setting on the
-  action's own mise version keep a brand-new release out until it has had a week in the wild.
-  An exact pin plus `mise.lock` would be stricter but is declined: nothing would bump it.
+- **A range alone installs new releases into credentialed jobs unreviewed**, and lets the
+  laptop, `checks` and `plan` end up on different versions (found at Task 9: Terraform 1.17.0
+  became eligible the day after the laptop moved to 1.16.6). `minimum_release_age = "7d"` (mise's
+  default is 24h) keeps a brand-new release out until it has had a week in the wild, but only
+  delays a bad one. **Decided 2026-10-27: commit `mise.lock`** (`lockfile = true`, locked for
+  `linux-x64` and `macos-arm64`; `mise lock` recorded checksums for Terraform and uv, and uv's are
+  GitHub-attested). Every job and the laptop install the same tools, CI installs `--locked`, and
+  a tool change is a reviewed diff. The cost is that nothing bumps the lock: `mise upgrade`, then
+  `mise lock --platform linux-x64,macos-arm64`, by hand. The action's own mise binary stays
+  unlocked.
 
 ### Found while shaping
 
@@ -142,7 +151,7 @@ New with this spec:
   tested, and Checkov suppressions with reasons
 - `global/tooling` (Task 8) — `mise.toml` is the one source of tool versions for the laptop and
   CI, every task is a mise task, and versions are ranges (the major, the minor for 0.x,
-  Terraform's from `required_version`)
+  Terraform's from `required_version`) resolved by a committed `mise.lock`
 - `infra/pipeline` (Task 10) — the CI roles and their trusts, staging before production, saved
   plans in S3, `id-token` only in jobs that run no project code, a bootstrap change before a new
   AWS service, rollback by revert, and break-glass used deliberately

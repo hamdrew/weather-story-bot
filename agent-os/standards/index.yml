@@ -4,7 +4,7 @@ global:
   principles:
     description: Local tools are read-only; decide purely then act; sources of truth vs derived data; the office is the unit of isolation
   tooling:
-    description: mise.toml is the one source of tool versions (laptop and CI) as ranges, never pins; every task is a mise task; run several with `:::`; a new tool is a mise.toml line
+    description: mise.toml holds tool version ranges and the committed mise.lock the exact versions (laptop and CI install the same, CI --locked); move them by hand with mise upgrade then mise lock for linux-x64 and macos-arm64; every task is a mise task; run several with `:::`; a new tool is a mise.toml line plus a re-lock
   launch-configs:
     description: Every executable script (scripts/*.py with a __main__ block, and the package CLI) gets a launch.json entry in the same change; never --apply, readonly profile for AWS tools, scratch output paths
 

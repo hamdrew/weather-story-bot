@@ -1,12 +1,16 @@
 # The one source of tool versions for the laptop and every CI job, and of every task (agent-os
-# standard global/tooling). Ranges, not exact pins: Dependabot can't bump this file, so a pin would
-# only ever move by hand. `mise upgrade` moves the laptop within the ranges.
+# standard global/tooling). The ranges below say what is allowed; the committed mise.lock says what
+# is installed, so the laptop and every CI job run the same versions. Dependabot can't bump either
+# file: move them by hand with `mise upgrade`, then `mise lock --platform linux-x64,macos-arm64`.
 min_version = { hard = "2026.10.0" }
 
 [settings]
 # A range installs whatever release is newest, in jobs that hold AWS credentials, so a release
-# must be a week old before it's picked up (mise's default is 24h).
+# must be a week old before it's picked up (mise's default is 24h). It gates what can enter
+# mise.lock when you upgrade; the lock gates what a job installs.
 minimum_release_age = "7d"
+# Keep mise.lock up to date whenever mise installs or upgrades a tool.
+lockfile = true
 
 [tools]
 # The same range as `required_version` in infra/versions.tf and infra/bootstrap/versions.tf

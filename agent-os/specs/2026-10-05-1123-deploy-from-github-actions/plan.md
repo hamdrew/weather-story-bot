@@ -62,7 +62,7 @@ and no Telegram credentials anywhere in CI. `make deploy` stays as a deliberate 
 | Locks | Plan roles plan with `-lock=false` (a stale saved plan is refused at apply anyway). Apply roles lock on their own exact `.tflock` key |
 | Cloud runner | Declined, as the roadmap records |
 | Task runner | mise tasks replace the `Makefile` (Task 8). Before Task 8, `make <target>` in this plan is history as written. From Task 8 on, the same target is `mise run <target>` |
-| Tool versions | `mise.toml` is the one source for the laptop and every CI job. Ranges, not exact pins: the major by default, the minor for a 0.x tool, and Terraform's from the stacks' `required_version`. CI installs through `jdx/mise-action`, not per-tool setup actions |
+| Tool versions | `mise.toml` holds the ranges for the laptop and every CI job: the major by default, the minor for a 0.x tool, and Terraform's from the stacks' `required_version`. A committed `mise.lock` (amended 2026-10-27, Task 9) records what they resolve to, for `linux-x64` and `macos-arm64`, so every job and the laptop install the same versions and CI installs `--locked`. Nothing bumps the lock: `mise upgrade` then `mise lock --platform linux-x64,macos-arm64`, by hand. CI installs through `jdx/mise-action`, not per-tool setup actions |
 
 ## Working agreement
 
@@ -339,13 +339,21 @@ proves the same tasks in CI.
   code never shares a job with AWS credentials.
 - `plan` task: a `--no-lock` flag → `-lock=false`.
 
+**As built (Task 9, 2026-10-27):** `pipeline.yml` now has no `make`, no `setup-terraform`/`setup-uv` and no version in the file; both jobs use `jdx/mise-action` pinned at v5.2.1 (released 2026-10-19: the newer 5.2.2–5.2.4 were inside our own 7-day window). Things to know:
+- **The action has its own `minimum_release_age`** (default 24h, for the mise binary itself), so both jobs set `7d` to match `mise.toml`. `plan` sets `cache: false` because it holds credentials. `checks` keeps the tool cache, keyed explicitly on `hashFiles('mise.toml', 'mise.lock')` (the action's default key may not cover those two file names; its docs list only the dotted ones), so a changed lock is a cache miss. The cache can't cause drift now: `--locked` installs the lock's exact version whatever the cache holds. uv's own package cache is gone with `setup-uv`: watch the `checks` time at Gate 4a, and add an `actions/cache` step for uv only if it hurts.
+- **`mise.lock` (added the same day).** `mise lock --platform linux-x64,macos-arm64` recorded Terraform 1.16.6 and uv 0.13.4 with checksums for both platforms (Terraform's match HashiCorp's published `SHA256SUMS`; uv's carry a GitHub attestation verified at lock time), and `lockfile = true` keeps it current. mise-action adds `--locked` when the file exists. See `global/tooling`.
+- **`:::` runs the tasks in parallel** (mise's `jobs` defaults to 8; `make` ran them in order), on the laptop too. Two cold-start runs (no `.venv`, no `.terraform-test`) passed with no lock contention. If Gate 4a flakes, `--jobs 1` on the `checks` command is the first thing to try.
+- **No `mise trust` step:** the action exports `MISE_TRUSTED_CONFIG_PATHS` for the workspace.
+- **`:::` is a YAML trap.** An unquoted `run: mise run lint ::: test` is a parse error (a colon followed by a space starts a mapping), so the `checks` command is in a `run: |` block. Found by parsing the file; nothing in this repo lints workflows (no actionlint or zizmor in `mise.toml`), so the first real validation is Gate 4a.
+- **Terraform 1.17.0 becomes eligible at 2026-10-28 12:32 CDT** (released 2026-10-21) and the lock holds 1.16.6, so CI stays on 1.16.6 until someone upgrades the lock. That upgrade is its own deliberate change (`mise upgrade`, `mise lock --platform linux-x64,macos-arm64`, then the PR plans), not something Gate 4a absorbs by accident.
+
 ### Gate 4a: the PR for Task 9 shows its own plans
 
 **Pass:** checks green, and both plan jobs end in **No changes**. That proves `ci-pr-plan`'s read
 policy and that the CI-built zip matches the laptop's (if Linux and macOS bytes differ, record
 it: the first pipeline apply will then show one code update). The CI log's Terraform and uv
-versions match the laptop's `mise ls` (record any difference: it's the newest release in the
-range, so the laptop catches up with `mise upgrade`). An `AccessDenied` is fixed in
+versions equal `mise.lock`'s and the laptop's `mise ls` (the lock makes that so, so any
+difference means the lock misses a platform: record it and re-lock). An `AccessDenied` is fixed in
 `infra/bootstrap` and applied with MFA, then re-run.
 
 ## Task 10: Main-branch deploys and pipeline-only production
