@@ -61,8 +61,8 @@ name = local.production ? "weather-story-bot" : "weather-story-bot-${var.environ
 
 ## Staging
 
-- **Staging is where real posts get watched.** Production becomes pipeline-only in Phase 2.1.
-  Until then it's `mise run deploy production`, so the rule is written ahead of being enforceable
+- **Staging is where real posts get watched.** Production is pipeline-only (`infra/pipeline`):
+  `plan` and `deploy` refuse it unless they run in Actions or `BREAK_GLASS=1` is on the command line
 - **Every environment's schedule is created `DISABLED` and its alarms are created on.** There is
   no `schedule_enabled` variable, so no environment differs by a flag. `mise run start <env>` and
   `mise run pause <env>` toggle the schedule and the alarm actions through the API
@@ -106,6 +106,8 @@ they can't disagree:
 | Data dir | `.terraform-<env>/` (`TF_DATA_DIR`, relative to `-chdir`) |
 | Plan file | `deploy-<env>.tfplan` |
 
+- `plan` and `deploy` refuse `production` unless `GITHUB_ACTIONS=true` or `BREAK_GLASS=1` is set on
+  the command line (`infra/pipeline`). `staging` has no such guard
 - The environment is a required positional argument with `choices "staging" "production"`, so mise
   refuses anything else, and an exported variable can't stand in for it
 - `plan` builds first and passes the zip's hash as `-var lambda_zip_sha256=<base64>`, so a plan is

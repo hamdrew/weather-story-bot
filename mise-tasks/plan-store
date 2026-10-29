@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+#MISE description="Upload or download production's saved plan in the artifacts bucket (Actions only)"
+#MISE hide=true
+#USAGE arg "<action>" help="upload (ci-plan) or download (ci-apply-production)" {
+#USAGE   choices "upload" "download"
+#USAGE }
+#USAGE arg "<key>" help="Object key, plans/production/<name>.tfplan"
+set -euo pipefail
+
+# A saved plan holds the tfvars in plain text, and the repository's logs are public, so it travels
+# through the private artifacts bucket and never as a GitHub artifact. ci-plan writes the key and
+# ci-apply-production reads it, and neither can touch any other key.
+[[ ${GITHUB_ACTIONS:-} == true ]] || { echo "plan-store runs in GitHub Actions only" >&2; exit 1; }
+action=${usage_action?}
+key=${usage_key?}
+[[ $key == plans/production/*.tfplan ]] || { echo "Key must be plans/production/<name>.tfplan: $key" >&2; exit 1; }
+plan=infra/deploy-production.tfplan
+
+# The bucket is a required tfvar (created by infra/bootstrap), so it is read from the same file the
+# plan used rather than kept as a repository variable that could disagree with it. Terraform takes
+# the last assignment of a variable, so this does too, and the name must look like a bucket name.
+bucket=$(sed -nE 's/^[[:space:]]*artifacts_bucket[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' infra/envs/production.tfvars | tail -n 1)
+[[ $bucket =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || {
+  echo "No valid artifacts_bucket in infra/envs/production.tfvars" >&2
+  exit 1
+}
+
+case $action in
+  # If-None-Match: the bucket refuses any write without it, and a key is never reused.
+  upload) aws s3api put-object --bucket "$bucket" --key "$key" --body "$plan" --if-none-match '*' --output text --query ETag >/dev/null ;;
+  download) aws s3api get-object --bucket "$bucket" --key "$key" "$plan" >/dev/null ;;
+esac
+echo "$action: s3://<artifacts bucket>/$key"

@@ -6,13 +6,14 @@
 set -euo pipefail
 
 env=${usage_environment?}
+mise run --quiet check-break-glass "$env"
 export TF_DATA_DIR=.terraform-$env
 plan_file=deploy-$env.tfplan
 
 # The AWS CLI, as the identity Terraform applies with: the weather-deploy profile on a laptop, and
 # the environment's role credentials in Actions (which set GITHUB_ACTIONS).
 aws=(aws)
-[[ -n ${GITHUB_ACTIONS:-} ]] || aws+=(--profile weather-deploy)
+[[ ${GITHUB_ACTIONS:-} == true ]] || aws+=(--profile weather-deploy)
 
 # Fail before the build when there is nothing to apply.
 mise run --quiet check-plan "$env"

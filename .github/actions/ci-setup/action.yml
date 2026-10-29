@@ -1,0 +1,59 @@
+name: ci-setup
+description: >-
+  The setup every credentialed pipeline job shares: the locked terraform and uv, one environment's
+  backend config and tfvars, and AWS credentials from one OIDC role (infra/pipeline). Check out the
+  repository first. The caller keeps `id-token: write`.
+
+inputs:
+  environment:
+    description: staging or production
+    required: true
+  state-key:
+    description: The environment's Terraform state key
+    required: true
+  state-bucket:
+    description: The Terraform state bucket
+    required: true
+  region:
+    description: The AWS region
+    required: true
+  tfvars:
+    description: The environment's whole .tfvars file, from a secret
+    required: true
+  role-arn:
+    description: The CI role to assume
+    required: true
+  session-name:
+    description: The role session name
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # No cache in a job that holds AWS credentials. --locked is explicit: a missing or incomplete
+    # mise.lock must fail the job. Only the two tools the plan needs: the workflow linters have no
+    # place in a credentialed job.
+    - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
+      with:
+        minimum_release_age: 7d
+        install_args: --locked terraform uv
+        cache: false
+
+    - name: Write backend config and tfvars
+      shell: bash
+      env:
+        ENVIRONMENT: ${{ inputs.environment }}
+        STATE_BUCKET: ${{ inputs.state-bucket }}
+        STATE_KEY: ${{ inputs.state-key }}
+        REGION: ${{ inputs.region }}
+        TFVARS: ${{ inputs.tfvars }}
+      run: mise run write-env-config "$ENVIRONMENT"
+
+    - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+      with:
+        role-to-assume: ${{ inputs.role-arn }}
+        role-session-name: ${{ inputs.session-name }}
+        aws-region: ${{ inputs.region }}
+        # Masks the account ID in later output (bucket names in the plan). It isn't a secret: the
+        # role ARN and the state bucket name still print it.
+        mask-aws-account-id: true

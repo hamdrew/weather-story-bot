@@ -1,4 +1,5 @@
-# Checks every change, and plans both environments for pull requests (infra/pipeline).
+# Checks every change, plans both environments for pull requests, and deploys main: staging, then
+# production after approval (infra/pipeline).
 #
 # The repository is public, so every log here is world-readable. Tfvars come from secrets and the
 # values that would print are sensitive in Terraform (infra/environments). Saved plans hold them in
@@ -7,6 +8,11 @@
 # AWS access is GitHub OIDC into the roles infra/bootstrap creates, each assumable from one exact
 # subject. id-token: write is granted only to jobs that run no project tests, so third-party test
 # and lint code never shares a job with AWS credentials.
+#
+# Pushes to main also deploy: staging applies, then production's plan is saved and, after your
+# approval, applied. Each apply job names a GitHub environment, so its OIDC subject is the one
+# only that environment's apply role trusts, and the environment's rules (main only, plus a
+# reviewer for production) gate it. The plan roles stay repository-level.
 #
 # Repository settings it needs (Settings > Secrets and variables > Actions):
 #   variables  AWS_ACCOUNT_ID, AWS_REGION, TF_STATE_BUCKET
@@ -24,8 +30,9 @@ on:
 permissions:
   contents: read
 
-# A newer push to a pull request replaces its running checks. Anything else gets a group of its
-# own, so nothing on main is ever cancelled or superseded.
+# A newer push to a pull request replaces its running checks. Every other run gets a group of its
+# own, so checks on main are never held up or cancelled. Deploys serialize on their own group, set
+# on the deploy jobs below.
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -106,47 +113,179 @@ jobs:
         with:
           persist-credentials: false
 
-      # No cache in a job that holds AWS credentials. --locked is explicit: the action adds it on
-      # its own only when it detects the lock file, and otherwise installs from the ranges without
-      # saying so. Here a missing or incomplete mise.lock must fail the job. Only the two tools the
-      # plan needs are installed: the workflow linters have no place in a credentialed job.
-      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
+      - uses: ./.github/actions/ci-setup # zizmor: ignore[self-repository] actionlint rejects the $/ form
         with:
-          minimum_release_age: 7d
-          install_args: --locked terraform uv
-          cache: false
-
-      # The same two local-only files a laptop has (infra/environments): one ENV selects them.
-      - name: Write backend config and tfvars
-        env:
-          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
-          STATE_KEY: ${{ matrix.state_key }}
-          REGION: ${{ vars.AWS_REGION }}
-          # Repository secrets: an environment would change the OIDC subject (see the top).
-          # Each leg names its own secret, so an empty one fails the check below instead of falling
-          # through to the other environment's file.
-          TFVARS: ${{ matrix.environment == 'staging' && secrets.STAGING_TFVARS || matrix.environment == 'production' && secrets.PRODUCTION_TFVARS || '' }} # zizmor: ignore[secrets-outside-env]
-        run: |
-          [ -n "$STATE_BUCKET" ] && [ -n "$REGION" ] || { echo "::error::Set the TF_STATE_BUCKET and AWS_REGION variables"; exit 1; }
-          [ -n "$TFVARS" ] || { echo "::error::Set the $(echo "$ENVIRONMENT" | tr '[:lower:]' '[:upper:]')_TFVARS secret"; exit 1; }
-          cat > "infra/envs/$ENVIRONMENT.backend.hcl" <<EOF
-          bucket       = "$STATE_BUCKET"
-          key          = "$STATE_KEY"
-          region       = "$REGION"
-          encrypt      = true
-          use_lockfile = true
-          EOF
-          printf '%s\n' "$TFVARS" > "infra/envs/$ENVIRONMENT.tfvars"
-
-      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
-        with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/weather-story-bot-ci-pr-plan
-          role-session-name: pr-plan-${{ github.run_id }}
-          aws-region: ${{ vars.AWS_REGION }}
-          # Masks the account ID in later output (bucket names in the plan). It isn't a secret: the
-          # role ARN above and the state bucket name still print it.
-          mask-aws-account-id: true
+          environment: ${{ matrix.environment }}
+          state-key: ${{ matrix.state_key }}
+          state-bucket: ${{ vars.TF_STATE_BUCKET }}
+          region: ${{ vars.AWS_REGION }}
+          # Repository secrets: an environment would change the OIDC subject (see the top). Each leg
+          # names its own secret, so an empty one fails write-env-config instead of falling through
+          # to the other environment's file.
+          tfvars: ${{ matrix.environment == 'staging' && secrets.STAGING_TFVARS || matrix.environment == 'production' && secrets.PRODUCTION_TFVARS || '' }} # zizmor: ignore[secrets-outside-env]
+          role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/weather-story-bot-ci-pr-plan
+          session-name: pr-plan-${{ github.run_id }}
 
       # Read-only: ci-pr-plan can't write the state lock, so the plan runs unlocked.
       - name: Plan
         run: mise run plan "$ENVIRONMENT" --no-lock
+
+      # Cosmetic, so a failure here never blocks the check.
+      - name: Plan summary
+        continue-on-error: true
+        run: mise run plan-summary "$ENVIRONMENT"
+
+  # Merges to main. Staging first, then production's plan, then production after your approval. A
+  # plan that changes nothing deploys nothing and asks for no approval. These jobs build the zip and
+  # run terraform, which is project code beside AWS credentials, so they run no tests or linters.
+  deploy-staging:
+    if: github.event_name == 'push'
+    name: deploy (staging)
+    needs: checks
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write # OIDC token for ci-apply-staging
+    env:
+      TF_INPUT: "0"
+      TF_IN_AUTOMATION: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/ci-setup # zizmor: ignore[self-repository] actionlint rejects the $/ form
+        with:
+          environment: staging
+          state-key: weather-story-bot/staging/terraform.tfstate
+          state-bucket: ${{ vars.TF_STATE_BUCKET }}
+          region: ${{ vars.AWS_REGION }}
+          tfvars: ${{ secrets.STAGING_TFVARS }}
+          role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/weather-story-bot-ci-apply-staging
+          session-name: deploy-staging-${{ github.run_id }}
+
+      # The apply role locks the state on its own key, so this plan locks too.
+      - name: Plan
+        run: mise run plan staging
+
+      # Cosmetic, so a failure here never blocks a deploy.
+      - name: Plan summary
+        continue-on-error: true
+        run: mise run plan-summary staging
+
+      - name: Any changes?
+        id: changes
+        run: mise run --quiet plan-changes staging --github-output
+
+      - name: Deploy
+        if: steps.changes.outputs.changed == 'true'
+        run: mise run deploy staging
+
+  # Production's plan is made here, on main, by the plan role, and saved so that what you approve is
+  # exactly what is applied. It is a separate job because Dependabot's pull requests get no plan.
+  plan-production:
+    if: github.event_name == 'push'
+    name: plan (production)
+    needs: deploy-staging
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write # OIDC token for ci-plan
+    outputs:
+      changed: ${{ steps.changes.outputs.changed }}
+      plan_key: ${{ steps.save.outputs.plan_key }}
+    env:
+      TF_INPUT: "0"
+      TF_IN_AUTOMATION: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # ci-plan runs on main only and, unlike ci-pr-plan, may write production's plan key.
+      - uses: ./.github/actions/ci-setup # zizmor: ignore[self-repository] actionlint rejects the $/ form
+        with:
+          environment: production
+          state-key: weather-story-bot/terraform.tfstate
+          state-bucket: ${{ vars.TF_STATE_BUCKET }}
+          region: ${{ vars.AWS_REGION }}
+          tfvars: ${{ secrets.PRODUCTION_TFVARS }} # zizmor: ignore[secrets-outside-env]
+          role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/weather-story-bot-ci-plan
+          session-name: plan-production-${{ github.run_id }}
+
+      # Read-only on state, so no lock. A plan made stale by an apply meanwhile is refused at apply.
+      - name: Plan
+        run: mise run plan production --no-lock
+
+      # Cosmetic, so a failure here never blocks a deploy.
+      - name: Plan summary
+        continue-on-error: true
+        run: mise run plan-summary production
+
+      - name: Any changes?
+        id: changes
+        run: mise run --quiet plan-changes production --github-output
+
+      # The run attempt is in the key because the bucket never lets a key be written twice, so
+      # re-running this job must not collide with its first attempt. Nothing is saved when nothing
+      # would change: deploy-production is skipped then.
+      - name: Save the plan
+        id: save
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          PLAN_KEY: plans/production/${{ github.run_id }}-${{ github.run_attempt }}.tfplan
+        run: |
+          mise run plan-store upload "$PLAN_KEY"
+          echo "plan_key=$PLAN_KEY" >> "$GITHUB_OUTPUT"
+
+  # Waits for your approval (the production environment's reviewer rule), then applies the saved
+  # plan. Skipped, with no approval asked, when the plan changes nothing: a job's `if` is decided
+  # before its environment's rules.
+  deploy-production:
+    if: github.event_name == 'push' && needs.plan-production.outputs.changed == 'true'
+    name: deploy (production)
+    needs: plan-production
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      id-token: write # OIDC token for ci-apply-production
+    env:
+      TF_INPUT: "0"
+      TF_IN_AUTOMATION: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/ci-setup # zizmor: ignore[self-repository] actionlint rejects the $/ form
+        with:
+          environment: production
+          state-key: weather-story-bot/terraform.tfstate
+          state-bucket: ${{ vars.TF_STATE_BUCKET }}
+          region: ${{ vars.AWS_REGION }}
+          tfvars: ${{ secrets.PRODUCTION_TFVARS }}
+          role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/weather-story-bot-ci-apply-production
+          session-name: deploy-production-${{ github.run_id }}
+
+      - name: Download the approved plan
+        env:
+          PLAN_KEY: ${{ needs.plan-production.outputs.plan_key }}
+        run: mise run plan-store download "$PLAN_KEY"
+
+      # deploy rebuilds and refuses a zip that isn't the one the plan was made for.
+      - name: Deploy
+        run: mise run deploy production

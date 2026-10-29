@@ -76,10 +76,10 @@ run = "uv run pytest --cov --cov-report=term-missing --cov-report=html"
 # actionlint is given the files: with none it looks for a .git root and, finding none, checks
 # nothing and exits 0. An unmatched glob fails instead, so workflows are named *.yml.
 [tasks.lint-actions]
-description = "actionlint and zizmor on .github/workflows"
+description = "actionlint on the workflows, zizmor on the workflows and local actions"
 run = [
   "actionlint .github/workflows/*.yml",
-  "zizmor .github/workflows",
+  "zizmor .github/workflows .github/actions",
 ]
 
 # The same, with zizmor's online audits, using your gh login. Prefer this one on a laptop. The token
