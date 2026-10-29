@@ -14,8 +14,8 @@ the script.
   would otherwise touch AWS sets `"env": {"AWS_PROFILE": "readonly"}` so it can't write even if
   someone adds `--apply` later (`global/principles`). A tool that can only run with the MFA profile
   gets no entry; document why in its docstring
-- Give it `args` that work on a clean checkout. When a script reads something `make` produces
+- Give it `args` that work on a clean checkout. When a script reads something a mise task produces
   (`build/package`), say so in a `//` comment on the entry
 - Write output to a scratch path (`build/debug.zip`), never to a file another step consumes
-  (`build/lambda.zip`). A debug session must not change what `make plan` hashes or `make deploy` applies
+  (`build/lambda.zip`). A debug session must not change what `mise run plan` hashes or `mise run deploy` applies
 - A script with subcommands gets one entry per subcommand worth stepping through

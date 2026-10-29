@@ -26,8 +26,8 @@ override_data {
 }
 
 variables {
-  github_repository = "octo/weather-story-bot"
-  state_bucket      = "state-bucket"
+  github_subject_prefix = "repo:octo@1234/weather-story-bot@5678"
+  state_bucket          = "state-bucket"
 }
 
 run "the_staging_role_names_only_staging_resources" {

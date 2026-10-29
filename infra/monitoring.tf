@@ -1,5 +1,5 @@
 locals {
-  # Every alarm make start / make pause toggles; the alarm_names output hands them to the script.
+  # Every alarm mise run start / mise run pause toggles; the alarm_names output hands them to the script.
   alarm_names = [
     aws_cloudwatch_metric_alarm.errors.alarm_name,
     aws_cloudwatch_metric_alarm.missed_runs.alarm_name,
@@ -70,7 +70,7 @@ resource "aws_cloudwatch_metric_alarm" "errors" {
 
 # Every alarm is created with its actions on, so a new environment is loud until it is running:
 # missed_runs and quiet treat missing data as breaching and email while the schedule (created
-# DISABLED) is idle. make pause turns the actions off with the schedule and make start turns them
+# DISABLED) is idle. mise run pause turns the actions off with the schedule and mise run start turns them
 # back on (scripts/set_run_state.py). ignore_changes keeps an apply from undoing either.
 resource "aws_cloudwatch_metric_alarm" "missed_runs" {
   alarm_name        = "${local.name}-missed-runs"

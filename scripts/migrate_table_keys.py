@@ -27,7 +27,7 @@ flips STATE_TABLE (Phase 1.2 deploy gate 3; the pause command is in the 2026-09-
 Verification section):
     uv run python scripts/migrate_table_keys.py            # review the plan
     uv run python scripts/migrate_table_keys.py --apply
-    make build && make deploy                               # flips STATE_TABLE, re-enables schedule
+    mise run build && mise run deploy production         # flips STATE_TABLE, re-enables schedule
 
 Credentials come from the usual boto3 chain (`aws login` profiles work through `boto3[crt]`).
 Writes may need the MFA admin profile, which prompts for a code: AWS_PROFILE=<profile> ...

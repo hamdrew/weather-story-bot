@@ -29,10 +29,10 @@ locals {
 
   # The GitHub OIDC subject each role is assumable from. Exact strings, never patterns.
   ci_roles = {
-    "pr-plan"          = "repo:${var.github_repository}:pull_request"
-    "plan"             = "repo:${var.github_repository}:ref:refs/heads/main"
-    "apply-staging"    = "repo:${var.github_repository}:environment:staging"
-    "apply-production" = "repo:${var.github_repository}:environment:production"
+    "pr-plan"          = "${var.github_subject_prefix}:pull_request"
+    "plan"             = "${var.github_subject_prefix}:ref:refs/heads/main"
+    "apply-staging"    = "${var.github_subject_prefix}:environment:staging"
+    "apply-production" = "${var.github_subject_prefix}:environment:production"
   }
 
   state_keys = [for env in ["staging", "production"] : local.environments[env].state_key]

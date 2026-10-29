@@ -62,13 +62,13 @@ name = local.production ? "weather-story-bot" : "weather-story-bot-${var.environ
 ## Staging
 
 - **Staging is where real posts get watched.** Production becomes pipeline-only in Phase 2.1.
-  Until then it's `make deploy ENV=production`, so the rule is written ahead of being enforceable
+  Until then it's `mise run deploy production`, so the rule is written ahead of being enforceable
 - **Every environment's schedule is created `DISABLED` and its alarms are created on.** There is
-  no `schedule_enabled` variable, so no environment differs by a flag. `make start ENV=<env>` and
-  `make pause ENV=<env>` toggle the schedule and the alarm actions through the API
+  no `schedule_enabled` variable, so no environment differs by a flag. `mise run start <env>` and
+  `mise run pause <env>` toggle the schedule and the alarm actions through the API
   (`scripts/set_run_state.py`), and `ignore_changes` on `state` and `actions_enabled` keeps an apply
   from undoing them. `lifecycle` can't be conditional, so production is ignored too: its schedule
-  and alarms stay as they are, and `make pause ENV=production` is how you stop it. Terraform
+  and alarms stay as they are, and `mise run pause production` is how you stop it. Terraform
   never will
 - Alarms are created on, so a new environment emails (`missed-runs` and `quiet` breach on missing
   data) until it is started. That is deliberate: the first alert proves the alarms and the email
@@ -94,20 +94,20 @@ production, `WeatherStoryBot/<env>` elsewhere. The log metric filters have no di
 shared namespace would merge staging's posts into production's `quiet` and `repost-loop` alarms.
 Production keeps its original namespace so its metric history carries on.
 
-## Makefile
+## Tasks
 
-One `ENV` selects the backend config, the var file, the data dir and the plan file together, so
+The environment argument of the `plan`, `deploy`, `start` and `pause` tasks (`mise run plan <env>`) selects the backend config, the var file, the data dir and the plan file together, so
 they can't disagree:
 
-| `ENV=<env>` selects | Path (under `infra/`) |
+| `<env>` selects | Path (under `infra/`) |
 |---|---|
 | Backend config | `envs/<env>.backend.hcl` (its own state key) |
 | Var file | `envs/<env>.tfvars` |
 | Data dir | `.terraform-<env>/` (`TF_DATA_DIR`, relative to `-chdir`) |
 | Plan file | `deploy-<env>.tfplan` |
 
-- `ENV` has no default and must be given on the command line (an exported `ENV` is refused).
-  `check-env` fails with exit 2 on anything else
+- The environment is a required positional argument with `choices "staging" "production"`, so mise
+  refuses anything else, and an exported variable can't stand in for it
 - `plan` builds first and passes the zip's hash as `-var lambda_zip_sha256=<base64>`, so a plan is
   made for one exact build. `deploy` rebuilds and refuses to apply when the zip's hash isn't the
   planned one. The zip is reproducible (`scripts/build_zip.py`), so an unchanged build plans as
@@ -119,7 +119,7 @@ they can't disagree:
 - `artifacts_bucket` and `permissions_boundary_arn` are required variables (both created by
   `infra/bootstrap`). The boundary is validated to be this environment's own, and both the Lambda
   and Scheduler roles are created under it
-- `environment` is passed as `-var environment=$(ENV)`, never kept in a tfvars file, so it can't
+- `environment` is passed as `-var environment=<env>`, never kept in a tfvars file, so it can't
   disagree with the backend
 - A data dir per environment, because `.terraform/` remembers the backend it was initialized
   against: with a shared one, a forgotten `-reconfigure` points a staging plan at production's

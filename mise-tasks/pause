@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#MISE description="Pause an environment's schedule and alarm actions (ask first: needs MFA, changes a live environment)"
+#USAGE arg "<environment>" help="The environment to pause" {
+#USAGE   choices "staging" "production"
+#USAGE }
+set -euo pipefail
+
+# Terraform creates the schedule DISABLED and the alarms on, then ignores both
+# (scripts/set_run_state.py explains the order and the idempotence). The names and region come from
+# the environment's outputs, which need a deploy of this version first. Needs the weather-deploy
+# profile's MFA code, so run it in a real terminal.
+env=${usage_environment?}
+TF_DATA_DIR=.terraform-$env terraform -chdir=infra output -json |
+  uv run python scripts/set_run_state.py pause --apply -

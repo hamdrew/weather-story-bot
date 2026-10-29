@@ -18,7 +18,7 @@ Pause the schedule first, so no run of either Lambda version lands between the b
 deploy (see the spec's Verification section for the pause command):
     uv run python scripts/migrate_story_keys.py            # review the plan
     uv run python scripts/migrate_story_keys.py --apply
-    make deploy                                             # also re-enables the schedule
+    mise run deploy production                                 # also re-enables the schedule
 
 Credentials come from the usual boto3 chain (`aws login` profiles work through `boto3[crt]`).
 Writes may need the MFA admin profile, which prompts for a code: AWS_PROFILE=<profile> ...

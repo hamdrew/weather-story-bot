@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from scripts.build_zip import build_zip, main
+from scripts.build_zip import build_zip, drop_console_scripts, main
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -127,3 +127,77 @@ def test_a_symlinked_directory_is_refused_rather_than_dropped(tmp_path: Path) ->
 
     with pytest.raises(ValueError, match="linked"):
         build_zip(tree, tmp_path / "out.zip")
+
+
+def installed_tree(root: Path, interpreter: str) -> Path:
+    """What `uv pip install --target` leaves: the package, a console script and its RECORD line.
+
+    The script's first line names the interpreter that ran the install, and RECORD holds its hash.
+    """
+    script = f"#!{interpreter}\nfrom httpx import main\n"
+    digest = base64.urlsafe_b64encode(hashlib.sha256(script.encode()).digest()).rstrip(b"=")
+    record = (
+        "httpx/_client.py,sha256=abc,17\n"
+        f"bin/httpx,sha256={digest.decode()},{len(script)}\n"
+        "httpx-0.28.1.dist-info/RECORD,,\n"
+    )
+    return make_tree(root, FILES | {"bin/httpx": script, "httpx-0.28.1.dist-info/RECORD": record})
+
+
+def test_the_interpreter_that_installed_the_package_does_not_change_the_bytes(
+    tmp_path: Path,
+) -> None:
+    laptop = installed_tree(tmp_path / "laptop", "/Users/someone/project/.venv/bin/python")
+    runner = installed_tree(tmp_path / "runner", "/usr/bin/python")
+
+    assert main([str(laptop), str(tmp_path / "laptop.zip")]) == 0
+    assert main([str(runner), str(tmp_path / "runner.zip")]) == 0
+
+    assert (tmp_path / "laptop.zip").read_bytes() == (tmp_path / "runner.zip").read_bytes()
+
+
+def test_console_scripts_are_not_in_the_zip(tmp_path: Path) -> None:
+    tree = installed_tree(tmp_path / "tree", "/usr/bin/python")
+
+    main([str(tree), str(tmp_path / "out.zip")])
+
+    with zipfile.ZipFile(tmp_path / "out.zip") as archive:
+        names = archive.namelist()
+    assert [name for name in names if name.startswith("bin/")] == []
+    assert "weather_story_bot/handler.py" in names
+
+
+def test_record_loses_the_lines_for_the_scripts_and_keeps_the_rest(tmp_path: Path) -> None:
+    tree = installed_tree(tmp_path / "tree", "/usr/bin/python")
+
+    drop_console_scripts(tree)
+
+    record = (tree / "httpx-0.28.1.dist-info/RECORD").read_text()
+    assert record == "httpx/_client.py,sha256=abc,17\nhttpx-0.28.1.dist-info/RECORD,,\n"
+    assert not (tree / "bin").exists()
+
+
+def test_names_that_only_start_like_bin_are_kept(tmp_path: Path) -> None:
+    tree = make_tree(
+        tmp_path / "tree",
+        FILES
+        | {
+            "binary/tool.py": "x = 1\n",
+            "binary-1.0.dist-info/RECORD": "binary/tool.py,sha256=x,6\nbin/run,sha256=y,3\n",
+        },
+    )
+
+    drop_console_scripts(tree)
+
+    assert (tree / "binary/tool.py").read_text() == "x = 1\n"
+    assert (tree / "binary-1.0.dist-info/RECORD").read_text() == "binary/tool.py,sha256=x,6\n"
+
+
+def test_a_tree_without_scripts_is_left_alone(tmp_path: Path) -> None:
+    tree = make_tree(tmp_path / "tree", FILES | {"httpx-0.28.1.dist-info/RECORD": "a,,\n"})
+    before = build_zip(tree, tmp_path / "before.zip")
+
+    drop_console_scripts(tree)
+    drop_console_scripts(tree)
+
+    assert build_zip(tree, tmp_path / "after.zip") == before

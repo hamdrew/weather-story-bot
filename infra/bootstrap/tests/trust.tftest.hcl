@@ -25,8 +25,8 @@ override_data {
 }
 
 variables {
-  github_repository = "octo/weather-story-bot"
-  state_bucket      = "state-bucket"
+  github_subject_prefix = "repo:octo@1234/weather-story-bot@5678"
+  state_bucket          = "state-bucket"
 }
 
 run "oidc_provider_is_githubs_with_the_sts_audience" {
@@ -60,10 +60,10 @@ run "each_trust_policy_pins_the_audience_and_an_exact_subject" {
         for c in one(d.statement).condition : c.values if c.variable == "token.actions.githubusercontent.com:sub"
       ]))
       }) == jsonencode({
-      "pr-plan"          = ["repo:octo/weather-story-bot:pull_request"]
-      "plan"             = ["repo:octo/weather-story-bot:ref:refs/heads/main"]
-      "apply-staging"    = ["repo:octo/weather-story-bot:environment:staging"]
-      "apply-production" = ["repo:octo/weather-story-bot:environment:production"]
+      "pr-plan"          = ["repo:octo@1234/weather-story-bot@5678:pull_request"]
+      "plan"             = ["repo:octo@1234/weather-story-bot@5678:ref:refs/heads/main"]
+      "apply-staging"    = ["repo:octo@1234/weather-story-bot@5678:environment:staging"]
+      "apply-production" = ["repo:octo@1234/weather-story-bot@5678:environment:production"]
     })
     error_message = "Each role's subject must be exact and name this repository."
   }
@@ -94,12 +94,24 @@ run "each_trust_policy_pins_the_audience_and_an_exact_subject" {
   }
 }
 
-run "the_repository_variable_is_validated" {
+# The legacy name-only form is refused: this repository's tokens carry immutable subjects, so a
+# trust policy built from it would never match (and a renamed or recreated repository could).
+run "a_legacy_subject_prefix_is_refused" {
   command = plan
 
   variables {
-    github_repository = "not-a-repository"
+    github_subject_prefix = "repo:octo/weather-story-bot"
   }
 
-  expect_failures = [var.github_repository]
+  expect_failures = [var.github_subject_prefix]
+}
+
+run "a_prefix_without_repo_is_refused" {
+  command = plan
+
+  variables {
+    github_subject_prefix = "octo@1234/weather-story-bot@5678"
+  }
+
+  expect_failures = [var.github_subject_prefix]
 }
