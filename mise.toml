@@ -82,6 +82,14 @@ run = [
   "zizmor .github/workflows .github/actions",
 ]
 
+# zizmor's stricter auditor persona over the workflows and the local action: the pedantic and
+# low-confidence audits the default persona hides. Run by hand to read, and to learn from; it is not
+# part of lint-actions or lint, so a finding here never blocks anything. Every accepted finding
+# carries an inline `# zizmor: ignore[<audit>] <reason>`, so a clean run means each one was decided.
+[tasks.lint-actions-auditor]
+description = "zizmor --persona=auditor on the workflows and local actions (by hand; not part of lint)"
+run = "zizmor --persona=auditor .github/workflows .github/actions"
+
 # The same, with zizmor's online audits, using your gh login. Prefer this one on a laptop. The token
 # is read into a variable first because `VAR="$(gh auth token)" cmd` carries on with an empty VAR
 # when gh fails, and zizmor would then quietly run offline. ZIZMOR_GITHUB_TOKEN, not GH_TOKEN, so

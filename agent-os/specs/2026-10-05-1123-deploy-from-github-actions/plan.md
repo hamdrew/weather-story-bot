@@ -411,6 +411,7 @@ difference means the lock misses a platform: record it and re-lock). An `AccessD
 - **Break-glass.** `check-break-glass` (hidden), called first by `plan` and `deploy`; only `BREAK_GLASS=1` or `GITHUB_ACTIONS=true` pass for production. 8 tests in `tests/test_check_break_glass.py`, written first.
 - **Docs.** New standard `infra/pipeline`; `infra/environments`, README Deploy, CLAUDE.md amended.
 - **Auditor review.** `zizmor --persona=auditor` finds nothing new: 3 ignored, all `secrets-outside-env` on the repo-level tfvars secrets in the non-environment jobs (the two `plan` legs and `plan-production`). The environment jobs need no ignore.
+- **Auditor task (added after review).** `mise run lint-actions-auditor` runs `zizmor --persona=auditor` on the workflows and the local action. It is a separate task by decision, not part of `lint-actions` or `lint`, so the plan's "no `--persona` flag in `lint-actions`" still holds. All 8 of its findings are accepted inline with a reason: 3 `secrets-outside-env` (the repo-level tfvars secrets), 4 `self-repository` (`./` for the local action, since actionlint rejects `$/`) and 1 `anonymous-definition` (the PR `plan` job, whose `name:` was dropped so a skipped matrix job doesn't show an unexpanded expression).
 - **Not proved offline:** the jobs themselves, `plan-store`'s S3 calls, and the environment approval. That is Gate 4b.
 
 ### Gate 4b: the first pipeline deploy

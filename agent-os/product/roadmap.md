@@ -153,15 +153,16 @@ that the CLI can't send one. Source: standards review, "Environments".
   stays O(1) in offices, per-office visibility comes from queries rather than metrics, prefer
   pay-per-use with no idle cost, every spec carries a cost section, retention is a cost decision,
   and the budget alarm rises deliberately when a spec raises expected spend.
-- **New rule:** staging is where real posts get watched. Production becomes pipeline-only when
-  Phase 2.1 lands — until then it's still `make deploy`, and the rule is written down ahead of
-  being enforceable.
+- **New rule:** staging is where real posts get watched. Production became pipeline-only when
+  Phase 2.1 landed (`infra/pipeline`).
 
 ## Phase 2.1: Deploy from GitHub Actions
 
-In progress (spec `2026-10-05-1123-deploy-from-github-actions`). Replaces `make deploy` from my
-laptop, before anything migrates the database or adds offices. Stage 1 (reproducible zip,
-`terraform test`, Checkov) is deployed to both environments (Gate 1 passed 2026-10-08).
+Done (spec `2026-10-05-1123-deploy-from-github-actions`; all four stages and gates passed, the
+first pipeline deploy of both environments on 2026-10-29). Replaced `make deploy` from my laptop,
+before anything migrates the database or adds offices. Merges to `main` deploy staging, then
+production after my approval (skipped when a plan changes nothing); the laptop path stays as
+`BREAK_GLASS=1`.
 
 - **Two fixes first:** make the Lambda zip reproducible, or every plan shows a change that isn't
   one; and make `plan`/`deploy` build first or fail outright when the zip is missing, so neither
