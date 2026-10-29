@@ -92,11 +92,26 @@ Variables already set in your shell take precedence over `.env`.
 
 ## Deploy
 
+Merging to `main` deploys, through `.github/workflows/pipeline.yml` (standard `infra/pipeline`):
+
+1. `checks` (lint, tests, Terraform tests, scan) passes.
+2. `deploy-staging` plans and applies staging, with no approval.
+3. `plan-production` plans production and saves the plan in the private artifacts bucket.
+4. `deploy-production` waits for your approval (read the plan in the `plan (production)` job's log first; the approval screen doesn't show it), then applies that exact plan.
+
+A push whose plan changes nothing skips the deploys and asks for no approval. Pull requests show both plans, read-only, before you merge. **Rolling back is a revert**: the zip's key is its hash, so the reverted commit rebuilds the same bytes and goes through the same steps. A change that needs a new AWS permission or service is applied to the bootstrap stack first (below). A new required Terraform variable means refreshing both tfvars secrets.
+
+**Break-glass** is the laptop path, for an emergency or for what the pipeline's roles are denied (a new table or archive). It needs MFA, and production refuses without the flag on the command line. Staging needs no flag:
+
 ```sh
-mise run build                # vendors deps for python3.13/arm64 into build/lambda.zip
-mise run plan production       # builds first; review changes; saves them to infra/deploy-production.tfplan
-mise run deploy production     # rebuilds, checks the zip, applies exactly that saved plan, then deletes it
+mise run build                                  # vendors deps for python3.13/arm64 into build/lambda.zip
+mise run plan staging                           # builds first; review changes; saves them to infra/deploy-staging.tfplan
+mise run deploy staging                         # rebuilds, checks the zip, applies exactly that saved plan, then deletes it
+BREAK_GLASS=1 mise run plan production
+BREAK_GLASS=1 mise run deploy production
 ```
+
+If you deploy production by hand, bring staging to the same commit through the pipeline afterwards.
 
 The zip is reproducible: `scripts/build_zip.py` sorts the entries and fixes their timestamps, modes and compression, so the same source and lockfile give the same bytes. `mise run build` prints the zip's base64 sha256 (also in `build/lambda.zip.sha256`), `mise run plan` passes it to Terraform as `lambda_zip_sha256`, and a build that changes nothing plans as **No changes**. `mise run deploy` rebuilds and refuses to apply if the new zip isn't the one the plan was made for. Run `mise run plan` again after any source change.
 
@@ -123,7 +138,7 @@ Invoke it again and every story should show as `skipped`. Logs are structured JS
 
 ## Bootstrap (CI access)
 
-`infra/bootstrap/` is a second Terraform stack that holds what the GitHub Actions pipeline signs in with: the GitHub OIDC provider, four CI roles, a permissions boundary per environment and the private artifacts bucket (Lambda zips and saved production plans). It is applied **by hand with MFA**, never by the pipeline, so the pipeline can't widen its own permissions. Nothing deploys through it until Phase 2.1's pipeline (Stage 4) exists, and `terraform destroy` removes it with no effect on either environment.
+`infra/bootstrap/` is a second Terraform stack that holds what the GitHub Actions pipeline signs in with: the GitHub OIDC provider, four CI roles, a permissions boundary per environment and the private artifacts bucket (Lambda zips and saved production plans). It is applied **by hand with MFA**, never by the pipeline, so the pipeline can't widen its own permissions. The pipeline assumes these roles to plan and deploy, and the Lambdas' code is read from its artifacts bucket, so `terraform destroy` is a break-glass step, not a cleanup.
 
 ```sh
 cp infra/bootstrap/backend.hcl.example infra/bootstrap/backend.hcl             # your state bucket

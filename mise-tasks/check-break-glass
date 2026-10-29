@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#MISE description="Refuse production unless it is the pipeline or a deliberate break-glass run"
+#MISE hide=true
+#USAGE arg "<environment>" help="The environment about to be planned or deployed" {
+#USAGE   choices "staging" "production"
+#USAGE }
+set -euo pipefail
+
+# Production is pipeline-only (infra/pipeline). The laptop path stays for emergencies, and has to be
+# asked for on the command line: BREAK_GLASS=1 mise run deploy production. Anything but "1" counts as no.
+env=${usage_environment?}
+[[ $env == production ]] || exit 0
+[[ ${GITHUB_ACTIONS:-} == true || ${BREAK_GLASS:-} == 1 ]] && exit 0
+echo "Production deploys from the pipeline. To deploy from here anyway, say so: BREAK_GLASS=1 mise run <plan|deploy> production" >&2
+exit 1

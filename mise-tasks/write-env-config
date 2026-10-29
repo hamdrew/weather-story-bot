@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+#MISE description="Write an environment's backend config and tfvars from CI variables and secrets (Actions only)"
+#MISE hide=true
+#USAGE arg "<environment>" help="The environment to write files for" {
+#USAGE   choices "staging" "production"
+#USAGE }
+set -euo pipefail
+
+# The same two local-only files a laptop has (infra/environments), written from the repository's
+# variables and secrets. Refuses outside Actions so it can never overwrite a laptop's own files.
+# Reads STATE_BUCKET, STATE_KEY, REGION and TFVARS from the environment: values go in through env,
+# never interpolated into the script.
+env=${usage_environment?}
+[[ ${GITHUB_ACTIONS:-} == true ]] || { echo "write-env-config runs in GitHub Actions only" >&2; exit 1; }
+# The values go inside HCL strings, so a quote or newline would end the string early or add an
+# attribute. Refuse them rather than escape them: none of these legitimately holds either.
+require() { # <variable name> <what to set when it is empty>
+  [[ -n ${!1:-} ]] || { echo "::error::Set $2 (empty $1)"; exit 1; }
+  [[ ${!1} != *[\"$'\n']* ]] || { echo "::error::$1 contains a quote or newline"; exit 1; }
+}
+require STATE_BUCKET "the TF_STATE_BUCKET variable"
+require STATE_KEY "STATE_KEY (the workflow's state key)"
+require REGION "the AWS_REGION variable"
+[[ -n ${TFVARS:-} ]] || {
+  echo "::error::Set the $(echo "$env" | tr '[:lower:]' '[:upper:]')_TFVARS secret"
+  exit 1
+}
+cat > "infra/envs/$env.backend.hcl" <<HCL
+bucket       = "$STATE_BUCKET"
+key          = "$STATE_KEY"
+region       = "$REGION"
+encrypt      = true
+use_lockfile = true
+HCL
+printf '%s\n' "$TFVARS" > "infra/envs/$env.tfvars"

@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+#MISE description="Print true or false: does the environment's saved plan change anything? (CI uses it to skip no-op deploys)"
+#MISE hide=true
+#USAGE arg "<environment>" help="The environment whose saved plan to read" {
+#USAGE   choices "staging" "production"
+#USAGE }
+#USAGE flag "--github-output" help="Also write changed=<answer> to $GITHUB_OUTPUT, only once the answer is known"
+set -euo pipefail
+
+# A plan with nothing but no-op and read actions (and unchanged outputs) is "No changes". An error
+# anywhere here fails the task with nothing printed, so a broken check can't read as "no changes"
+# and skip a deploy.
+env=${usage_environment?}
+export TF_DATA_DIR=.terraform-$env
+
+plan=$(terraform -chdir=infra show -json "deploy-$env.tfplan")
+# Captured on its own line so a failure stops the task (set -e). Written into `echo "x=$(cmd)"`, the
+# same failure would leave a green step and an empty answer.
+answer=$(printf '%s' "$plan" | uv run --no-project python -c '
+import json, sys
+
+plan = json.load(sys.stdin)
+quiet = {"no-op", "read"}
+changed = any(set(c["change"]["actions"]) - quiet for c in plan.get("resource_changes", []))
+changed = changed or any(set(o["actions"]) - quiet for o in plan.get("output_changes", {}).values())
+print("true" if changed else "false")
+')
+[[ $answer == true || $answer == false ]] || { echo "plan-changes: unexpected answer '$answer'" >&2; exit 1; }
+
+if [[ ${usage_github_output:-false} == true ]]; then
+  echo "changed=$answer" >> "${GITHUB_OUTPUT:?}"
+fi
+echo "$answer"

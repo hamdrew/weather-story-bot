@@ -47,6 +47,8 @@ infra:
     description: Production unsuffixed, others weather-story-bot-<env>; differences via variables or local.production, never forked files; created things derived from environment, outside things are required variables; production-only budget and posted table; the environment argument selects backend, var file, data dir and plan; lowercase Environment tag on everything via default_tags, bucket ABAC on; values that print in public logs are sensitive; plan builds first and passes the zip hash, deploy refuses a different zip; staging is where real posts get watched; schedule created DISABLED and alarms created on, toggled by mise run start/pause; a bot and token parameter per environment; per-environment metric namespaces
   iam:
     description: Exact actions on narrowest ARNs via policy documents; the only delete is item-level DeleteItem for the lease; Environment tag conditions (Allow + StringEquals, on exact ARNs, no tag-write actions, live a deploy before the condition; Logs has none); SourceAccount guard on service trust policies; CI roles in infra/bootstrap (exact OIDC sub, plan roles read configuration never data, apply roles by name + tag + per-environment boundary, Deny on deletes)
+  pipeline:
+    description: pull requests plan, main deploys staging then production after approval; production plan saved in S3 (never a GitHub artifact); id-token only in jobs that run no tests; one deploy at a time; a new variable means refreshing the tfvars secrets, a new AWS action a bootstrap change first; rollback is a revert; production laptop deploys need BREAK_GLASS=1
 
 testing:
   handler-tests:

@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+#MISE description="Append the environment's saved plan to the workflow run's summary page (Actions only)"
+#MISE hide=true
+#USAGE arg "<environment>" help="The environment whose saved plan to show" {
+#USAGE   choices "staging" "production"
+#USAGE }
+set -euo pipefail
+
+# The same text the plan step already printed to the log, so it shows nothing the public log does not
+# (sensitive values print as "(sensitive value)"). A summary is capped at 1 MiB, so a huge plan is cut.
+env=${usage_environment?}
+export TF_DATA_DIR=.terraform-$env
+: "${GITHUB_STEP_SUMMARY:?runs in GitHub Actions only}"
+
+text=$(terraform -chdir=infra show -no-color "deploy-$env.tfplan")
+headline=$(grep -E '^(Plan:|No changes\.)' <<<"$text" | head -n 1 || true)
+limit=500000
+note=
+if ((${#text} > limit)); then
+  text=${text:0:limit}
+  note=$'\n\n(truncated: see the plan step in the job log)'
+fi
+
+{
+  echo "### Terraform plan: $env: ${headline:-see below}"
+  echo
+  echo "<details><summary>Full plan</summary>"
+  echo
+  echo '```'
+  printf '%s\n' "$text"
+  echo '```'
+  echo "$note"
+  echo "</details>"
+} >> "$GITHUB_STEP_SUMMARY"

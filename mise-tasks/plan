@@ -11,6 +11,7 @@ set -euo pipefail
 # backend, and forgetting -reconfigure would point a staging plan at production's state.
 # TF_DATA_DIR is relative to -chdir, so it lands in infra/.terraform-<env>/.
 env=${usage_environment?}
+mise run --quiet check-break-glass "$env"
 export TF_DATA_DIR=.terraform-$env
 
 # Save the plan so deploy applies exactly what was reviewed. Terraform refuses a plan that has gone
