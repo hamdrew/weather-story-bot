@@ -1,5 +1,5 @@
-# Passed by the Makefile from ENV (-var environment=...), never set in a tfvars file, so it can't
-# disagree with the backend config the same ENV selects.
+# Passed by the plan task (mise-tasks/plan) from its environment argument (-var environment=...),
+# never set in a tfvars file, so it can't disagree with the backend config the same argument selects.
 variable "environment" {
   description = "Deployment environment: production or staging. Selects names, the token parameter and the metric namespace."
   type        = string
@@ -125,11 +125,11 @@ variable "permissions_boundary_arn" {
   }
 }
 
-# Passed by `make plan` from the zip it just built (build/lambda.zip.sha256), never set in a tfvars
+# Passed by `mise run plan` from the zip it just built (build/lambda.zip.sha256), never set in a tfvars
 # file. Terraform takes it as a plain input instead of hashing the file itself, so a plan is
-# made for one exact build, and `make deploy` refuses to apply it if the rebuilt zip differs.
+# made for one exact build, and `mise run deploy` refuses to apply it if the rebuilt zip differs.
 variable "lambda_zip_sha256" {
-  description = "Base64 sha256 of the zip make build produces, as printed by scripts/build_zip.py."
+  description = "Base64 sha256 of the zip mise run build produces, as printed by scripts/build_zip.py."
   type        = string
 
   validation {

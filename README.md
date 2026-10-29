@@ -25,7 +25,7 @@ EventBridge Scheduler ──► Lambda ──► api.weather.gov
 
 ## One-time setup
 
-Prerequisites: [uv](https://docs.astral.sh/uv/), Terraform ≥ 1.11, and the AWS CLI with credentials for the target account.
+Prerequisites: [mise](https://mise.jdx.dev/) and the AWS CLI with credentials for the target account. `mise.toml` holds the tool versions as ranges (Terraform 1.x, uv 0.13.x) and the committed `mise.lock` pins what they resolve to, so `mise install` fetches the same versions on every machine and in CI. To move them, run `mise upgrade` and then `mise lock --platform linux-x64,macos-arm64`, and commit both files (a release must be a week old first). Every task below is a mise task, listed by `mise tasks`. To run several, put `:::` between them (`mise run lint ::: test`), or mise hands the second name to the first as an argument.
 
 1. **Create the bot.** Message [@BotFather](https://t.me/BotFather), send `/newbot`, and copy the token.
 2. **Create the channel.** Create a private Telegram channel and add the bot as an administrator that can post messages.
@@ -58,18 +58,20 @@ Prerequisites: [uv](https://docs.astral.sh/uv/), Terraform ≥ 1.11, and the AWS
    cp infra/envs/production.backend.hcl.example infra/envs/production.backend.hcl   # set the bucket name
    cp infra/envs/production.tfvars.example infra/envs/production.tfvars             # set chat_id, nws_user_agent and alert_email
    ```
-   `make plan ENV=production` runs `terraform init` itself, in production's own data dir (`infra/.terraform-production/`). There's no `terraform.tfvars`: Terraform loads that automatically, so any variable an environment's file left out would silently take production's value.
+   `mise run plan production` runs `terraform init` itself, in production's own data dir (`infra/.terraform-production/`). There's no `terraform.tfvars`: Terraform loads that automatically, so any variable an environment's file left out would silently take production's value.
    NWS asks API clients to send a `User-Agent` that identifies the app and gives a way to contact you, e.g. `weather-story-bot (you@example.com)`.
 
 ## Local development
 
 ```sh
-make test     # unit tests (respx + moto; no network, no AWS)
-make tftest   # terraform test on infra/tests (offline, mock AWS provider, no credentials)
-make scan     # Checkov security scan of infra/ (blocking; Checkov lives in tools/checkov/)
-make coverage # tests with a coverage report (terminal + htmlcov/index.html)
-make lint     # ruff + ty + terraform fmt
-make format   # apply ruff/terraform formatting
+mise run test       # unit tests (respx + moto; no network, no AWS)
+mise run tftest     # terraform test on infra/tests (offline, mock AWS provider, no credentials)
+mise run scan       # Checkov security scan of infra/ (Terraform only; blocking; Checkov lives in tools/checkov/)
+mise run coverage   # tests with a coverage report (terminal + htmlcov/index.html)
+mise run lint       # ruff + ty + terraform fmt + lint-actions
+mise run lint-actions # actionlint + zizmor on .github/workflows (zizmor offline unless a token is set)
+mise run lint-actions-online # the same with zizmor's online audits, using your gh login (prefer this locally)
+mise run format     # apply ruff/terraform formatting
 
 # Print each live story's decision beside its caption (read-only: no AWS, no Telegram):
 NWS_USER_AGENT="weather-story-bot (you@example.com)" \
@@ -86,23 +88,23 @@ uv run python -m weather_story_bot --dry-run --office MKX
 
 Variables already set in your shell take precedence over `.env`.
 
-`make scan` fails on any Checkov finding. Fix it, or suppress it inline inside the resource block with a reason: `#checkov:skip=CKV_AWS_50:the structured JSON logs are the trace`. A skip with no reason fails the scan too. Checkov is its own small uv project in `tools/checkov/` (it pins `boto3` exactly, which the main project's dev tools can't share). Its version is in `tools/checkov/uv.lock`, and Dependabot proposes bumps. Run `uv lock --upgrade --project tools/checkov` to bump it by hand.
+`mise run scan` fails on any Checkov finding. Fix it, or suppress it inline inside the resource block with a reason: `#checkov:skip=CKV_AWS_50:the structured JSON logs are the trace`. A skip with no reason fails the scan too. Checkov is its own small uv project in `tools/checkov/` (it pins `boto3` exactly, which the main project's dev tools can't share). Its version is in `tools/checkov/uv.lock`, and Dependabot proposes bumps. Run `uv lock --upgrade --project tools/checkov` to bump it by hand.
 
 ## Deploy
 
 ```sh
-make build                   # vendors deps for python3.13/arm64 into build/lambda.zip
-make plan ENV=production     # builds first; review changes; saves them to infra/deploy-production.tfplan
-make deploy ENV=production   # rebuilds, checks the zip, applies exactly that saved plan, then deletes it
+mise run build                # vendors deps for python3.13/arm64 into build/lambda.zip
+mise run plan production       # builds first; review changes; saves them to infra/deploy-production.tfplan
+mise run deploy production     # rebuilds, checks the zip, applies exactly that saved plan, then deletes it
 ```
 
-The zip is reproducible: `scripts/build_zip.py` sorts the entries and fixes their timestamps, modes and compression, so the same source and lockfile give the same bytes. `make build` prints the zip's base64 sha256 (also in `build/lambda.zip.sha256`), `make plan` passes it to Terraform as `lambda_zip_sha256`, and a build that changes nothing plans as **No changes**. `make deploy` rebuilds and refuses to apply if the new zip isn't the one the plan was made for. Run `make plan` again after any source change.
+The zip is reproducible: `scripts/build_zip.py` sorts the entries and fixes their timestamps, modes and compression, so the same source and lockfile give the same bytes. `mise run build` prints the zip's base64 sha256 (also in `build/lambda.zip.sha256`), `mise run plan` passes it to Terraform as `lambda_zip_sha256`, and a build that changes nothing plans as **No changes**. `mise run deploy` rebuilds and refuses to apply if the new zip isn't the one the plan was made for. Run `mise run plan` again after any source change.
 
-The Lambda's code comes from S3, not from a file Terraform reads. After the hash check, `make deploy` uploads the zip to `s3://<artifacts bucket>/<env>/lambda/<hash>.zip` with `If-None-Match: *` (the bucket policy refuses a write without it, so an object is never replaced), then applies. The key is the zip's hash, so a 412 on upload just means those bytes are already there, and reverting a commit rebuilds the same bytes at the same key. Each environment's tfvars needs two values from the bootstrap stack, `artifacts_bucket` and `permissions_boundary_arn` (its `artifacts_bucket` and `boundary_arns` outputs; the `.example` files show the shape). Both Lambda roles are created under that environment's permissions boundary.
+The Lambda's code comes from S3, not from a file Terraform reads. After the hash check, `mise run deploy` uploads the zip to `s3://<artifacts bucket>/<env>/lambda/<hash>.zip` with `If-None-Match: *` (the bucket policy refuses a write without it, so an object is never replaced), then applies. The key is the zip's hash, so a 412 on upload just means those bytes are already there, and reverting a commit rebuilds the same bytes at the same key. Each environment's tfvars needs two values from the bootstrap stack, `artifacts_bucket` and `permissions_boundary_arn` (its `artifacts_bucket` and `boundary_arns` outputs; the `.example` files show the shape). Both Lambda roles are created under that environment's permissions boundary.
 
 `offices`, `alert_email` and `nws_user_agent` are `sensitive`, so a plan prints `(sensitive value)` for them. This repository is public, and its CI logs will be too.
 
-`ENV` (`production` or `staging`) is required and selects the backend config, var file, data dir and plan file together.
+The environment argument (`production` or `staging`) is required and selects the backend config, var file, data dir and plan file together.
 
 To run other Terraform commands, point them at the same environment's data dir:
 
@@ -125,13 +127,13 @@ Invoke it again and every story should show as `skipped`. Logs are structured JS
 
 ```sh
 cp infra/bootstrap/backend.hcl.example infra/bootstrap/backend.hcl             # your state bucket
-cp infra/bootstrap/bootstrap.tfvars.example infra/bootstrap/bootstrap.tfvars   # your repository and state bucket
+cp infra/bootstrap/bootstrap.tfvars.example infra/bootstrap/bootstrap.tfvars   # your repository's OIDC subject prefix and state bucket
 cp infra/override.tf infra/bootstrap/override.tf                               # profile = "weather-deploy"
 aws iam list-open-id-connect-providers --profile readonly   # is there already a GitHub provider?
-make bootstrap-plan                                          # review it
+mise run bootstrap-plan                                          # review it
 ```
 
-Before applying it, create the GitHub side (below): a workflow that names an environment that doesn't exist yet creates it with no protection, and could then assume that environment's apply role. Then `make bootstrap-deploy`, which applies exactly that saved plan.
+Before applying it, create the GitHub side (below): a workflow that names an environment that doesn't exist yet creates it with no protection, and could then assume that environment's apply role. Then `mise run bootstrap-deploy`, which applies exactly that saved plan.
 
 The account has one GitHub OIDC provider at most. If the listing shows `token.actions.githubusercontent.com`, import it before planning, so the stack doesn't try to create a duplicate:
 
@@ -150,7 +152,7 @@ TF_DATA_DIR=.terraform-bootstrap terraform -chdir=infra/bootstrap import -var-fi
 
 An apply role creates or changes IAM roles only under its own environment's boundary (`weather-story-bot-staging-boundary`, `weather-story-bot-boundary`, which the main stack takes as `permissions_boundary_arn` in Phase 2.1 Stage 3) and can never delete a table, the archive bucket or an object in either bucket. The outputs (`terraform output`, with the same `TF_DATA_DIR`) give the bucket name and the boundary ARNs.
 
-The GitHub side, by hand (Settings, or `gh api`), before `make bootstrap-deploy`. The workflows read these. `AWS_ACCOUNT_ID` and `TF_STATE_BUCKET` are plain repository variables. `STAGING_TFVARS` and `PRODUCTION_TFVARS` hold your chat ids and email, so they are **secrets**: the repository is public, and Actions masks secrets in its logs but prints variables as they are.
+The GitHub side, by hand (Settings, or `gh api`), before `mise run bootstrap-deploy`. The workflows read these. `AWS_ACCOUNT_ID`, `AWS_REGION` and `TF_STATE_BUCKET` are plain repository variables. `STAGING_TFVARS` and `PRODUCTION_TFVARS` hold your chat ids and email, so they are **secrets**: the repository is public, and Actions masks secrets in its logs but prints variables as they are.
 
 ```sh
 REPO=<owner>/weather-story-bot
@@ -163,8 +165,9 @@ gh api -X PUT repos/$REPO/environments/production \
   -F 'deployment_branch_policy[protected_branches]=false' -F 'deployment_branch_policy[custom_branch_policies]=true' \
   -F "reviewers[][type]=User" -F "reviewers[][id]=$USER_ID" -F prevent_self_review=false
 gh api -X POST repos/$REPO/environments/production/deployment-branch-policies -f name=main
-# What the workflows read: two variables, and the tfvars as secrets.
+# What the workflows read: three variables, and the tfvars as secrets.
 gh variable set AWS_ACCOUNT_ID --repo $REPO --body <account id>
+gh variable set AWS_REGION --repo $REPO --body us-east-2
 gh variable set TF_STATE_BUCKET --repo $REPO --body <state bucket>
 gh secret set STAGING_TFVARS --repo $REPO < infra/envs/staging.tfvars
 gh secret set PRODUCTION_TFVARS --repo $REPO < infra/envs/production.tfvars
@@ -217,21 +220,21 @@ Staging is where real posts get watched: its own bot, a private channel, its own
    ```
 4. **Deploy.** The plan should create only `-staging` resources, with no budget, the schedule `DISABLED` and all five alarms on:
    ```sh
-   make plan ENV=staging
-   make deploy ENV=staging
+   mise run plan staging
+   mise run deploy staging
    ```
    Then confirm the subscription email for the `weather-story-bot-staging-alerts` topic. Until you start staging, `missed-runs` and `quiet` will breach and email you, because their alarms are on and nothing is running. That's expected, and a handy proof that the alarms and the email path work.
 5. **Start it.** The first run fires immediately and posts MKX's active stories to the private channel, then it runs every 15 minutes. Wait for the next run, which should log every story as `skipped`, then pause it:
    ```sh
-   make start ENV=staging
-   make pause ENV=staging
+   mise run start staging
+   mise run pause staging
    ```
 
 ## Starting and pausing an environment
 
-A new environment's schedule is created `DISABLED` and its alarms are created on. `make start ENV=<env>` enables the schedule and the alarm actions, and `make pause ENV=<env>` disables both. Both ask for your MFA code (the `weather-deploy` profile Terraform uses), so run them in a terminal. `scripts/set_run_state.py` does the work and does nothing without `--apply`, which the make targets pass. It is idempotent, and it reads the schedule and alarm names from the environment's Terraform outputs, so deploy an environment before you start it.
+A new environment's schedule is created `DISABLED` and its alarms are created on. `mise run start <env>` enables the schedule and the alarm actions, and `mise run pause <env>` disables both. Both ask for your MFA code (the `weather-deploy` profile Terraform uses), so run them in a terminal. `scripts/set_run_state.py` does the work and does nothing without `--apply`, which the task passes. It is idempotent, and it reads the schedule and alarm names from the environment's Terraform outputs, so deploy an environment before you start it.
 
-- Terraform ignores the schedule's `state` and each alarm's `actions_enabled` after creating them, so `make deploy` never undoes a start or a pause. That includes production, whose schedule and alarms stay as they are (both on): `make pause ENV=production` is how you stop it, never a Terraform change.
+- Terraform ignores the schedule's `state` and each alarm's `actions_enabled` after creating them, so `mise run deploy` never undoes a start or a pause. That includes production, whose schedule and alarms stay as they are (both on): `mise run pause production` is how you stop it, never a Terraform change.
 - Pausing production turns its alarm actions off too, `errors` included, so start it again when you're done.
 - Pausing keeps the alarms but turns their actions off. `missed-runs` and `quiet` treat missing data as breaching, so they sit in ALARM while paused, without emailing. Starting re-enables their actions, and the first runs bring them back to OK, which sends an OK email.
 
@@ -273,13 +276,13 @@ aws cloudwatch set-alarm-state --alarm-name weather-story-bot-errors \
 
 Each alarm email includes the same hints and a link to the log group.
 
-Staging (`weather-story-bot-staging-*`, on its own `weather-story-bot-staging-alerts` topic) has the same five alarms. Every environment's alarms are created with their actions on, and `make pause` / `make start` switch them off and on with the schedule, so a paused staging doesn't email about the idleness itself. Staging's alarms are on before its first start, so `missed-runs` and `quiet` email until then. Staging's metrics use the `WeatherStoryBot/staging` namespace, so its posts never count toward production's `quiet` and `repost-loop`. The budget is production-only.
+Staging (`weather-story-bot-staging-*`, on its own `weather-story-bot-staging-alerts` topic) has the same five alarms. Every environment's alarms are created with their actions on, and `mise run pause` / `mise run start` switch them off and on with the schedule, so a paused staging doesn't email about the idleness itself. Staging's alarms are on before its first start, so `missed-runs` and `quiet` email until then. Staging's metrics use the `WeatherStoryBot/staging` namespace, so its posts never count toward production's `quiet` and `repost-loop`. The budget is production-only.
 
 `quiet` and `repost-loop` count the Telegram client's `Telegram message sent` log line through a log metric filter (`WeatherStoryBot/StoriesPosted`), so don't change that message text. It's logged as soon as Telegram accepts a message, so posts whose DynamoDB write then fails still count. "Updated" reposts count too. Until a full day of data exists, `quiet` may show `INSUFFICIENT_DATA`. `nws-ambiguous` counts the handler's `Ambiguous stories from NWS` line (`WeatherStoryBot/AmbiguousStories`), so don't change that message text either.
 
 ### Tuning thresholds
 
-The starting values are guesses until there's real posting data. Override them in `infra/envs/production.tfvars` and run `make plan ENV=production && make deploy ENV=production`:
+The starting values are guesses until there's real posting data. Override them in `infra/envs/production.tfvars` and run `mise run plan production && mise run deploy production`:
 
 ```hcl
 monthly_budget_usd     = 5  # USD per month, whole account
@@ -291,7 +294,7 @@ If you slow the schedule down to less than once an hour, `missed-runs` will fire
 
 ## Cost estimate
 
-`make cost` estimates the monthly AWS cost of everything in `infra/` with [Infracost](https://www.infracost.io/). It reads the Terraform files directly, so it needs no Terraform plan and no AWS credentials. It's for running by hand, not before deploys or in CI.
+`mise run cost` estimates the monthly AWS cost of everything in `infra/` with [Infracost](https://www.infracost.io/). It reads the Terraform files directly, so it needs no Terraform plan and no AWS credentials. It's for running by hand, not before deploys or in CI.
 
 One-time setup:
 
@@ -304,10 +307,10 @@ infracost doctor       # checks that auth works
 Then:
 
 ```sh
-make cost
+mise run cost
 ```
 
-It prices `infra/` for four scenarios side by side: **1 office** (MKX today), **6 offices** (Wisconsin and its neighbours), **all 122** NWS forecast offices and **staging** (one office with the schedule left on, the worst case). Each column shows every costed resource at full precision, with a total at the bottom. At the committed estimates that's about $0.60, $1.12, $13.91 and $0.60 a month. The full scan result is saved to `build/infracost.json`. Infracost's own tables round to whole dollars, which would show `$0` for most of this, so `make cost` prints its own table.
+It prices `infra/` for four scenarios side by side: **1 office** (MKX today), **6 offices** (Wisconsin and its neighbours), **all 122** NWS forecast offices and **staging** (one office with the schedule left on, the worst case). Each column shows every costed resource at full precision, with a total at the bottom. At the committed estimates that's about $0.60, $1.12, $13.91 and $0.60 a month. The full scan result is saved to `build/infracost.json`. Infracost's own tables round to whole dollars, which would show `$0` for most of this, so `mise run cost` prints its own table.
 
 The production scenarios assume one Lambda invocation per office per run, the design offices are moving to. Infracost doesn't price the EventBridge schedule, which is free up to 14 million invocations a month (about 350,000 for all 122 offices), or data transfer out: each post uploads its image to Telegram, about 24 GB a month for all 122 offices, inside the 100 GB of free egress (about $2.20 at list price).
 
@@ -321,7 +324,7 @@ infracost inspect --file build/infracost.json --failing
 
 ### Updating the usage assumptions
 
-Almost everything here is billed by usage, which Infracost can't read from Terraform. `scripts/infracost_usage.py` holds the monthly usage of one office (runs, stories, posts, run time, image size), with a comment on each value saying where it came from. `make cost` multiplies those rates out into one usage file per scenario in `build/`, and `infracost.yml` points one scan project at each. When the schedule, story volume, run time or retention changes, update the constants at the top of the script and run `make cost` again.
+Almost everything here is billed by usage, which Infracost can't read from Terraform. `scripts/infracost_usage.py` holds the monthly usage of one office (runs, stories, posts, run time, image size), with a comment on each value saying where it came from. `mise run cost` multiplies those rates out into one usage file per scenario in `build/`, and `infracost.yml` points one scan project at each. When the schedule, story volume, run time or retention changes, update the constants at the top of the script and run `mise run cost` again.
 
 Usage keys are Terraform resource addresses, such as `aws_lambda_function.bot`. A misspelled key or address is silently ignored, so check that the resource's cost changed in the table. Infracost rounds DynamoDB storage down to whole GB, so anything under 1 GB shows as $0.
 
@@ -383,4 +386,4 @@ aws s3api list-object-versions --bucket "$BUCKET" --prefix stories/MKX/2026/09/1
      GRB = { chat_id = "-100…", name = "Green Bay" }
    }
    ```
-3. Run `make plan ENV=production`, review it, then `make deploy ENV=production`. On its first run, the Lambda posts all of the new office's active stories.
+3. Run `mise run plan production`, review it, then `mise run deploy production`. On its first run, the Lambda posts all of the new office's active stories.

@@ -1,6 +1,6 @@
 """Zip a directory into bytes that depend only on the files' names and contents.
 
-`make build` uses this so the same source and lockfile always give the same zip, and so the same
+`mise run build` uses this so the same source and lockfile always give the same zip, and so the same
 sha256. Terraform's `source_code_hash` and the artifacts bucket key (Phase 2.1) are that hash, so a
 rebuild that changes nothing plans as "No changes". Entries are sorted, carry no directory entries,
 and have a fixed timestamp and mode, so mtimes, the order the files were written in and their modes
@@ -8,9 +8,14 @@ can't leak into the bytes.
 
 Entries are stored, not deflated. Deflate's output depends on the zlib behind the interpreter
 (Apple's, zlib-ng, vanilla), so a laptop and a CI runner could disagree on the bytes. The package is
-a couple of MB, far under Lambda's 50 MB limit. One input is still outside this script: the
+a couple of MB, far under Lambda's 50 MB limit.
+
+`main` first removes the console scripts `uv pip install --target` wrote into `bin/`, and their
+`RECORD` lines (`drop_console_scripts`). Their shebangs name the interpreter that ran the install,
+a path that differs between a laptop, a CI job with a venv and one without. That edits the source
+directory in place, and it is idempotent. One input is still outside this script: the
 `*.dist-info/RECORD` and `INSTALLER` files that `uv pip install` writes, which can vary with the uv
-version, so keep CI's uv version the same as the laptop's.
+version, so keep CI's uv version the same as the laptop's (`mise.lock` does that).
 
 Standard library only: the credentialed CI jobs run it with `uv run --no-project`, so no
 third-party code runs beside AWS credentials.
@@ -24,7 +29,9 @@ from __future__ import annotations
 
 import argparse
 import base64
+import csv
 import hashlib
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -65,11 +72,31 @@ def build_zip(source: Path, destination: Path) -> str:
     return base64.b64encode(hashlib.sha256(destination.read_bytes()).digest()).decode()
 
 
+def drop_console_scripts(package: Path) -> None:
+    """Remove the console scripts `uv pip install --target` wrote, and their RECORD lines.
+
+    Each wrapper in `bin/` starts with `#!` and the path of the interpreter that ran the install,
+    and the package's `RECORD` holds the wrapper's hash. That path is the laptop's `.venv`, a CI
+    job's `.venv` or `/usr/bin/python`, so the same lockfile would zip to different bytes on
+    each. Lambda runs the handler, never these command-line tools. Idempotent.
+    """
+    scripts = package / "bin"
+    if scripts.is_dir():
+        shutil.rmtree(scripts)
+    for record in package.glob("*.dist-info/RECORD"):
+        # Bytes in and out, so a file's line endings are kept.
+        lines = record.read_bytes().decode().splitlines(keepends=True)
+        kept = [line for line in lines if not next(csv.reader([line]), [""])[0].startswith("bin/")]
+        if kept != lines:
+            record.write_bytes("".join(kept).encode())
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("source", type=Path, help="directory to zip")
     parser.add_argument("destination", type=Path, help="zip file to write")
     args = parser.parse_args(argv)
+    drop_console_scripts(args.source)
     print(build_zip(args.source, args.destination))
     return 0
 

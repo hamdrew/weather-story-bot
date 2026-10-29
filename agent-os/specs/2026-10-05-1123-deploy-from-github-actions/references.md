@@ -46,7 +46,7 @@
 
 - **Location:** `README.md` "Deploy", "Staging", "Starting and pausing an environment", "Cost
   estimate"
-- **Relevance:** Deploy is rewritten in Task 9 (pipeline, approval, rollback, break-glass).
+- **Relevance:** Deploy is rewritten in Task 10 (pipeline, approval, rollback, break-glass).
   Setup gains the bootstrap and GitHub environments and variables in Gate 2.
 
 ## External
@@ -88,6 +88,20 @@
   policy can Deny `s3:PutObject` when `s3:if-none-match` is Null, forcing `If-None-Match: *`.
   Multipart uploads need an `s3:ObjectCreationOperation` exemption, and copies into the bucket
   stop working. Neither applies to a single small zip.
+
+### mise (Task 8)
+
+- https://mise.jdx.dev/configuration.html: version syntax (exact, a fuzzy prefix like `"1"`,
+  `prefix:`, `latest`; no `>=` ranges), `min_version`, and idiomatic version files (Terraform's is
+  `.terraform-version`, off by default; `required_version` in `.tf` is not read).
+- https://mise.jdx.dev/tasks/task-arguments.html: `usage` args with `choices`, file tasks in
+  `mise-tasks/`. https://mise.jdx.dev/dev-tools/mise-lock.html: `minimum_release_age` (default
+  `24h`) applies to fuzzy resolution, and pinned or locked versions skip it.
+- https://github.com/jdx/mise-action: installs mise (signed checksums), runs `mise install` from
+  `mise.toml`, and has `minimum_release_age` for mise's own version when `version` is unset.
+- Dependabot: https://docs.github.com/en/code-security/dependabot/ecosystems-supported-by-dependabot/supported-ecosystems-and-repositories
+  lists no mise ecosystem (checked 2026-10-13). Renovate's manager:
+  https://docs.renovatebot.com/modules/manager/mise/.
 
 ### IAM
 

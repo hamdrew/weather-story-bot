@@ -1,6 +1,6 @@
 terraform {
   # use_lockfile (native S3 state locking) is GA from 1.11.
-  required_version = ">= 1.11"
+  required_version = "~> 1.11" # moves with terraform in mise.toml
 
   required_providers {
     aws = {

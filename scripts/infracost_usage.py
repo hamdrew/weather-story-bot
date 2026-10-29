@@ -1,4 +1,4 @@
-"""Write Infracost usage files for `make cost`: one office, a handful, every US office, and staging.
+"""Write Infracost usage files for `mise run cost`: one office, a handful, every US office, staging.
 
 Infracost can't read usage from Terraform, so each scenario gets a usage file built from the same
 per-office monthly rates below, multiplied by its office count. Keeping the rates in one place
@@ -8,8 +8,9 @@ a comment says "measured".
     uv run python scripts/infracost_usage.py write build   # build/infracost-usage-<name>.yml
     uv run python scripts/infracost_usage.py report build/infracost.json
 
-`make cost` writes the files, `infracost scan` prices each as its own project (infracost.yml), and
-`report` prints the scenarios side by side. The usage files are JSON, which is valid YAML.
+`mise run cost` writes the files, `infracost scan` prices each as its own project
+(infracost.yml), and `report` prints the scenarios side by side. The usage files are JSON, which is
+valid YAML.
 """
 
 from __future__ import annotations
