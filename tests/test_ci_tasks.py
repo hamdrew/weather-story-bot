@@ -40,11 +40,17 @@ def run(sandbox: Path, task: str, **env: str) -> subprocess.CompletedProcess[str
 # plan-changes: does the saved plan change anything?
 
 
-def plan_json(resource_actions=(), output_actions=()) -> str:
+def plan_json(resource_actions=(), output_actions=(), drift_actions=(), importing=()) -> str:
     return json.dumps(
         {
-            "resource_changes": [{"change": {"actions": a}} for a in resource_actions],
+            "resource_changes": [
+                {"change": {"actions": a, **({"importing": {"id": "x"}} if i else {})}}
+                for a, i in zip(
+                    resource_actions, [*importing, *[False] * len(resource_actions)], strict=False
+                )
+            ],
             "output_changes": {f"o{i}": {"actions": a} for i, a in enumerate(output_actions)},
+            "resource_drift": [{"change": {"actions": a}} for a in drift_actions],
         }
     )
 
@@ -66,6 +72,32 @@ def test_plan_changes(sandbox, resources, outputs, expected):
     result = run(sandbox, "plan-changes", usage_environment="staging")
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == expected
+
+
+def planned(sandbox: Path, **kwargs) -> str:
+    (sandbox / "plan.json").write_text(plan_json(**kwargs))
+    fake(sandbox / "bin", "terraform", f'cat "{sandbox}/plan.json"')
+    result = run(sandbox, "plan-changes", usage_environment="staging")
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+def test_drift_counts_as_a_change(sandbox):
+    # Refreshed state differs from the last apply (something changed outside Terraform).
+    assert planned(sandbox, resource_actions=[["no-op"]], drift_actions=[["update"]]) == "true"
+
+
+def test_drift_of_a_deleted_resource_counts_as_a_change(sandbox):
+    assert planned(sandbox, drift_actions=[["delete"]]) == "true"
+
+
+def test_an_import_counts_as_a_change(sandbox):
+    # An import's action is no-op; only change.importing says state is about to gain a resource.
+    assert planned(sandbox, resource_actions=[["no-op"]], importing=[True]) == "true"
+
+
+def test_no_drift_no_import_is_still_no_change(sandbox):
+    assert planned(sandbox, resource_actions=[["no-op"]], drift_actions=[["no-op"]]) == "false"
 
 
 def test_plan_changes_fails_closed_when_terraform_fails(sandbox):

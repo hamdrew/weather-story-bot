@@ -7,7 +7,8 @@
 #USAGE flag "--github-output" help="Also write changed=<answer> to $GITHUB_OUTPUT, only once the answer is known"
 set -euo pipefail
 
-# A plan with nothing but no-op and read actions (and unchanged outputs) is "No changes". An error
+# A plan with nothing but no-op and read actions, no drift, no import and unchanged outputs is
+# "No changes". An error
 # anywhere here fails the task with nothing printed, so a broken check can't read as "no changes"
 # and skip a deploy.
 env=${usage_environment?}
@@ -21,8 +22,21 @@ import json, sys
 
 plan = json.load(sys.stdin)
 quiet = {"no-op", "read"}
-changed = any(set(c["change"]["actions"]) - quiet for c in plan.get("resource_changes", []))
-changed = changed or any(set(o["actions"]) - quiet for o in plan.get("output_changes", {}).values())
+
+
+def acts(changes):
+    return any(set(c["change"]["actions"]) - quiet for c in changes)
+
+
+changed = (
+    acts(plan.get("resource_changes", []))
+    # Something changed outside Terraform since the last apply. Applying the plan writes the
+    # refreshed state back, which is what makes it worth a deploy.
+    or acts(plan.get("resource_drift", []))
+    # An import has the no-op action; only change.importing says state will gain the resource.
+    or any("importing" in c["change"] for c in plan.get("resource_changes", []))
+    or any(set(o["actions"]) - quiet for o in plan.get("output_changes", {}).values())
+)
 print("true" if changed else "false")
 ')
 [[ $answer == true || $answer == false ]] || { echo "plan-changes: unexpected answer '$answer'" >&2; exit 1; }
