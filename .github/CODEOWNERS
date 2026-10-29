@@ -1,0 +1,5 @@
+# Default ownership: GitHub requests a review from the owner on every pull request, which is what
+# sends the Dependabot PRs to the owner's phone ("Requests to review a pull request" in GitHub
+# Mobile). Read from the default branch, so it applies once merged. Don't turn on "Require review
+# from Code Owners": the sole owner couldn't approve their own pull requests.
+* @hamdrew

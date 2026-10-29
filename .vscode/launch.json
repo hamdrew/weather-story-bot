@@ -52,7 +52,7 @@
             "program": "${workspaceFolder}/scripts/infracost_usage.py",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            // Run `make cost` first so build/infracost.json exists.
+            // Run `mise run cost` first so build/infracost.json exists.
             "args": ["report", "build/infracost.json"]
         },
         {
@@ -62,8 +62,9 @@
             "program": "${workspaceFolder}/scripts/build_zip.py",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            // Run `make build` first so build/package exists. This writes build/debug.zip, not
-            // build/lambda.zip, so a debug session can't change the zip `make plan` hashes.
+            // Run `mise run build` first so build/package exists. This writes build/debug.zip, not
+            // build/lambda.zip, so a debug session can't change the zip `mise run plan` hashes. It
+            // does remove build/package/bin in place (the console scripts); `mise run build` redoes it.
             "args": ["build/package", "build/debug.zip"]
         }
     ]

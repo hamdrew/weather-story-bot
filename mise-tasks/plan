@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+#MISE description="Build, then save a Terraform plan for an environment"
+#USAGE arg "<environment>" help="The environment to plan" {
+#USAGE   choices "staging" "production"
+#USAGE }
+#USAGE flag "--no-lock" help="Plan with -lock=false, for the CI plan roles (they can read state but not write its lock file)"
+set -euo pipefail
+
+# The environment selects the backend config, var file, data dir and plan file together, so they
+# can't disagree. Each environment has its own data dir: a shared .terraform/ remembers its last
+# backend, and forgetting -reconfigure would point a staging plan at production's state.
+# TF_DATA_DIR is relative to -chdir, so it lands in infra/.terraform-<env>/.
+env=${usage_environment?}
+export TF_DATA_DIR=.terraform-$env
+
+# Save the plan so deploy applies exactly what was reviewed. Terraform refuses a plan that has gone
+# stale (state changed since it was made), and deploy fails if there is no plan to apply. A plan
+# that goes stale because an apply ran meanwhile is refused at apply, which is why --no-lock is safe.
+# plan builds first: the zip's hash is a plan input, so a plan always describes the code it was
+# made from.
+mise run --quiet build
+
+lock=true
+[[ ${usage_no_lock:-false} == true ]] && lock=false
+
+terraform -chdir=infra init -input=false -backend-config="envs/$env.backend.hcl"
+# -var environment comes last: the last value wins, so a stray line in a tfvars file can't make the
+# environment disagree with the backend.
+terraform -chdir=infra plan -lock="$lock" -var-file="envs/$env.tfvars" \
+  -var "lambda_zip_sha256=$(cat build/lambda.zip.sha256)" \
+  -var "environment=$env" -out="deploy-$env.tfplan"

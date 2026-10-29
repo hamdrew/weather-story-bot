@@ -108,12 +108,12 @@ run "production_code_comes_from_its_own_prefix_under_the_hash" {
 
   assert {
     condition     = aws_lambda_function.bot.filename == null
-    error_message = "No local file: the zip is uploaded by make deploy, never by Terraform."
+    error_message = "No local file: the zip is uploaded by mise run deploy, never by Terraform."
   }
 
   assert {
     condition     = output.lambda_s3_key == aws_lambda_function.bot.s3_key
-    error_message = "make deploy uploads to the key the plan holds, so the output must match the function's."
+    error_message = "mise run deploy uploads to the key the plan holds, so the output must match the function's."
   }
 }
 

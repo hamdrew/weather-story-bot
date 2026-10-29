@@ -12,7 +12,7 @@ a small fixed monthly cost, and everything else paid per use.
 - **Prefer pay-per-use with no idle cost.** Lambda, on-demand DynamoDB, S3 and the scheduler cost
   nothing while idle. A resource that bills by the hour (a NAT gateway, a provisioned table, an
   always-on endpoint) needs a reason in the spec
-- **Every spec carries a `cost.md`**, produced by `make cost`, with the figures at the scales that
+- **Every spec carries a `cost.md`**, produced by `mise run cost`, with the figures at the scales that
   spec cares about, what is fixed and what scales, and what Infracost doesn't price. Record the
   date and the Infracost version. When a spec changes nothing, say so and show the unchanged total
 - **Retention is a cost decision.** The archive and state table are kept forever

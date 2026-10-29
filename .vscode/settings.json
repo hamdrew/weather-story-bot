@@ -4,6 +4,5 @@
     ],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,
-    "python.analysis.typeCheckingMode": "off",
-    "makefile.configureOnOpen": false
+    "python.analysis.typeCheckingMode": "off"
 }
