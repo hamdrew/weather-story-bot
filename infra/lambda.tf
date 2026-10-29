@@ -10,7 +10,7 @@ resource "aws_lambda_function" "bot" {
   #checkov:skip=CKV_AWS_117:A VPC needs a NAT gateway, which bills by the hour, to reach NWS and Telegram (infra/budget)
   #checkov:skip=CKV_AWS_116:Async retries are off; the next scheduled run is the retry (backend/retries)
   #checkov:skip=CKV_AWS_173:The variables hold no credentials (the token is in SSM) and a customer managed key costs $1/month
-  #checkov:skip=CKV_AWS_272:No signing pipeline; the zip is built from this repo by make build and deployed only after a reviewed plan
+  #checkov:skip=CKV_AWS_272:No signing pipeline; the zip is built from this repo by mise run build and deployed only after a reviewed plan
   function_name    = local.name
   description      = "Posts new NWS Weather Stories to Telegram"
   role             = aws_iam_role.lambda.arn

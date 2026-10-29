@@ -1,16 +1,16 @@
 # Terraform Tests
 
 `terraform test` checks the rules `infra/` is meant to keep, offline. They were `terraform console`
-checks by hand in Phase 2.0. Now a pull request and a laptop run them the same way (`make tftest`).
+checks by hand in Phase 2.0. Now a pull request and a laptop run them the same way (`mise run tftest`).
 
 ## Running
 
-- `make tftest` runs `terraform init -backend=false` and `terraform test` in `TF_DATA_DIR=.terraform-test`,
+- `mise run tftest` runs `terraform init -backend=false` and `terraform test` in `TF_DATA_DIR=.terraform-test`,
   so it never touches an environment's state or its `.terraform-<env>/` dir
 - Tests live in `infra/tests/*.tftest.hcl`: `environments` (names, namespaces, production-only
   `count`s, tags), `variables` (sensitivity and validations) and `iam` (policy conditions)
 - The bootstrap stack has its own tests in `infra/bootstrap/tests/` (`trust`, `plan_roles`,
-  `apply_roles`, `artifacts`), run by the same `make tftest` after the main stack's
+  `apply_roles`, `artifacts`), run by the same `mise run tftest` after the main stack's
 - They need no AWS credentials. `mock_provider "aws"` replaces the provider, so the laptop's
   gitignored `override.tf` (`profile = "weather-deploy"`) is never configured
 
@@ -38,7 +38,7 @@ checks by hand in Phase 2.0. Now a pull request and a laptop run them the same w
 - Build an ARN a test reads from names (`"arn:aws:s3:::${local.bucket}"`), not from a mocked
   resource's `.arn`, which is a random string
 - A new test must be seen to fail: break the rule it guards (a capitalised tag, a wildcard ARN, a
-  removed `sensitive`), run `make tftest`, and put it back
+  removed `sensitive`), run `mise run tftest`, and put it back
 
 ## What gets a test
 
@@ -58,18 +58,23 @@ checks by hand in Phase 2.0. Now a pull request and a laptop run them the same w
 
 ## Security scan (Checkov)
 
-`make scan` runs Checkov on `infra/` (which includes `infra/bootstrap/`) from its own uv project,
+`mise run scan` runs Checkov on `infra/` (which includes `infra/bootstrap/`) from its own uv project,
 `tools/checkov/`, the same on a laptop and in CI, so no third-party GitHub Action ever runs beside CI credentials.
 It is blocking: any failed check exits non-zero.
 
 - Fix a finding when the fix is free and safe. Otherwise suppress it inside the resource block:
   `#checkov:skip=CKV_AWS_50:<why>`, one line per check
-- **The reason is mandatory.** `make scan` fails first on any `checkov:skip=<ID>` with no
+- **The reason is mandatory.** `mise run scan` fails first on any `checkov:skip=<ID>` with no
   `:reason`. Write the actual constraint (cost, a service limit, a decision), and name the
   standard or spec where it is recorded
 - A fix that changes infrastructure goes in the plan for the spec's next deploy gate. Do not
   apply it from the scan
 - Checkov is a separate project because it pins `boto3` exactly, which the main project's dev tools
-  can't share. Its version lives in `tools/checkov/uv.lock`, never in the Makefile, and Dependabot proposes
+  can't share. Its version lives in `tools/checkov/uv.lock`, never in `mise.toml`, and Dependabot proposes
   bumps
 - A Checkov bump can add rules. Triage what the new rules find in the same PR that bumps it
+- **Checkov scans Terraform only; workflows are `mise run lint-actions`** (actionlint + zizmor).
+  Checkov's GitHub Actions framework silently drops any workflow its bundled schema rejects, and
+  reports `passed 0, failed 0, resource_count 0` with no error. It did that to `pipeline.yml` over
+  `cancel-in-progress: ${{ ... }}` (Checkov 3.3.29), so a clean Checkov result for a workflow means
+  nothing. Do not point `scan` at `.github`

@@ -40,6 +40,10 @@ and no Telegram credentials anywhere in CI. `make deploy` stays as a deliberate 
 - **Content-addressed zips make rollback a revert.** The key is the zip's sha256, so a
   docs-only merge plans as a no-op. Reverting a commit rebuilds byte-identical bytes, and the
   object at that key is either still there or uploaded again.
+- **Dependabot has no mise ecosystem** (checked 2026-10-13 against GitHub's supported-ecosystems
+  list). Renovate does read `mise.toml`, but it isn't adopted here. An exact tool pin would only
+  ever move by hand, so `mise.toml` holds ranges. mise also has no `>=` syntax, so the Terraform
+  range comes from tightening `required_version` to match it.
 
 ## Decisions (from shaping)
 
@@ -57,6 +61,8 @@ and no Telegram credentials anywhere in CI. `make deploy` stays as a deliberate 
 | Break-glass | `make plan`/`make deploy` refuse `ENV=production` unless `BREAK_GLASS=1` is on the command line (or `GITHUB_ACTIONS=true`) |
 | Locks | Plan roles plan with `-lock=false` (a stale saved plan is refused at apply anyway). Apply roles lock on their own exact `.tflock` key |
 | Cloud runner | Declined, as the roadmap records |
+| Task runner | mise tasks replace the `Makefile` (Task 8). Before Task 8, `make <target>` in this plan is history as written. From Task 8 on, the same target is `mise run <target>` |
+| Tool versions | `mise.toml` holds the ranges for the laptop and every CI job: the major by default, the minor for a 0.x tool, and Terraform's from the stacks' `required_version`. A committed `mise.lock` (amended 2026-10-27, Task 9) records what they resolve to, for `linux-x64` and `macos-arm64`, so every job and the laptop install the same versions and CI installs `--locked`. Nothing bumps the lock: `mise upgrade` then `mise lock --platform linux-x64,macos-arm64`, by hand. CI installs through `jdx/mise-action`, not per-tool setup actions |
 
 ## Working agreement
 
@@ -269,33 +275,116 @@ next cold start (role credentials refresh then).
 
 # Stage 4: The pipeline
 
-## Task 8: Pull-request workflow
+## Task 8: mise for tool versions and tasks
+
+- `mise.toml` at the repo root holds the tool versions as ranges, not exact pins. Dependabot
+  can't bump `mise.toml`, so an exact pin would only ever move by hand:
+  - `terraform = "1"`. mise has no `>=` syntax, so the stacks' constraint moves to meet it:
+    `required_version` in `infra/versions.tf` and `infra/bootstrap/versions.tf` goes from
+    `">= 1.11"` to `"~> 1.11"` (1.11 or later, below 2.0). `"1"` is that range's major, and
+    `terraform init` refuses a version outside it, so a mismatch fails loudly instead of drifting.
+    A comment beside each says the two move together.
+  - `uv = "0.13"`. The default is the major, but uv is pre-1.0, where a minor release is the
+    breaking boundary (`"0"` would accept all of them). So a 0.x tool takes its minor.
+  - Nothing else. uv already provides Python (`requires-python`), and Checkov stays in
+    `tools/checkov/uv.lock`.
+  - `min_version` (hard) for the mise features the tasks use, and
+    `[settings] minimum_release_age = "7d"`. A range installs whatever release is newest, in
+    jobs that hold AWS credentials, so a release must be a week old before it's picked up.
+    mise's default is 24h.
+- Every `Makefile` target becomes a mise task of the same name, and the `Makefile` is deleted.
+  Short tasks go in `[tasks]` in `mise.toml`. `plan`, `deploy`, `bootstrap-plan`,
+  `bootstrap-deploy`, `start` and `pause` become file tasks in `mise-tasks/` (bash,
+  `set -euo pipefail`). `check-env`/`check-plan` become hidden helper tasks. `ENV=<env>` becomes a
+  required positional argument with `choices "staging" "production"` (`mise run plan staging`).
+  `BREAK_GLASS=1` and `GITHUB_ACTIONS` stay environment variables.
+- Behavior doesn't change. `plan` still builds first and passes the hash, `deploy` still refuses
+  a different zip, uploads with `--if-none-match '*'`, applies exactly the saved plan and deletes
+  it. Keep `mise.toml` free of `[env]` sourcing and hooks, so loading the config runs nothing.
+- Docs: CLAUDE.md Commands, README, `.vscode/launch.json`, the standards that name a target
+  (`index.yml`, `infra/environments`, `infra/alarms`, `infra/budget`, `infra/data-retention`,
+  `infra/iam`, `backend/cli`, `global/launch-configs`, `testing/terraform-tests`), and the
+  docstrings and messages in `scripts/*.py` and `tools/checkov/pyproject.toml`. The earlier
+  tasks and gate records in this plan keep `make` as written.
+- New standard **`global/tooling`**: `mise.toml` is the one source of tool versions for the
+  laptop and CI, and every task is a mise task. Ranges, not pins (the major, the minor for 0.x,
+  Terraform's from `required_version`). Why: Dependabot can't bump mise. A new tool means a
+  `mise.toml` line, not a setup action. `mise upgrade` moves the laptop within the ranges.
+- Verify: `mise run lint ::: test ::: tftest ::: scan` is green (`mise run a b` hands `b` to `a` as an
+  argument; `:::` separates tasks). `mise run build` twice gives the same hash,
+  and it equals the last `make build` hash from before the switch. `mise run plan staging` and
+  `mise run plan production` both show **No changes**.
+
+**As built (Task 8, 2026-10-13):** `mise.toml` plus `mise-tasks/{plan,deploy,check-plan,bootstrap-plan,bootstrap-deploy,start,pause}`; the `Makefile` is gone. `check-env` has no task: the `choices` on the environment argument refuse anything else, and an exported `ENV` can't reach a positional argument. `mise run build` twice gave `lLRsXkEy8eZ2kMPI928VVclO5y9jLQLq4Z4HtLBEvPE=`, the same as the last `make build`. `lint`, `test`, `tftest` and `scan` pass. Two things to know:
+- **`:::` between tasks.** `mise run lint test` passes `test` to `lint` as an argument, so every multi-task line (Task 9's `checks` job too) uses `:::`.
+- **`minimum_release_age = "7d"` hides uv 0.13.0** (released 2026-10-09) until about 2026-10-16, so `uv = "0.13"` doesn't resolve in a clean install before then. Locally it was verified with `MISE_MINIMUM_RELEASE_AGE=0d`. Don't run Gate 4a's CI before that date, or take uv's minor from the newest aged release (`0.12`) until it passes.
+- `mise run plan staging` and `mise run plan production` both showed **No changes** (2026-10-27), with the same zip hash. `.github/workflows/pipeline.yml` (staged draft) still calls `make`; Task 9 rewrites it for mise.
+- **Also in this commit, found at Gate 4a (2026-10-28): immutable OIDC subjects.** `infra/bootstrap` now accepts only immutable subjects (`repo:<owner>@<owner id>/<name>@<repository id>`, from `gh api repos/<owner>/<name>/actions/oidc/customization/sub --jq .sub_claim_prefix`): the `variables.tf` validation, `locals.tf`, `bootstrap.tfvars.example` and `tests/trust.tftest.hcl`, with the rule in `infra/iam`. The change was in the working tree before the Task 9 session and went into this commit without a review, and the plan never mentioned it. It was not applied either (that needs `bootstrap-deploy` and MFA), so the four deployed roles still trusted the name-only subjects until Gate 4a. Why: an immutable subject still matches after a rename, a repository recreated under the old name can't match, and this repository's tokens never carry the name-only form.
+
+No gate of its own. Nothing in AWS changes (`required_version` is not a resource), and Gate 4a
+proves the same tasks in CI.
+
+## Task 9: Pull-request workflow
 
 - `.github/workflows/pipeline.yml`, `permissions: contents: read` at the top. Actions are pinned
-  by commit SHA (Dependabot already updates them). Terraform and uv versions are pinned.
-- `checks` job (every event, **no `id-token`**): `make lint test tftest scan`, and `make build`
-  twice with the hashes compared.
+  by commit SHA (Dependabot already updates them).
+- Every job installs its tools with `jdx/mise-action` (SHA-pinned) from `mise.toml`, the
+  credentialed jobs included. There is no `setup-terraform`/`setup-uv` and no version in the
+  workflow. The action's own mise version uses `minimum_release_age: 7d` rather than a pin, for
+  the same reason as the tools.
+- `checks` job (every event, **no `id-token`**): `mise run lint ::: test ::: tftest ::: scan`, and
+  `mise run build` twice with the hashes compared.
 - `plan` job (PRs from this repo, not Dependabot; matrix staging/production; `id-token: write`
   only here): writes `envs/<env>.backend.hcl` from variables and `.tfvars` from the `<ENV>_TFVARS` secret, then
-  `make plan ENV=<env> LOCK=false` with `ci-pr-plan`. It runs no project tests, so third-party
+  `mise run plan <env> --no-lock` with `ci-pr-plan`. It runs no project tests, so third-party
   code never shares a job with AWS credentials.
-- `Makefile`: `LOCK ?= true` → `-lock=$(LOCK)`.
+- `plan` task: a `--no-lock` flag → `-lock=false`.
 
-### Gate 4a: the PR for Task 8 shows its own plans
+**As built (Task 9, 2026-10-27):** `pipeline.yml` now has no `make`, no `setup-terraform`/`setup-uv` and no version in the file; both jobs use `jdx/mise-action` pinned at v5.2.1 (released 2026-10-19: the newer 5.2.2–5.2.4 were inside our own 7-day window). Things to know:
+- **The action has its own `minimum_release_age`** (default 24h, for the mise binary itself), so both jobs set `7d` to match `mise.toml`. `plan` sets `cache: false` because it holds credentials. `checks` keeps the tool cache, keyed explicitly on `hashFiles('mise.toml', 'mise.lock')` (the action's default key may not cover those two file names; its docs list only the dotted ones), so a changed lock is a cache miss. The cache can't cause drift now: `--locked` installs the lock's exact version whatever the cache holds. uv's own package cache is gone with `setup-uv`: watch the `checks` time at Gate 4a, and add an `actions/cache` step for uv only if it hurts.
+- **`mise.lock` (added the same day).** `mise lock --platform linux-x64,macos-arm64` recorded Terraform 1.16.6 and uv 0.13.4 with checksums for both platforms (Terraform's match HashiCorp's published `SHA256SUMS`; uv's carry a GitHub attestation verified at lock time), and `lockfile = true` keeps it current. mise-action adds `--locked` when the file exists. See `global/tooling`.
+- **`:::` runs the tasks in parallel** (mise's `jobs` defaults to 8; `make` ran them in order), on the laptop too. Two cold-start runs (no `.venv`, no `.terraform-test`) passed with no lock contention. If Gate 4a flakes, `--jobs 1` on the `checks` command is the first thing to try.
+- **No `mise trust` step:** the action exports `MISE_TRUSTED_CONFIG_PATHS` for the workspace.
+- **`:::` is a YAML trap.** An unquoted `run: mise run lint ::: test` is a parse error (a colon followed by a space starts a mapping), so the `checks` command is in a `run: |` block. Found by parsing the file; `mise run lint-actions` (below) now lints it.
+- **Terraform 1.17.0 becomes eligible at 2026-10-28 12:32 CDT** (released 2026-10-21) and the lock holds 1.16.6, so CI stays on 1.16.6 until someone upgrades the lock. That upgrade is its own deliberate change (`mise upgrade`, `mise lock --platform linux-x64,macos-arm64`, then the PR plans), not something Gate 4a absorbs by accident.
+- **Workflow linting (2026-10-27).** `actionlint`, `zizmor` and `shellcheck` are locked mise tools; `mise run lint-actions` runs actionlint and zizmor and `lint` includes it. First run: one real nit fixed in `pipeline.yml` (`tr a-z A-Z` became character classes, SC2018/SC2019), otherwise clean. Both tools were shown to bite on a deliberately bad workflow (zizmor: `dangerous-triggers`, `template-injection`, `unpinned-uses`, `artipacked`; actionlint: SC2086 and a mistyped `github.evnt`).
+  - **Checkov does not scan workflows, by decision.** It silently skips any workflow its bundled schema rejects (it reported 0 resources for `pipeline.yml` because of `cancel-in-progress: ${{ ... }}`), and zizmor covers its useful checks. `scan` stays Terraform-only (`testing/terraform-tests`).
+  - **actionlint is given `.github/workflows/*.yml`** rather than finding workflows itself: with no `.git` root it checks nothing and exits 0. Name workflows `.yml`.
+  - **CI.** `checks` has a separate step, `mise run lint-actions` with `GH_TOKEN: ${{ github.token }}`, which turns on zizmor's online audits (impostor commits, known-vulnerable actions); the `lint` step runs it again offline. `plan` installs only `terraform uv` (`install_args: --locked terraform uv`). Only Gate 4a shows these two working on a runner.
+  - **`mise run lint-actions-online`** is the laptop version: the same checks with zizmor's online audits, token read from `gh auth token` per run (tested: it fails loudly when `gh` fails or prints nothing). `CLAUDE.md` tells agents to prefer it over `lint-actions`.
+  - **zizmor's "(2 suppressed)" on `pipeline.yml`** is the two `secrets-outside-env` findings on the `TFVARS` line (`secrets.STAGING_TFVARS` and `secrets.PRODUCTION_TFVARS`). That audit belongs to the `auditor` persona, so the default `regular` persona hides them whatever the comment says, and `--no-ignores` changes nothing. Under `--persona=auditor` they surface: 2 medium findings, or "2 ignored" with the `# zizmor: ignore[secrets-outside-env]` comment on that line (the only ignore in the repo, no config file). They are not online-only: the auditor run was offline. The ignore is deliberate (secrets stay outside a GitHub environment because an environment would change the OIDC subject `ci-pr-plan` trusts), and it is inert until someone runs with the auditor persona.
+  - **Gate 4a pre-check:** `mise run lint` is green before the PR is opened.
+
+### Gate 4a: the PR for Task 9 shows its own plans
 
 **Pass:** checks green, and both plan jobs end in **No changes**. That proves `ci-pr-plan`'s read
 policy and that the CI-built zip matches the laptop's (if Linux and macOS bytes differ, record
-it: the first pipeline apply will then show one code update). An `AccessDenied` is fixed in
+it: the first pipeline apply will then show one code update). The CI log's Terraform and uv
+versions equal `mise.lock`'s and the laptop's `mise ls` (the lock makes that so, so any
+difference means the lock misses a platform: record it and re-lock). An `AccessDenied` is fixed in
 `infra/bootstrap` and applied with MFA, then re-run.
 
-## Task 9: Main-branch deploys and pipeline-only production
+**Gate 4a result (2026-10-28, PR #26): passed, with one recorded difference and one open item.** Three fixes were needed first, and each is worth remembering:
+1. **Checkov crashed on Python 3.15.0** (`scan`). `tools/checkov` had `requires-python = ">=3.13"` and no pin, so a clean runner downloaded the newest CPython, and `beartype` imports `typing.no_type_check_decorator`, which 3.15 removed. The laptop's old 3.13 `.venv` hid it. Fixed with `tools/checkov/.python-version` (`3.13`, `0f02b9a`). mise also cancelled the other parallel tasks when `scan` failed, so that log under-reported (`mise run --continue-on-error` would show every failure; not added).
+2. **`sts:AssumeRoleWithWebIdentity` denied.** The deployed trust policies still had the name-only subjects while GitHub issues the immutable ones (Task 8 note). `mise run bootstrap-plan` showed exactly four `sub` strings changing, and `bootstrap-deploy` applied them: 0 added, 4 changed, 0 destroyed. All four roles are fixed, not only `ci-pr-plan`, so Gate 4b's apply roles won't hit this.
+3. **`Plan` failed on missing variables.** `STAGING_TFVARS` and `PRODUCTION_TFVARS` (set 2026-10-10) predated `artifacts_bucket` and `permissions_boundary_arn` (Task 7). Re-uploaded from the local tfvars with `gh secret set <NAME> < infra/envs/<env>.tfvars`. **A new required Terraform variable means refreshing both secrets**: say so in `infra/pipeline` (Task 10).
+
+**Result.** `checks` green. Both plan jobs: `0 to add, 1 to change, 0 to destroy`, and the one change is the Lambda code: `s3_key` and `source_code_hash` go from the laptop's `lLRsXkEy…` to CI's `ItiiqOHJ…`. The CI zip differs from the laptop's, which the pass criterion allows: the first pipeline apply (Gate 4b) will show this one code update. Everything else held: Terraform 1.16.6 and uv 0.13.4 equal `mise.lock`; provider 6.68.0; the read policy, backend and refresh worked under `ci-pr-plan` in both environments; and the `cache_key` template, the online zizmor step and `install_args: --locked terraform uv` all worked.
+
+**Also seen.** GitHub masks a multi-line secret line by line, so the tfvars' single-character lines print as `***` in plan logs (`tags = {***`). Harmless, but it makes them look odd.
+
+**Open: the `checks` job's zip differs from the plan jobs'.** Same commit, lock and runner image, but `9n+rdGoR…` against `ItiiqOHJ…`. The two plan jobs agree with each other, and each build is stable within a job. It matters for Task 10, where `deploy-production` rebuilds in a different job from `plan-production`. `scripts/build_zip.py` fixes names, order, times and modes, and its docstring names one input it can't control: the `*.dist-info/RECORD` and `INSTALLER` files `uv pip install` writes. 
+
+**Cause found and fixed (2026-10-28).** `uv pip install --target` writes console-script wrappers into `build/package/bin/` (`bin/httpx`, `bin/idna`). Their first line is `#!<path of the interpreter that ran the install>`, and each package's `RECORD` lists the script's SHA-256. That interpreter depends on where the build runs: the laptop's `.venv/bin/python` (a macOS path), the `checks` job's `.venv/bin/python` (a runner path: lint and test had created the venv), and the `plan` jobs' `/usr/bin/python` (CPython 3.12.3: no venv exists there, and `uv pip` used the system Python although `.python-version` says 3.13). So the zip's bytes depend on the host. The package is correct in all three, because `--python-version 3.13` and `--python-platform aarch64-manylinux2014` pick the wheels; only the shebangs and the matching `RECORD` lines differ, and Lambda never runs `bin/`. The `build_zip.py` docstring blamed `RECORD` drift between uv versions, which was the wrong input. **Fix:** `drop_console_scripts` in `scripts/build_zip.py` (called first by `main`) removes `bin/` and the `RECORD` lines for it, test-first in `tests/test_build_zip.py` (5 tests; the property is that the same package installed by two different interpreters zips to identical bytes). Nothing runs those scripts: the handler is a Python import and `httpx`'s CLI needs an extra we don't install. The zip has 194 members, down from 196, and no host path left in it. **The laptop's hash is now `o97k286EsovCe09skB1OFrtqvS01hw3XsBOc70Nf6Ks=`** (stable across builds). **Confirmed in CI (PR #26, commit `1824088`):** the laptop, `checks` (both builds) and both `plan` jobs all print `o97k286E…`, although the interpreters still differ (`.venv` 3.13.16 against `/usr/bin/python` 3.12.3). The plans still show 1 change per environment: the deployed Lambda has the old laptop-built `lLRsXkEy…`, so the only delta is `lLRsXkEy…` → `o97k286E…` (`s3_key`, `source_code_hash`), which Gate 4b's first apply performs; after that an unchanged build plans as No changes. The deployed code's hash changes once more, and Gate 4b's first apply is that update either way.
+
+## Task 10: Main-branch deploys and pipeline-only production
 
 - On push to `main`, with `concurrency: deploy` (never cancelled):
-  `deploy-staging` (environment `staging`, `ci-apply-staging`: `make plan` + `make deploy`) →
-  `plan-production` (`ci-plan`: plan printed to the log, `.tfplan` uploaded, key passed as a job
-  output) → `deploy-production` (environment `production`, waits for your approval,
-  `ci-apply-production`: download, `make deploy ENV=production`).
-- `Makefile`: `ENV=production` needs `BREAK_GLASS=1` on the command line unless
+  `deploy-staging` (environment `staging`, `ci-apply-staging`: `mise run plan staging` +
+  `mise run deploy staging`) → `plan-production` (`ci-plan`: plan printed to the log, `.tfplan`
+  uploaded, key passed as a job output) → `deploy-production` (environment `production`, waits
+  for your approval, `ci-apply-production`: download, `mise run deploy production`).
+- `plan`/`deploy` tasks: `production` needs `BREAK_GLASS=1` in the environment unless
   `GITHUB_ACTIONS=true`.
 - New standard **`infra/pipeline`**: roles and trusts, staging before production, saved plans
   in S3, `id-token` only in jobs that run no project code, a new AWS service means a bootstrap
@@ -304,11 +393,17 @@ it: the first pipeline apply will then show one code update). An `AccessDenied` 
   lifecycle settings Terraform applies right after creating one, `infra/iam`). Amend
   `infra/environments` (pipeline-only is now enforced). README Deploy rewritten (pipeline,
   approval, rollback, break-glass). CLAUDE.md commands.
+- **One-off auditor review of the deploy workflow.** Once the deploy jobs are written, run
+  `zizmor --persona=auditor .github/workflows` by hand and read the findings. This is the first
+  workflow that holds apply credentials, so it is worth the stricter persona's false positives
+  once. It is a review, not a gate: the default `regular` persona stays in `lint-actions` (the
+  auditor persona only adds findings we accept, such as `secrets-outside-env` on the repo-level
+  tfvars secrets), and no `--persona` flag is added to the task.
 
 ### Gate 4b: the first pipeline deploy
 
-Merge Task 9. **Pass:** `deploy-staging` applies (No changes, or the one code update from Gate
-4a), `plan-production` shows the same, you approve, and it applies. `make deploy ENV=production`
+Merge Task 10. **Pass:** `deploy-staging` applies (No changes, or the one code update from Gate
+4a), `plan-production` shows the same, you approve, and it applies. `mise run deploy production`
 without `BREAK_GLASS=1` refuses. Writes are proved by the next real change, which flows staging
 → production through the pipeline. Until then the break-glass path is ready.
 **Rollback:** revert. The laptop path still works with `BREAK_GLASS=1`.
@@ -319,7 +414,8 @@ Then `roadmap.md`: Phase 2.1 done.
 
 ## Verification (end to end)
 
-- `make lint test tftest scan` after every task. `make build` is byte-identical twice.
+- `make lint test tftest scan` after every task (`mise run lint ::: test ::: tftest ::: scan` from Task 8 on). The build is
+  byte-identical twice, and the same before and after the switch to mise.
 - Gate 1: a second plan shows No changes. Gate 2: the simulator spot checks, and the main stacks
   unchanged. Gate 3: staging and production run under the boundary with no `AccessDenied`.
 - Gate 4a/4b: PR plans are green and read-only (`ci-pr-plan` can't read the token or archive

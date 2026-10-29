@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+#MISE description="Apply an environment's saved plan (ask first: changes live infrastructure)"
+#USAGE arg "<environment>" help="The environment to deploy" {
+#USAGE   choices "staging" "production"
+#USAGE }
+set -euo pipefail
+
+env=${usage_environment?}
+export TF_DATA_DIR=.terraform-$env
+plan_file=deploy-$env.tfplan
+
+# The AWS CLI, as the identity Terraform applies with: the weather-deploy profile on a laptop, and
+# the environment's role credentials in Actions (which set GITHUB_ACTIONS).
+aws=(aws)
+[[ -n ${GITHUB_ACTIONS:-} ]] || aws+=(--profile weather-deploy)
+
+# Fail before the build when there is nothing to apply.
+mise run --quiet check-plan "$env"
+
+# deploy rebuilds and refuses to apply if the new zip isn't the one the plan was made for (source
+# changed since the plan), so the plan and the code can't disagree.
+mise run --quiet build
+
+# It also runs init, so a fresh machine can apply a plan it only downloaded.
+terraform -chdir=infra init -input=false -backend-config="envs/$env.backend.hcl"
+
+plan=$(terraform -chdir=infra show -json "$plan_file")
+field() { printf '%s' "$plan" | uv run --no-project python -c "import json, sys; d = json.load(sys.stdin); print($1)"; }
+
+planned=$(field 'd["variables"]["lambda_zip_sha256"]["value"]')
+built=$(cat build/lambda.zip.sha256)
+[[ $planned == "$built" ]] || {
+  echo "The zip just built ($built) is not the one planned ($planned). Run mise run plan $env again." >&2
+  exit 1
+}
+
+# The zip is uploaded to the key the plan holds (Lambda reads its code from S3, and the bucket and
+# key come from the plan so they are derived once, in Terraform). If-None-Match makes the write
+# refuse to replace an object, which the bucket policy requires: the key is the zip's hash, so a
+# 412 means these exact bytes are already there.
+bucket=$(field 'd["variables"]["artifacts_bucket"]["value"]')
+key=$(field 'd["planned_values"]["outputs"]["lambda_s3_key"]["value"]')
+region=$(field 'd["variables"]["region"]["value"]')
+err=$("${aws[@]}" s3api put-object --region "$region" --bucket "$bucket" --key "$key" \
+  --body build/lambda.zip --if-none-match '*' --output text --query ETag 2>&1 >/dev/null) || {
+  case $err in
+    *PreconditionFailed*) echo "s3://$bucket/$key is already there (same bytes)" ;;
+    *) echo "$err" >&2; exit 1 ;;
+  esac
+}
+
+terraform -chdir=infra apply "$plan_file"
+rm "infra/$plan_file"
