@@ -1,14 +1,21 @@
 # Budget
 
 What the project costs is a design input, not something found on the bill. The shape that matters:
-a small fixed monthly cost, and everything else paid per use.
+a small fixed monthly cost, and everything else paid per use. Cost informs the design; it doesn't
+veto it. Once there's more than one office this starts to be a public service, and a design that
+serves it better may cost more.
 
-- **Fixed monthly cost stays O(1) in offices.** Alarms, the SNS topic and the budget are shared by
-  every office, so adding one adds usage cost only. A resource per office (an alarm, a custom
-  metric, a table, a schedule) is the thing to refuse. See `global/principles` (the office is the
-  unit of isolation) for what is per office instead
-- **Per-office visibility comes from queries and reports**, not per-office alarms or custom
-  metrics. Logs Insights, the ledger and the archive already hold the per-office facts
+- **Shared by default.** Alarms, the SNS topic and the budget are shared by every office, so adding
+  an office normally adds usage cost only. See `global/principles` (the office is the unit of
+  isolation) for what is per office instead
+- **Per-office cost is allowed, if it's estimated and approved first** (2026-10-29, Phase 2.2). A
+  resource per office (a schedule, an alarm, a custom metric) needs its cost at each scale in the
+  spec's `cost.md`, and the user approves that estimate before it's deployed. A per-office
+  resource that costs nothing while idle (an EventBridge schedule, billed per invocation) still
+  goes in `cost.md`, as zero fixed cost
+- **Per-office visibility comes from queries and reports** by default. Logs Insights, the ledger
+  and the archive already hold the per-office facts, so a per-office alarm or metric needs a
+  reason a query can't meet
 - **Prefer pay-per-use with no idle cost.** Lambda, on-demand DynamoDB, S3 and the scheduler cost
   nothing while idle. A resource that bills by the hour (a NAT gateway, a provisioned table, an
   always-on endpoint) needs a reason in the spec

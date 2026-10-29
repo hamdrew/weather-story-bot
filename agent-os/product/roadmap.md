@@ -223,6 +223,10 @@ production after my approval (skipped when a plan changes nothing); the laptop p
 
 ## Phase 2.2: Wisconsin and Minneapolis Offices
 
+In progress (spec `2026-10-29-1409-wisconsin-and-minneapolis-offices`). Shaping amended
+`infra/budget`: per-office cost is allowed once its estimate is approved. **Shaping also added
+DLH (Duluth)**, so the five offices cover all of Wisconsin rather than nearly all of it.
+
 Sources: standards review, sections on `env-config`, `dynamodb-schema`, `side-effect-order`,
 `run-outcomes`, `retries`, `alarms` and `test-data`.
 
@@ -273,6 +277,21 @@ queries get built once against the shape they'll actually run on.
   weekly job would never trip.
 - **Refresh the note's "Current state" section before shaping,** since Phases 1.2 through 2.2 change
   the log messages it's written against.
+
+## Side effort: Public Release (alongside Phase 3)
+
+Not a sequential phase: it runs in parallel with Year in Review once Phase 2.2's offices are live.
+Added 2026-10-29 while shaping Phase 2.2: with four offices, this starts to be a public service,
+so release whatever offices exist rather than waiting for national coverage. User experience and
+outreach rather than infrastructure. Takes over Phase 4's "promote the channels" and "stay
+clearly unofficial" items for the offices already running.
+
+- **Publish the channels:** links in the README, and listings in trusted Telegram directories,
+  weather forums and enthusiast communities.
+- **Channels written for strangers:** a name, description and photo per channel, and a pinned
+  message describing the office, its area and what the channel posts.
+- **Say how to interact with the Weather Story Bot,** and decide what interaction it supports.
+- **Stay clearly unofficial** (see Phase 4): no NWS or NOAA branding, a link to the source.
 
 ## Phase 3: Year in Review
 
@@ -385,10 +404,11 @@ so these travel together. Sources: standards review, "Before about 50 offices" a
 - **A daily health digest instead of per-office quiet alarms.** The global "gone quiet" alarm can't
   see one silent office, and a per-office version would be noisy, because some offices rarely
   publish at all. Build the digest from the run records, comparing each office against its
-  *own* history. That's a report, not an alarm, which keeps fixed monthly cost O(1) in offices per
-  `infra/budget` — per-office alarms and per-office custom metrics are exactly what that standard
-  exists to prevent.
-- **Then promote the channels to a wider audience.** Get them listed where people actually look:
+  *own* history. That's a report, not an alarm. `infra/budget` allows per-office cost once its
+  estimate is approved, but at forty offices per-office alarms are a real bill, and a report
+  compares each office against its own baseline better than a fixed threshold can anyway.
+- **Then promote the channels to a wider audience** (the Public Release side effort starts this
+  for the first four offices). Get them listed where people actually look:
   Telegram channel directories and catalogs, weather forums and enthusiast communities, the
   relevant state and regional subreddits, and — since the Year in Review may already be going to
   them — the NWS offices themselves. Each channel needs a name, description and photo written for
