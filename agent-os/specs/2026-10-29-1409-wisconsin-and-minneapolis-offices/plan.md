@@ -96,9 +96,13 @@ standards below), `references.md` and no `visuals/` (none were provided). Also:
   event `Put` (`attribute_not_exists(PK)`) in one `TransactWriteItems`. Move the event item
   builder out of `history.py` so both share it, and stop `handler._apply_post_or_update` writing
   that event separately
-- Pass a `ClientRequestToken` derived from office, story key and message id. Without it, a
-  botocore retry of a transaction that succeeded (but whose response was lost) fails on the
-  event's `attribute_not_exists`. The run would then count `failed` and orphan the old message
+- Pass no `ClientRequestToken` of our own (amended 2026-10-29, during the task). botocore fills
+  one in for every `TransactWriteItems` call and reuses it on its own retries, so a retry of a
+  transaction that succeeded (but whose response was lost) is already a no-op. Those retries are
+  the only re-send. A derived token would add nothing, and would add risks: a code-level retry
+  reads the clock again, so it would get `IdempotentParameterMismatch`, and tokens aren't per
+  table (a transaction can span tables), so staging and production, which share an account and
+  region, could clash. A test pins botocore's token on the wire
 - If the transaction fails (including a cancelled event-key collision), the record fails and
   counts as `failed`. The next run reposts, and the old message isn't deleted, as today.
   Deleted/delete-failed events, rejections, `last_seen` and run records stay best effort

@@ -16,11 +16,12 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from weather_story_bot.archive import StoryArchive
 from weather_story_bot.config import OfficeConfig, Settings
-from weather_story_bot.history import EventKind, StoryHistory
+from weather_story_bot.history import StoryHistory
 from weather_story_bot.models import Story
 from weather_story_bot.nws import NwsClient
 from weather_story_bot.planner import Decision, Outcome, decide, select_active
 from weather_story_bot.state import (
+    EventKind,
     OfficeLease,
     PostedRecord,
     PostedStore,
@@ -294,15 +295,16 @@ def _apply_post_or_update(office: OfficeConfig, decision: Decision, services: Se
         image,
         updated=decision.outcome is Outcome.UPDATE,
     )
-    posted_at = datetime.now(UTC)
     # Recorded only after Telegram accepts it: a failure here may cause a repost, never a miss.
+    # The posted/updated ledger event is part of the same transaction.
     services.store.record_posted(
         story,
         message_id,
         prefix,
         fingerprint,
         image_sha256=image_sha256(image),
-        posted_at=posted_at,
+        posted_at=datetime.now(UTC),
+        updated=decision.outcome is Outcome.UPDATE,
     )
     extra: dict[str, Any] = {
         "image_id": story.image_id,
@@ -329,13 +331,6 @@ def _apply_post_or_update(office: OfficeConfig, decision: Decision, services: Se
         )
 
     # History goes after the whole chain, never between its steps (backend/side-effect-order).
-    services.history.record_event(
-        story,
-        EventKind.POSTED if decision.outcome is Outcome.POST else EventKind.UPDATED,
-        at=posted_at,
-        fingerprint=fingerprint,
-        telegram_message_id=message_id,
-    )
     if replaced is not None and delete_event is not None:
         kind, deleted_at = delete_event
         services.history.record_deletion(story, replaced, kind, at=deleted_at)

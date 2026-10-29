@@ -1,11 +1,18 @@
-"""DynamoDB record of which stories have been posted, and the message showing each one."""
+"""DynamoDB record of which stories have been posted, and the message showing each one.
+
+The safety chain's writes (backend/side-effect-order): the current-story record with its
+`posted`/`updated` ledger event, written together, and the office lease. Best-effort history is
+in `history.py`.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -86,6 +93,55 @@ def utc_timestamp(at: datetime) -> str:
     return at.astimezone(UTC).isoformat(timespec="microseconds")
 
 
+class EventKind(StrEnum):
+    POSTED = "posted"
+    UPDATED = "updated"
+    REJECTED = "rejected"
+    DELETED = "deleted"
+    DELETE_FAILED = "delete_failed"
+
+
+def event_item(
+    story: Story,
+    kind: EventKind,
+    *,
+    at: datetime,
+    fingerprint: str | None = None,
+    telegram_message_id: int | None = None,
+    reasons: Sequence[str] = (),
+) -> dict[str, AttributeValueTypeDef]:
+    """One immutable ledger event about one revision of a story (backend/dynamodb-schema).
+
+    Shared by `PostedStore.record_posted`, which writes `posted`/`updated` events in its
+    transaction, and `history.StoryHistory.record_event`, which writes `rejected` ones best effort.
+    `at` is when the action happened and is part of the key, so read the clock per event. Events
+    hold only the revision they are about: what an update changed is derived from consecutive
+    events at analysis time, never stored (`global/principles`).
+    """
+    key = story_key(story)
+    item: dict[str, AttributeValueTypeDef] = {
+        "PK": {"S": office_pk(story.office_id)},
+        "SK": {"S": event_sk(story.start_time, key, at)},
+        "schema_version": {"N": str(SCHEMA_VERSION)},
+        "office_id": {"S": story.office_id},
+        "story_key": {"S": key},
+        "event": {"S": kind},
+        "event_at": {"S": utc_timestamp(at)},
+        "image_id": {"S": story.image_id},
+        "title": {"S": story.title},
+        "start_time": {"S": story.start_time.isoformat()},
+        "end_time": {"S": story.end_time.isoformat()},
+        "update_time": {"S": story.update_time.isoformat()},
+    }
+    if fingerprint is not None:
+        item["fingerprint"] = {"S": fingerprint}
+    if telegram_message_id is not None:
+        item["telegram_message_id"] = {"N": str(telegram_message_id)}
+    if reasons:
+        item["reasons"] = {"L": [{"S": reason} for reason in reasons]}
+    return item
+
+
 @dataclass(frozen=True, slots=True)
 class PostedRecord:
     """The latest posted revision of a story and the Telegram message showing it.
@@ -110,7 +166,8 @@ class PostedStore:
     """One current-story item per posted story in the state table (backend/dynamodb-schema).
 
     Keyed `PK = OFFICE#<office_id>`, `SK = STORY#<start_utc_iso>#<story_key>`, and built from the
-    `Story` alone, so a lookup and the write it follows can't disagree about the key.
+    `Story` alone, so a lookup and the write it follows can't disagree about the key. Each record
+    is written with its post's `EVENT#` item, atomically.
     """
 
     def __init__(self, dynamodb_client: DynamoDBClient, table_name: str) -> None:
@@ -147,8 +204,14 @@ class PostedStore:
         *,
         image_sha256: str,
         posted_at: datetime | None = None,
+        updated: bool = False,
     ) -> None:
-        """Replace the story's record with the revision just posted."""
+        """Replace the story's record with the revision just posted, and write its ledger event.
+
+        One transaction, so a recorded post always has its `posted` or `updated` event and an
+        event never describes a post that wasn't recorded. If either write fails (including the
+        event's key already being taken), neither is written and this raises.
+        """
         posted_at = posted_at or datetime.now(UTC)
         item: dict[str, AttributeValueTypeDef] = {
             **story_item_key(story),
@@ -167,7 +230,28 @@ class PostedStore:
             "image_sha256": {"S": image_sha256},
             "description_sha256": {"S": description_sha256(story)},
         }
-        self._client.put_item(TableName=self._table, Item=item)
+        event = event_item(
+            story,
+            EventKind.UPDATED if updated else EventKind.POSTED,
+            at=posted_at,
+            fingerprint=fingerprint,
+            telegram_message_id=message_id,
+        )
+        # No ClientRequestToken: botocore fills one in and reuses it on its own retries, so a retry
+        # after a lost response is a no-op rather than a cancelled event write.
+        self._client.transact_write_items(
+            TransactItems=[
+                {"Put": {"TableName": self._table, "Item": item}},
+                # Never overwrites: a key collision cancels the whole transaction.
+                {
+                    "Put": {
+                        "TableName": self._table,
+                        "Item": event,
+                        "ConditionExpression": "attribute_not_exists(PK)",
+                    }
+                },
+            ],
+        )
 
 
 def _last_seen_at(item: dict[str, AttributeValueTypeDef]) -> datetime | None:

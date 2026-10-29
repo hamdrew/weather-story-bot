@@ -8,8 +8,8 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from tests.conftest import TABLE_NAME, make_story
-from weather_story_bot.history import EventKind, StoryHistory
-from weather_story_bot.state import PostedRecord, PostedStore, story_key
+from weather_story_bot.history import StoryHistory
+from weather_story_bot.state import EventKind, PostedRecord, PostedStore, story_key
 
 NOW = datetime(2026, 9, 25, 14, 37, 12, 345678, tzinfo=UTC)
 MISSING_TABLE = "no-such-table"
