@@ -25,7 +25,9 @@ def sandbox(tmp_path):
 
 
 def run(sandbox: Path, task: str, **env: str) -> subprocess.CompletedProcess[str]:
-    base = {k: v for k, v in os.environ.items() if k not in {"GITHUB_ACTIONS", "BREAK_GLASS"}}
+    # Actions sets these on a runner; a test that wants one passes it, so none leaks in.
+    scrubbed = {"GITHUB_ACTIONS", "BREAK_GLASS", "GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"}
+    base = {k: v for k, v in os.environ.items() if k not in scrubbed}
     base["PATH"] = f"{sandbox / 'bin'}{os.pathsep}{base['PATH']}"
     return subprocess.run(
         [str(TASKS / task)],
