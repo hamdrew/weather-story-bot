@@ -83,12 +83,13 @@ jobs:
 
   # Pull requests from branches of this repository. Dependabot's can't get an OIDC token, and a
   # fork's must never assume a role; both still get checks.
-  plan:
+  plan: # zizmor: ignore[anonymous-definition] a `name:` expression shows unexpanded when skipped
     if: >-
       github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.full_name == github.repository
       && github.event.pull_request.user.login != 'dependabot[bot]'
-    name: plan (${{ matrix.environment }})
+    # No `name:`: GitHub names a matrix leg `plan (<environment>)`, and a skipped one (every push to
+    # main) shows plain `plan`. An expression in `name:` would show unexpanded when skipped.
     needs: checks
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -98,11 +99,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - environment: staging
-            state_key: weather-story-bot/staging/terraform.tfstate
-          - environment: production
-            state_key: weather-story-bot/terraform.tfstate
+        environment: [staging, production]
     env:
       ENVIRONMENT: ${{ matrix.environment }}
       # A variable missing from the tfvars secret fails instead of waiting for input.
@@ -116,7 +113,9 @@ jobs:
       - uses: ./.github/actions/ci-setup # zizmor: ignore[self-repository] actionlint rejects the $/ form
         with:
           environment: ${{ matrix.environment }}
-          state-key: ${{ matrix.state_key }}
+          # Each leg reads its own environment's state; a mix-up would plan one environment against
+          # the other's.
+          state-key: ${{ matrix.environment == 'staging' && 'weather-story-bot/staging/terraform.tfstate' || 'weather-story-bot/terraform.tfstate' }}
           state-bucket: ${{ vars.TF_STATE_BUCKET }}
           region: ${{ vars.AWS_REGION }}
           # Repository secrets: an environment would change the OIDC subject (see the top). Each leg
