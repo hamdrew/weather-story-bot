@@ -1,8 +1,9 @@
 # ci-apply-staging and ci-apply-production, one per environment, each assumable only from its own
 # GitHub environment. An apply role reaches only its environment's resources: staging by name
-# prefix, production by exact name (locals.tf), plus Environment tag conditions where the service
-# supports them (the gaps are listed in infra/iam). Roles it creates or changes must carry the
-# environment's own permissions boundary, and nothing here can change or delete a boundary.
+# prefix, production by exact name or a ? pattern no staging name can match (locals.tf), plus
+# Environment tag conditions where the service supports them (the gaps are listed in infra/iam).
+# Roles it creates or changes must carry the environment's own permissions boundary, and nothing
+# here can change or delete a boundary.
 locals {
   # Each environment's own Environment tag, which default_tags puts on everything it creates.
   tag_conditions = { for env in keys(local.environments) : env => {
