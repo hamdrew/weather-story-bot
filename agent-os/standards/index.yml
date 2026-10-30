@@ -60,4 +60,4 @@ testing:
   terraform-tests:
     description: mise run tftest runs offline against a mock aws provider; assert on policy document inputs, not .json; one expect_failures run per validation; see a new test fail before trusting it; mise run scan (Checkov, Terraform only; workflows are mise run lint-actions) is blocking and every inline skip needs a reason
   test-data:
-    description: make_story camelCase overrides and mkx_payload; production NWS quirks become dated parametrized cases
+    description: make_story camelCase overrides and office_payload(office_id) over captured listings; production NWS quirks become dated parametrized cases

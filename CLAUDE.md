@@ -34,8 +34,8 @@ Every task is a mise task (`mise.toml`, and bash file tasks in `mise-tasks/`); `
   model, research, parallel checks) without asking first.
 - In every task: test-driven-development for behaviour changes, systematic-debugging for failures,
   verification-before-completion before reporting done, requesting-code-review before handing back.
-- agent-os rules win over a skill's defaults. Stop after each numbered task even if a skill says to
-  run continuously. Never run `deploy`, `start`/`pause` or `bootstrap-deploy` (they need MFA and
+- agent-os rules win over a skill's defaults. Stop at natural stopping points you judge, and always
+  at the end of a stage and at every gate, even if a skill says to run continuously. Never run `deploy`, `start`/`pause` or `bootstrap-deploy` (they need MFA and
   change live infrastructure), and never commit without asking: where a skill says to commit, stage
   the change and ask. A gate is the user's to run.
 

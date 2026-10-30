@@ -33,14 +33,27 @@ def aws_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
 
 
+def office_payload(office_id: str) -> dict[str, Any]:
+    """An office's real NWS listing, read fresh from `fixtures/` on every call.
+
+    Captured listings: MKX committed with the MVP on 2026-09-13; MPX by `curl` on 2026-10-29 at
+    21:44 CDT.
+    """
+    return json.loads((FIXTURES / f"{office_id.lower()}_weatherstories.json").read_text())
+
+
+def office_stories(office_id: str) -> list[Story]:
+    return [Story.from_api(item) for item in office_payload(office_id)["stories"]]
+
+
 @pytest.fixture
 def mkx_payload() -> dict[str, Any]:
-    return json.loads((FIXTURES / "mkx_weatherstories.json").read_text())
+    return office_payload("MKX")
 
 
 @pytest.fixture
-def mkx_stories(mkx_payload: dict[str, Any]) -> list[Story]:
-    return [Story.from_api(item) for item in mkx_payload["stories"]]
+def mkx_stories() -> list[Story]:
+    return office_stories("MKX")
 
 
 def make_story(**overrides: Any) -> Story:

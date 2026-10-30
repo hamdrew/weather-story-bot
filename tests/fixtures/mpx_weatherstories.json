@@ -1,0 +1,31 @@
+{
+    "@context": {
+        "@version": "1.1"
+    },
+    "stories": [
+        {
+            "officeId": "MPX",
+            "startTime": "2026-10-29T21:15:00+00:00",
+            "endTime": "2026-10-30T12:00:00+00:00",
+            "updateTime": "2026-10-29T21:22:44+00:00",
+            "title": "Rain Chances Ahead",
+            "description": "Another nice day ahead for the end of the work week! We're tracking scattered rain on Halloween, followed by widespread rain early next week.",
+            "altText": "Tonight: Partly cloudy, Lows in the 30s. \nFriday: Mostly sunny early, increasing clouds across southern MN later on. Highs in the 50s. \nSaturday: Scattered rain showers with highs in the 50s. \nSunday: Partly cloudy and mild, with highs in the 60s. \nMonday & Tuesday: Widespread rain likely. ",
+            "priority": false,
+            "order": 1,
+            "download": "https://api.weather.gov/offices/MPX/weatherstories/download/b40274e6-2cc2-4ee8-80b6-28ac4959a46b"
+        },
+        {
+            "officeId": "MPX",
+            "startTime": "2026-10-29T21:07:00+00:00",
+            "endTime": "2026-11-01T04:59:00+00:00",
+            "updateTime": "2026-10-29T21:13:49+00:00",
+            "title": "Trick or Treat Forecast",
+            "description": "Definitely will not have to worry about putting on the snow boots for trick or treating but you may want to have a light jacket and an umbrella handy. Happy Halloween!",
+            "altText": "Forecast infographic of cities across central and southern MN and western WI for Saturday afternoon and evening. Temperatures will be in 50s for trick or treating with chance of scattered rain showers across central and northern MN in the early evening. ",
+            "priority": false,
+            "order": 3,
+            "download": "https://api.weather.gov/offices/MPX/weatherstories/download/732df153-64cc-4241-b145-1d38ee4631c1"
+        }
+    ]
+}
