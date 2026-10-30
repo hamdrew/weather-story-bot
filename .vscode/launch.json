@@ -66,6 +66,19 @@
             // build/lambda.zip, so a debug session can't change the zip `mise run plan` hashes. It
             // does remove build/package/bin in place (the console scripts); `mise run build` redoes it.
             "args": ["build/package", "build/debug.zip"]
+        },
+        {
+            "name": "Tests: Debug Test",
+            "type": "debugpy",
+            "request": "launch",
+            // Used by the Testing panel's "Debug Test", not F5. Tests are offline (moto + respx),
+            // so stepping into botocore, httpx or moto never reaches AWS, Telegram or NWS.
+            "purpose": ["debug-test"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            // Step into libraries and stop at breakpoints set in them, such as moto's
+            // transact_write_items.
+            "justMyCode": false
         }
     ]
 }
