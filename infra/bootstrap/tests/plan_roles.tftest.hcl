@@ -134,3 +134,16 @@ run "no_bucket_pattern_can_reach_an_object" {
     error_message = "A bucket ARN in the read policy must be exact: a pattern would also match the bucket's objects."
   }
 }
+
+# A plan refreshes every schedule, so the read policy must reach each environment's per-office names.
+run "the_read_policy_reads_every_offices_schedule" {
+  assert {
+    condition = alltrue([
+      for name in ["weather-story-bot", "weather-story-bot-mkx", "weather-story-bot-staging", "weather-story-bot-staging-mkx"] : anytrue([
+        for r in one([for s in data.aws_iam_policy_document.plan_read.statement : s.resources if s.sid == "ScheduleRead"]) :
+        can(regex("^${replace(replace(replace(r, ".", "\\."), "*", ".*"), "?", ".")}$", "arn:aws:scheduler:us-east-2:123456789012:schedule/default/${name}"))
+      ])
+    ])
+    error_message = "The read policy must read both environments' schedules, per office."
+  }
+}

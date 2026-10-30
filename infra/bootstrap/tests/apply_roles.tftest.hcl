@@ -41,14 +41,17 @@ run "the_staging_role_names_only_staging_resources" {
   }
 }
 
-run "the_production_role_uses_exact_names" {
+# A * inside a name (not a :* or /* after it) would be a prefix pattern. ? is allowed on schedules
+# only, where each_environment_creates_its_own_offices_schedules_and_never_the_others checks it
+# against real names: enough of them elsewhere ("????????" matches "-staging") would reach staging.
+run "the_production_role_uses_no_prefix_pattern" {
   assert {
     condition = alltrue(flatten([
       for s in({ for env in ["staging", "production"] : env => flatten([for k, doc in data.aws_iam_policy_document.apply : doc.statement if startswith(k, "${env}-")]) })["production"] : [
-        for r in s.resources : !strcontains(r, "staging") && !strcontains(r, "weather-story-bot*")
+        for r in s.resources : !strcontains(r, "staging") && !can(regex("weather-story-bot[^:/]*\\*", r)) && (!strcontains(r, "?") || startswith(r, "arn:aws:scheduler:"))
       ] if s.effect == "Allow" && !contains(["NoResourceLevelReads", "StateList"], s.sid)
     ]))
-    error_message = "Production's names are a prefix of staging's, so its ARNs must be exact and never match staging."
+    error_message = "Production's names are a prefix of staging's, so no production name may use * or (outside schedules) ?: it could match staging."
   }
 }
 
@@ -331,5 +334,46 @@ run "boundaries_differ_and_are_named_per_environment" {
       "production" = ["arn:aws:ssm:us-east-2:123456789012:parameter/weather-story-bot/telegram-token"]
     })
     error_message = "Each boundary reaches its own environment's token parameter only."
+  }
+}
+
+# IAM's ? matches exactly one character and office ids are three letters (^[A-Z]{3}$), so production's
+# per-office schedules can use weather-story-bot-??? while every staging name, being longer, never
+# matches it. Each pattern becomes an anchored regex: . escaped, * to .*, ? to a single character.
+# These read local.apply_statements, the documents' inputs: a failed assert that iterates the
+# for_each data source crashes terraform test (hashicorp/terraform#39365), even indexed by key.
+run "each_environment_creates_its_own_offices_schedules_and_never_the_others" {
+  assert {
+    condition = jsonencode({
+      for env, d in local.apply_statements : env => [
+        for name in ["weather-story-bot", "weather-story-bot-mkx", "weather-story-bot-mkxx", "weather-story-bot-staging", "weather-story-bot-staging-mkx"] : name if anytrue(flatten([
+          for s in d : [
+            for r in s.resources : can(regex("^${replace(replace(replace(r, ".", "\\."), "*", ".*"), "?", ".")}$", "arn:aws:scheduler:us-east-2:123456789012:schedule/default/${name}"))
+          ] if s.effect == "Allow" && contains(s.actions, "scheduler:CreateSchedule")
+        ]))
+      ]
+      }) == jsonencode({
+      "staging"    = ["weather-story-bot-staging", "weather-story-bot-staging-mkx"]
+      "production" = ["weather-story-bot", "weather-story-bot-mkx"]
+    })
+    error_message = "Production creates weather-story-bot and its per-office schedules, staging only its own; neither matches the other's names."
+  }
+}
+
+run "each_environment_creates_its_own_misconfigured_alarm" {
+  assert {
+    condition = jsonencode({
+      for env, d in local.apply_statements : env => [
+        for name in ["weather-story-bot-errors", "weather-story-bot-misconfigured", "weather-story-bot-staging-errors", "weather-story-bot-staging-misconfigured"] : name if anytrue(flatten([
+          for s in d : [
+            for r in s.resources : can(regex("^${replace(replace(replace(r, ".", "\\."), "*", ".*"), "?", ".")}$", "arn:aws:cloudwatch:us-east-2:123456789012:alarm:${name}"))
+          ] if s.sid == "Creates"
+        ]))
+      ]
+      }) == jsonencode({
+      "staging"    = ["weather-story-bot-staging-errors", "weather-story-bot-staging-misconfigured"]
+      "production" = ["weather-story-bot-errors", "weather-story-bot-misconfigured"]
+    })
+    error_message = "Each environment creates its own misconfigured alarm, and never the other's alarms."
   }
 }

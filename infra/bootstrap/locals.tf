@@ -9,7 +9,8 @@ locals {
 
   # Production is unsuffixed and staging is weather-story-bot-staging, so production's names are a
   # prefix of staging's (infra/environments). Staging therefore matches by prefix, which also
-  # covers a resource added later, and production lists exact names: a pattern would match staging.
+  # covers a resource added later, and production lists exact names: a * pattern would match staging.
+  # The one exception is ? (exactly one character), for per-office schedules (below).
   environments = {
     staging = {
       name         = "weather-story-bot-staging"
@@ -44,11 +45,15 @@ locals {
     table    = e.prefix ? ["${e.name}*"] : ["${e.name}-state", "${e.name}-posted"]
     # Exact even for staging: in IAM, * also matches /, so a bucket pattern beside s3:Get* would
     # read the archive's objects. The archive is the main stack's only bucket.
-    bucket   = ["${e.name}-archive-${local.account_id}"]
-    topic    = e.prefix ? ["${e.name}*"] : ["${e.name}-alerts"]
-    schedule = e.prefix ? ["${e.name}*"] : [e.name]
+    bucket = ["${e.name}-archive-${local.account_id}"]
+    topic  = e.prefix ? ["${e.name}*"] : ["${e.name}-alerts"]
+    # One schedule per office, named <name>-<office id in lower case>. IAM's ? matches exactly one
+    # character and office ids are three letters (^[A-Z]{3}$ in config.py and variables.tf), so ???
+    # matches production's per-office names and never a staging name, which is always longer. The
+    # unsuffixed name stays until Phase 2.2 Task 9: rolling back the cutover recreates it.
+    schedule = e.prefix ? ["${e.name}*"] : [e.name, "${e.name}-???"]
     alarm = e.prefix ? ["${e.name}*"] : [
-      for a in ["errors", "missed-runs", "quiet", "repost-loop", "nws-ambiguous"] : "${e.name}-${a}"
+      for a in ["errors", "missed-runs", "quiet", "repost-loop", "nws-ambiguous", "misconfigured"] : "${e.name}-${a}"
     ]
     log_group = e.prefix ? ["/aws/lambda/${e.name}*"] : ["/aws/lambda/${e.name}"]
     # Production only: the budget covers the whole account (infra/environments).

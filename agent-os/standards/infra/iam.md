@@ -50,8 +50,12 @@ these scoped exceptions and additions:
   `Query` or `Scan`, nothing in `ssm` or `kms`. `ReadOnlyAccess` would include `ssm:GetParameter`,
   and the `aws/ssm` key lets any principal in the account decrypt the Telegram token
 - **Names:** staging matches by prefix (`weather-story-bot-staging*`). Production's names are a
-  prefix of staging's, so production uses exact names, never a pattern. Bucket ARNs are exact in
-  both: in IAM `*` also matches `/`, so a bucket pattern beside `s3:Get*` would read its objects
+  prefix of staging's, so production uses exact names, never a `*` pattern. The one exception is
+  `?`, which matches exactly one character: production's per-office schedules are
+  `weather-story-bot-???` (office ids are three letters), which no staging name is short enough to
+  match. Tests check that pattern against both environments' names and reject `?` on any other
+  resource (eight of them match `-staging`). Bucket ARNs are exact in both: in IAM `*` also
+  matches `/`, so a bucket pattern beside `s3:Get*` would read its objects
 - **Tag conditions on apply roles:** `aws:ResourceTag/Environment` on existing resources and
   `aws:RequestTag/Environment` + `aws:TagKeys` on creates, where the action supports them. An apply
   role may hold a tag-write action only on its own environment's names, with `aws:RequestTag`

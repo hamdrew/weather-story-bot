@@ -32,9 +32,12 @@ checks by hand in Phase 2.0. Now a pull request and a laptop run them the same w
   (`local.default_tags`) that the production code uses too. Never add a local only for a test
 - **Compare collections with `jsonencode(a) == jsonencode(b)`** (or `toset(a) == toset(b)` for
   unordered lists). Terraform's `==` is false for a list against a tuple or a map against an
-  object, and a failed comparison of mocked values can crash the test runner while it prints the
-  diff ("value has marks"). A crash like that means an assertion is false, not a Terraform bug:
-  bisect it one assert at a time
+  object
+- **A failed assert that iterates a whole `aws_iam_policy_document` crashes the runner** ("value has
+  marks", hashicorp/terraform#39365: the data source's deprecated attributes carry marks the
+  diagnostic can't render). The crash still means the assert is false: bisect it one assert at a
+  time. Indexing by key doesn't avoid it. A new test can assert on the local that feeds the
+  document (`local.apply_statements[env]`) instead, which fails cleanly with a diff
 - Build an ARN a test reads from names (`"arn:aws:s3:::${local.bucket}"`), not from a mocked
   resource's `.arn`, which is a random string
 - A new test must be seen to fail: break the rule it guards (a capitalised tag, a wildcard ARN, a

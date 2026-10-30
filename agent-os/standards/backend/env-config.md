@@ -28,3 +28,4 @@ Validated as `^[A-Z]{3}$` in **both** `config.py` and `variables.tf`. Keep the t
 - Terraform catches typos at plan time
 - Python still checks, because office ids end up in NWS URLs and S3 paths (`../X` must fail), and the Lambda's env can be changed outside Terraform
 - The local CLI's `--office` is only uppercased, not validated. It hits NWS only
+- Production's CI roles reach its per-office schedules as `weather-story-bot-???` (`infra/iam`), which relies on ids being exactly three characters. Widening the regex means changing `infra/bootstrap/locals.tf` and its tests first

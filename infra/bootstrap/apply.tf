@@ -1,8 +1,9 @@
 # ci-apply-staging and ci-apply-production, one per environment, each assumable only from its own
 # GitHub environment. An apply role reaches only its environment's resources: staging by name
-# prefix, production by exact name (locals.tf), plus Environment tag conditions where the service
-# supports them (the gaps are listed in infra/iam). Roles it creates or changes must carry the
-# environment's own permissions boundary, and nothing here can change or delete a boundary.
+# prefix, production by exact name or a ? pattern no staging name can match (locals.tf), plus
+# Environment tag conditions where the service supports them (the gaps are listed in infra/iam).
+# Roles it creates or changes must carry the environment's own permissions boundary, and nothing
+# here can change or delete a boundary.
 locals {
   # Each environment's own Environment tag, which default_tags puts on everything it creates.
   tag_conditions = { for env in keys(local.environments) : env => {
@@ -216,8 +217,9 @@ locals {
 
 # One role policy would pass IAM's 10,240-character limit on inline policies, so each role gets
 # three customer managed policies (6,144 characters each), grouped by what they do. Production's
-# are about 3.2, 3.9 and 4.0 KB; a statement that pushes one over fails at apply, so move it to a
-# lighter group (apply_group_of is exhaustive, so an unassigned statement fails the plan).
+# access, roles-tags and writes are about 3.4, 3.8 and 4.5 KB (read live after Phase 2.2 Gate 2);
+# a statement that pushes one over fails at apply, so move it to a lighter group (apply_group_of is
+# exhaustive, so an unassigned statement fails the plan).
 locals {
   apply_group_of = {
     State                      = "access"
