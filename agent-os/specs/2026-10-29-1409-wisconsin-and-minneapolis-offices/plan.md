@@ -69,7 +69,8 @@ rest.
 
 ## Working agreement
 
-Stop after each numbered task. Each task follows TDD for behaviour changes and ends with
+Stop at natural stopping points, as Claude judges them, and always at the end of a stage and
+at every gate. Each task follows TDD for behaviour changes and ends with
 `mise run lint ::: test` (plus `tftest` and `scan` when it touches infra) and a code review. Then
 stage the changes and ask before committing. Gates are the user's to run: `deploy`, `start`,
 `pause` and `bootstrap-deploy` all need MFA. Verify each gate against real AWS with the `readonly`
