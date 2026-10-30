@@ -7,7 +7,7 @@ import httpx
 import pytest
 import respx
 
-from tests.conftest import make_story
+from tests.conftest import make_story, office_payload, office_stories
 from weather_story_bot.models import Story
 from weather_story_bot.nws import NwsClient, NwsError
 
@@ -67,6 +67,29 @@ def test_list_stories_sorts_by_order_and_sends_headers(
     request = route.calls.last.request
     assert request.headers["User-Agent"] == USER_AGENT
     assert request.headers["Accept"] == "application/ld+json"
+
+
+@pytest.mark.parametrize(
+    ("office_id", "orders"),
+    [
+        ("MKX", [1, 2]),
+        # MPX listed orders 1 and 3 on 2026-10-29: the order can skip a number.
+        ("MPX", [1, 3]),
+    ],
+)
+@respx.mock
+def test_list_stories_parses_each_office_listing(
+    client: NwsClient, office_id: str, orders: list[int]
+) -> None:
+    payload = office_payload(office_id)
+    payload["stories"].reverse()
+    respx.get(f"https://api.weather.gov/offices/{office_id}/weatherstories").respond(json=payload)
+
+    stories = client.list_stories(office_id)
+
+    assert [s.order for s in stories] == orders
+    assert {s.office_id for s in stories} == {office_id}
+    assert stories == office_stories(office_id)
 
 
 @respx.mock
