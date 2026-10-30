@@ -19,3 +19,6 @@ the script.
 - Write output to a scratch path (`build/debug.zip`), never to a file another step consumes
   (`build/lambda.zip`). A debug session must not change what `mise run plan` hashes or `mise run deploy` applies
 - A script with subcommands gets one entry per subcommand worth stepping through
+- Tests have one entry, `Tests: Debug Test`, with `"purpose": ["debug-test"]` so the Testing panel's
+  "Debug Test" uses it, and `"justMyCode": false` so you can step into botocore and moto. Tests
+  are offline, so it needs no AWS profile

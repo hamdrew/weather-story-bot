@@ -223,6 +223,10 @@ production after my approval (skipped when a plan changes nothing); the laptop p
 
 ## Phase 2.2: Wisconsin and Minneapolis Offices
 
+In progress (spec `2026-10-29-1409-wisconsin-and-minneapolis-offices`). Shaping amended
+`infra/budget`: per-office cost is allowed once its estimate is approved. **Shaping also added
+DLH (Duluth)**, so the five offices cover all of Wisconsin rather than nearly all of it.
+
 Sources: standards review, sections on `env-config`, `dynamodb-schema`, `side-effect-order`,
 `run-outcomes`, `retries`, `alarms` and `test-data`.
 
@@ -385,14 +389,16 @@ so these travel together. Sources: standards review, "Before about 50 offices" a
 - **A daily health digest instead of per-office quiet alarms.** The global "gone quiet" alarm can't
   see one silent office, and a per-office version would be noisy, because some offices rarely
   publish at all. Build the digest from the run records, comparing each office against its
-  *own* history. That's a report, not an alarm, which keeps fixed monthly cost O(1) in offices per
-  `infra/budget` — per-office alarms and per-office custom metrics are exactly what that standard
-  exists to prevent.
-- **Then promote the channels to a wider audience.** Get them listed where people actually look:
+  *own* history. That's a report, not an alarm. `infra/budget` allows per-office cost once its
+  estimate is approved, but at forty offices per-office alarms are a real bill, and a report
+  compares each office against its own baseline better than a fixed threshold can anyway.
+- **Then promote the channels to a wider audience.** Link them from the README, and get them
+  listed where people actually look:
   Telegram channel directories and catalogs, weather forums and enthusiast communities, the
   relevant state and regional subreddits, and — since the Year in Review may already be going to
   them — the NWS offices themselves. Each channel needs a name, description and photo written for
-  strangers rather than for me, and a pinned post explaining what it is.
+  strangers rather than for me, and a pinned post explaining what it is. Say how to interact with
+  the bot, and decide what interaction it supports.
 - **Stay clearly unofficial.** Public listings are exactly where this starts to look like an NWS
   product. No NWS or NOAA logos, seal or branding anywhere in the channel identity, and say in the
   description that it's an unofficial feed of public data, with a link to the source. The graphics

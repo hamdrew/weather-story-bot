@@ -278,7 +278,7 @@ def test_old_message_is_kept_when_recording_the_repost_fails(
     run(services)
     revise(api, mkx_payload, b"PNG-revised")
 
-    def fail(*_: object) -> None:
+    def fail(*_: object, **__: object) -> None:
         raise RuntimeError("PutItem throttled")
 
     monkeypatch.setattr(services.store, "record_posted", fail)
@@ -288,6 +288,54 @@ def test_old_message_is_kept_when_recording_the_repost_fails(
     assert summary["MKX"] == counts(skipped=1, failed=1)
     assert api.routes["photo"].call_count == 3
     assert api.routes["delete"].call_count == 0
+
+
+def test_cancelled_transaction_records_neither_item_and_the_next_run_reposts(
+    services: handler.Services,
+    api: Any,
+    mkx_payload: dict[str, Any],
+    dynamodb: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run(services)
+    story = revise(api, mkx_payload, b"PNG-revised")
+    transact_write_items = dynamodb.transact_write_items
+    taken: list[dict[str, Any]] = []
+
+    def event_key_taken(**kwargs: Any) -> Any:
+        # Take the event's key first, so moto itself cancels the transaction on its condition.
+        # Seeded here, not beforehand, because the key holds posted_at, read from the real clock.
+        [event] = [
+            action["Put"]["Item"]
+            for action in kwargs["TransactItems"]
+            if action["Put"]["Item"]["SK"]["S"].startswith("EVENT#")
+        ]
+        taken.append({"PK": event["PK"], "SK": event["SK"]})
+        dynamodb.put_item(TableName=TABLE_NAME, Item=taken[-1])
+        return transact_write_items(**kwargs)
+
+    monkeypatch.setattr(dynamodb, "transact_write_items", event_key_taken)
+
+    assert run(services)["MKX"] == counts(skipped=1, failed=1)
+
+    # Message 102 was sent, but neither its record nor its event was written.
+    assert posted_record(services, story).telegram_message_id == 101
+    [key] = taken
+    assert dynamodb.get_item(TableName=TABLE_NAME, Key=key)["Item"] == key
+    dynamodb.delete_item(TableName=TABLE_NAME, Key=key)  # Only real events from here on.
+    assert events(dynamodb) == [("posted", 100), ("posted", 101)]
+    assert api.routes["delete"].call_count == 0
+
+    monkeypatch.setattr(dynamodb, "transact_write_items", transact_write_items)
+    assert run(services)["MKX"] == counts(updated=1, skipped=1)
+    assert posted_record(services, story).telegram_message_id == 103
+    assert events(dynamodb)[2:] == [("updated", 103), ("deleted", 101)]
+    # 102 stays in the channel beside 103: a repost, never a missed story.
+    assert deleted_ids(api) == [101]
+
+    assert run(services)["MKX"] == counts(skipped=2)
+    assert api.routes["photo"].call_count == 4
+    assert api.routes["delete"].call_count == 1
 
 
 @pytest.mark.parametrize(
@@ -491,7 +539,7 @@ def test_post_is_counted_even_when_recording_fails(
 ) -> None:
     # The StoriesPosted CloudWatch metric filter matches "Telegram message sent", so the
     # repost-loop alarm must still see posts whose DynamoDB write fails.
-    def fail(*_: object) -> None:
+    def fail(*_: object, **__: object) -> None:
         raise RuntimeError("PutItem throttled")
 
     monkeypatch.setattr(services.store, "record_posted", fail)

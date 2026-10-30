@@ -1,8 +1,10 @@
 """Append-only history in the state table: what the bot did, and when it could see NWS.
 
 Best-effort on purpose, and kept out of `state.py`, which is the safety chain. A failed history
-write logs a WARNING and returns; it never raises for AWS errors and never blocks a post. See
-`backend/dynamodb-schema` for the item keys.
+write logs a WARNING and returns; it never raises for AWS errors and never blocks a post. The
+`posted`/`updated` event is the exception: it is written atomically with the post's record, by
+`state.PostedStore.record_posted`, so it isn't here. See `backend/dynamodb-schema` for the item
+keys.
 """
 
 from __future__ import annotations
@@ -10,7 +12,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -18,7 +19,9 @@ from botocore.exceptions import BotoCoreError, ClientError
 from weather_story_bot.models import Story
 from weather_story_bot.state import (
     SCHEMA_VERSION,
+    EventKind,
     PostedRecord,
+    event_item,
     event_sk,
     office_pk,
     run_sk,
@@ -38,14 +41,6 @@ logger = logging.getLogger(__name__)
 LAST_SEEN_INTERVAL = timedelta(hours=1)
 
 
-class EventKind(StrEnum):
-    POSTED = "posted"
-    UPDATED = "updated"
-    REJECTED = "rejected"
-    DELETED = "deleted"
-    DELETE_FAILED = "delete_failed"
-
-
 class StoryHistory:
     """Ledger events, story sightings and run records (backend/dynamodb-schema)."""
 
@@ -63,34 +58,20 @@ class StoryHistory:
         telegram_message_id: int | None = None,
         reasons: Sequence[str] = (),
     ) -> None:
-        """Write one immutable ledger event about one revision of a story.
+        """Write one immutable ledger event about one revision of a story, best effort.
 
-        `at` is when the action happened; read the clock per event, since it is part of the key.
-        An event never overwrites another: a key collision is a failed write, not a replacement.
-        Events hold only the revision they are about. What an update changed is derived from
-        consecutive events at analysis time, never stored (`global/principles`).
+        For `rejected` events. `posted`/`updated` events are part of `PostedStore.record_posted`'s
+        transaction instead, so a recorded post always has its event. `state.event_item` builds
+        both. An event never overwrites another: a key collision is a failed write.
         """
-        key = story_key(story)
-        item: dict[str, AttributeValueTypeDef] = {
-            "PK": {"S": office_pk(story.office_id)},
-            "SK": {"S": event_sk(story.start_time, key, at)},
-            "schema_version": {"N": str(SCHEMA_VERSION)},
-            "office_id": {"S": story.office_id},
-            "story_key": {"S": key},
-            "event": {"S": kind},
-            "event_at": {"S": utc_timestamp(at)},
-            "image_id": {"S": story.image_id},
-            "title": {"S": story.title},
-            "start_time": {"S": story.start_time.isoformat()},
-            "end_time": {"S": story.end_time.isoformat()},
-            "update_time": {"S": story.update_time.isoformat()},
-        }
-        if fingerprint is not None:
-            item["fingerprint"] = {"S": fingerprint}
-        if telegram_message_id is not None:
-            item["telegram_message_id"] = {"N": str(telegram_message_id)}
-        if reasons:
-            item["reasons"] = {"L": [{"S": reason} for reason in reasons]}
+        item = event_item(
+            story,
+            kind,
+            at=at,
+            fingerprint=fingerprint,
+            telegram_message_id=telegram_message_id,
+            reasons=reasons,
+        )
         self._put_event(item, story.image_id)
 
     def record_deletion(

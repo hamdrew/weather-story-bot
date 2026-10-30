@@ -16,7 +16,7 @@ backend:
   client-errors:
     description: One public error type per client; handler.run is the only catch-all boundary
   dynamodb-schema:
-    description: Generic PK/SK with OFFICE#/STORY#/EVENT#/RUN#/LEASE keys, schema_version, no TTL, no indexes (analytics via S3 export), never an LSI; best-effort append-only history; office lease; migration script pattern
+    description: Generic PK/SK with OFFICE#/STORY#/EVENT#/RUN#/LEASE keys, schema_version, no TTL, no indexes (analytics via S3 export), never an LSI; best-effort append-only history except the posted/updated event, atomic with its record; office lease; migration script pattern
   env-config:
     description: Settings.from_env(Mapping) with ConfigError; add a setting in config.py, lambda.tf, variables.tf and a test; office id regex in both places
   injected-clients:
@@ -28,7 +28,7 @@ backend:
   secrets-in-errors:
     description: Keep the Telegram token URL out of exceptions, tracebacks and logs
   side-effect-order:
-    description: Office lease first; find, archive, send, record, delete old message; each failure leaves the old message or both, never zero; history writes around the chain, never between its steps
+    description: Office lease first; find, archive, send, record (story item + posted/updated event in one transaction), delete old message; each failure leaves the old message or both, never zero; other history writes around the chain, never between its steps
   story-identity:
     description: story_key (title + UTC start) vs content_fingerprint (image + description); no NWS-volatile fields; stored hash parts only explain changes
   structured-logging:
@@ -40,7 +40,7 @@ infra:
   alarms:
     description: Alarm descriptions are runbooks; ok_actions, commented treat_missing_data, tunable thresholds as variables; every alarm created with actions on and toggled with the schedule (mise run pause/start, ignore_changes); per-environment namespaces
   budget:
-    description: Fixed monthly cost O(1) in offices; per-office visibility from queries, not metrics; pay-per-use with no idle cost; every spec has a cost.md from mise run cost; retention is a cost decision; the budget rises deliberately
+    description: Cost informs design, never vetoes it; shared resources by default; per-office cost only once estimated in cost.md and approved before deploy; per-office visibility from queries by default; pay-per-use with no idle cost; every spec has a cost.md from mise run cost; retention is a cost decision; the budget rises deliberately
   data-retention:
     description: Archive and state table kept forever (no TTL) with matched 35-day undo windows; only the artifacts bucket (derived zips and plans) may expire; stop and ask before replacing a table or bucket
   environments:

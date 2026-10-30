@@ -41,8 +41,9 @@ ARCHIVE_MONTHS = 12  # S3 and DynamoDB grow forever, so storage is priced after 
 
 PNG_MB = 1.64  # measured average archived image
 JSON_KB = 0.9  # measured average archived story JSON
-# DynamoDB item sizes, all under 1 KB, so every write is 1 WRU and every GetItem 1 RRU. Storage
-# counts a story item per post, though an update overwrites one: close enough at 0.7 KB.
+# DynamoDB item sizes, all under 1 KB, so every write is 1 WRU (2 inside a transaction) and every
+# GetItem 1 RRU. Storage counts a story item per post, though an update overwrites one: close
+# enough at 0.7 KB.
 RUN_ITEM_KB = 0.4
 STORY_ITEM_KB = 0.7
 EVENT_ITEM_KB = 0.5
@@ -57,7 +58,7 @@ WRITES_PER_OFFICE = (
     + RUNS  # RUN# record
     + STORIES_PER_RUN * 24 * 30  # last_seen_at UpdateItem, at most hourly per unchanged story
     + POSTS  # last_seen_at again on the run after a post, since record_posted clears it
-    + POSTS * 2  # current-story PutItem + posted/updated ledger event
+    + POSTS * 2 * 2  # current-story Put + posted/updated event: one transaction, 2 WRUs an item
     + UPDATES  # deleted/delete_failed event for the replaced message
     + REJECTIONS  # rejected ledger event
 )

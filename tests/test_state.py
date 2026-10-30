@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from botocore.exceptions import ClientError
 
 from tests.conftest import TABLE_NAME, make_story
 from weather_story_bot.state import (
@@ -14,6 +16,7 @@ from weather_story_bot.state import (
     PostedStore,
     content_fingerprint,
     description_sha256,
+    event_sk,
     image_sha256,
     story_key,
 )
@@ -103,6 +106,15 @@ def test_story_key_distinguishes_occurrences(overrides: dict[str, Any]) -> None:
     assert story_key(make_story()) != story_key(make_story(**overrides))
 
 
+def items(dynamodb: Any, prefix: str) -> list[dict[str, Any]]:
+    """Items whose sort key starts with `prefix`, in key order."""
+    found = dynamodb.scan(TableName=TABLE_NAME)["Items"]
+    return sorted(
+        (item for item in found if item["SK"]["S"].startswith(prefix)),
+        key=lambda item: item["SK"]["S"],
+    )
+
+
 def test_find_story_missing(dynamodb: Any) -> None:
     assert PostedStore(dynamodb, TABLE_NAME).find_story(make_story()) is None
 
@@ -125,7 +137,7 @@ def test_record_posted_then_find_story(dynamodb: Any) -> None:
         description_sha256=description_sha256(story),
     )
     assert store.find_story(make_story(officeId="GRB")) is None
-    [item] = dynamodb.scan(TableName=TABLE_NAME)["Items"]
+    [item] = items(dynamodb, "STORY#")
     assert item["PK"] == {"S": "OFFICE#MKX"}
     # Pinned: scripts/migrate_table_keys.py wrote the live records under exactly this key.
     assert item["SK"] == {"S": f"STORY#2026-09-12T19:24:00+00:00#{story_key(story)}"}
@@ -146,7 +158,7 @@ def test_sort_key_uses_the_utc_start(dynamodb: Any) -> None:
 
     store.record_posted(story, 42, "p1", "fp1", image_sha256="img1")
 
-    [item] = dynamodb.scan(TableName=TABLE_NAME)["Items"]
+    [item] = items(dynamodb, "STORY#")
     assert item["SK"]["S"].startswith("STORY#2026-09-12T19:24:00+00:00#")
     assert item["start_time"] == {"S": "2026-09-12T14:24:00-05:00"}
     assert store.find_story(story) is not None
@@ -167,7 +179,100 @@ def test_record_posted_replaces_previous_revision(dynamodb: Any) -> None:
         image_sha256="img2",
         description_sha256=description_sha256(revised),
     )
-    assert len(dynamodb.scan(TableName=TABLE_NAME)["Items"]) == 1
+    assert len(items(dynamodb, "STORY#")) == 1
+
+
+POSTED_AT = datetime(2026, 9, 12, 20, 0, 0, 123456, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(("updated", "kind"), [(False, "posted"), (True, "updated")])
+def test_record_posted_writes_its_ledger_event(dynamodb: Any, updated: bool, kind: str) -> None:
+    story = make_story()
+
+    PostedStore(dynamodb, TABLE_NAME).record_posted(
+        story, 42, "p1", "fp1", image_sha256="img1", posted_at=POSTED_AT, updated=updated
+    )
+
+    [event] = items(dynamodb, "EVENT#")
+    assert event == {
+        "PK": {"S": "OFFICE#MKX"},
+        "SK": {
+            "S": f"EVENT#2026-09-12T19:24:00+00:00#{story_key(story)}"
+            "#2026-09-12T20:00:00.123456+00:00"
+        },
+        "schema_version": {"N": "1"},
+        "office_id": {"S": "MKX"},
+        "story_key": {"S": story_key(story)},
+        "event": {"S": kind},
+        # The send's time, the same instant as the record's posted_at.
+        "event_at": {"S": "2026-09-12T20:00:00.123456+00:00"},
+        "image_id": {"S": "aaaa-1111"},
+        "title": {"S": "Storms Monday Night"},
+        "start_time": {"S": "2026-09-12T19:24:00+00:00"},
+        "end_time": {"S": "2026-09-13T19:24:00+00:00"},
+        "update_time": {"S": "2026-09-12T19:30:25+00:00"},
+        "fingerprint": {"S": "fp1"},
+        "telegram_message_id": {"N": "42"},
+    }
+
+
+def test_record_posted_writes_neither_item_when_the_event_collides(dynamodb: Any) -> None:
+    store = PostedStore(dynamodb, TABLE_NAME)
+    store.record_posted(make_story(), 42, "p1", "fp1", image_sha256="img1")
+    revised = make_story(download=REISSUED_DOWNLOAD, description="Storm timing has shifted.")
+    # An event already holds the key the repost's event would take.
+    collision = {
+        "PK": {"S": "OFFICE#MKX"},
+        "SK": {"S": event_sk(revised.start_time, story_key(revised), POSTED_AT)},
+    }
+    dynamodb.put_item(TableName=TABLE_NAME, Item=collision)
+
+    with pytest.raises(ClientError) as raised:
+        store.record_posted(
+            revised, 43, "p2", "fp2", image_sha256="img2", posted_at=POSTED_AT, updated=True
+        )
+
+    assert raised.value.response["Error"]["Code"] == "TransactionCanceledException"
+    # The record still points at the old message, so the next run reposts and deletes nothing.
+    record = store.find_story(revised)
+    assert record is not None
+    assert record.telegram_message_id == 42
+    # The original post's event is the only real one; the colliding item is untouched.
+    ledger = [
+        (e["event"]["S"], e["telegram_message_id"]["N"])
+        for e in items(dynamodb, "EVENT#")
+        if "event" in e
+    ]
+    assert ledger == [("posted", "42")]
+    assert dynamodb.get_item(TableName=TABLE_NAME, Key=collision)["Item"] == collision
+
+
+def test_record_posted_relies_on_botocores_idempotency_token(dynamodb: Any) -> None:
+    # botocore fills in a ClientRequestToken for every TransactWriteItems call and reuses it on its
+    # own retries, so a retry after a lost response is a no-op, not a cancelled event write. That
+    # is the only re-send there is (backend/retries), so record_posted passes no token of its own.
+    passed: list[dict[str, Any]] = []
+    sent: list[dict[str, Any]] = []
+
+    def capture_passed(params: dict[str, Any], **_: Any) -> None:
+        passed.append(dict(params))
+
+    def capture_sent(params: dict[str, Any], **_: Any) -> None:
+        sent.append(json.loads(params["body"]))
+
+    dynamodb.meta.events.register(
+        "provide-client-params.dynamodb.TransactWriteItems", capture_passed
+    )
+    dynamodb.meta.events.register("before-call.dynamodb.TransactWriteItems", capture_sent)
+
+    PostedStore(dynamodb, TABLE_NAME).record_posted(
+        make_story(), 42, "p1", "fp1", image_sha256="img1"
+    )
+
+    [request] = passed
+    assert "ClientRequestToken" not in request
+    [body] = sent
+    assert body["ClientRequestToken"]
 
 
 def test_find_story_reads_records_written_before_content_hashes(dynamodb: Any) -> None:
@@ -175,7 +280,7 @@ def test_find_story_reads_records_written_before_content_hashes(dynamodb: Any) -
     store = PostedStore(dynamodb, TABLE_NAME)
     story = make_story()
     store.record_posted(story, 42, "p1", "fp1", image_sha256="img1")
-    [item] = dynamodb.scan(TableName=TABLE_NAME)["Items"]
+    [item] = items(dynamodb, "STORY#")
     dynamodb.update_item(
         TableName=TABLE_NAME,
         Key={"PK": item["PK"], "SK": item["SK"]},
@@ -198,7 +303,7 @@ def test_find_story_ignores_a_malformed_last_seen_at(dynamodb: Any, stored: dict
     store = PostedStore(dynamodb, TABLE_NAME)
     story = make_story()
     store.record_posted(story, 42, "p1", "fp1", image_sha256="img1")
-    [item] = dynamodb.scan(TableName=TABLE_NAME)["Items"]
+    [item] = items(dynamodb, "STORY#")
     dynamodb.update_item(
         TableName=TABLE_NAME,
         Key={"PK": item["PK"], "SK": item["SK"]},

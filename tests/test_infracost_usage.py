@@ -34,7 +34,7 @@ def test_one_office_counts_every_dynamodb_request() -> None:
         + 2880  # RUN# record per run
         + 2 * 24 * 30  # last_seen_at, hourly per unchanged story
         + 125  # last_seen_at again on the run after each post (record_posted clears it)
-        + 2 * 125  # story item + posted/updated event per post
+        + 2 * 2 * 125  # story item + posted/updated event per post, 2 WRUs each in a transaction
         + 10  # deletion event per update
         + 3 * 96  # rejected events
     )

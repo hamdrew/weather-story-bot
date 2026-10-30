@@ -46,5 +46,6 @@ Concurrency, failure, configuration, and onboarding are all per office.
 - `story_key` alone is not a global identity; `(office_id, story_key)` is
 - Checks that compare stories to each other stay inside one office's listing — neighbouring
   offices can legitimately share a regional graphic (`backend/untrusted-nws-data`)
-- Per-office *visibility* comes from queries and reports, never from per-office alarms or
-  custom metrics, whose fixed cost grows with the office count
+- Per-office *visibility* comes from queries and reports by default. A per-office alarm or custom
+  metric, whose fixed cost grows with the office count, needs a reason a query can't meet and an
+  approved estimate (`infra/budget`)
