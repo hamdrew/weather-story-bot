@@ -278,21 +278,6 @@ queries get built once against the shape they'll actually run on.
 - **Refresh the note's "Current state" section before shaping,** since Phases 1.2 through 2.2 change
   the log messages it's written against.
 
-## Side effort: Public Release (alongside Phase 3)
-
-Not a sequential phase: it runs in parallel with Year in Review once Phase 2.2's offices are live.
-Added 2026-10-29 while shaping Phase 2.2: with four offices, this starts to be a public service,
-so release whatever offices exist rather than waiting for national coverage. User experience and
-outreach rather than infrastructure. Takes over Phase 4's "promote the channels" and "stay
-clearly unofficial" items for the offices already running.
-
-- **Publish the channels:** links in the README, and listings in trusted Telegram directories,
-  weather forums and enthusiast communities.
-- **Channels written for strangers:** a name, description and photo per channel, and a pinned
-  message describing the office, its area and what the channel posts.
-- **Say how to interact with the Weather Story Bot,** and decide what interaction it supports.
-- **Stay clearly unofficial** (see Phase 4): no NWS or NOAA branding, a link to the source.
-
 ## Phase 3: Year in Review
 
 Source: `agent-os/notes/2026-09-16-year-in-review-ideas.md`. Absorbs the old "story archive" item,
@@ -407,12 +392,13 @@ so these travel together. Sources: standards review, "Before about 50 offices" a
   *own* history. That's a report, not an alarm. `infra/budget` allows per-office cost once its
   estimate is approved, but at forty offices per-office alarms are a real bill, and a report
   compares each office against its own baseline better than a fixed threshold can anyway.
-- **Then promote the channels to a wider audience** (the Public Release side effort starts this
-  for the first four offices). Get them listed where people actually look:
+- **Then promote the channels to a wider audience.** Link them from the README, and get them
+  listed where people actually look:
   Telegram channel directories and catalogs, weather forums and enthusiast communities, the
   relevant state and regional subreddits, and — since the Year in Review may already be going to
   them — the NWS offices themselves. Each channel needs a name, description and photo written for
-  strangers rather than for me, and a pinned post explaining what it is.
+  strangers rather than for me, and a pinned post explaining what it is. Say how to interact with
+  the bot, and decide what interaction it supports.
 - **Stay clearly unofficial.** Public listings are exactly where this starts to look like an NWS
   product. No NWS or NOAA logos, seal or branding anywhere in the channel identity, and say in the
   description that it's an unofficial feed of public data, with a link to the source. The graphics

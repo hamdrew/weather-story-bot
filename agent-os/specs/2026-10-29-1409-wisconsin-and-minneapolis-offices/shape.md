@@ -17,8 +17,8 @@ Lambda invocation. This spec covers the whole roadmap entry:
 - an add-an-office checklist and check script
 - generalized test fixtures
 
-Out of scope: the Public Release side effort (added to the roadmap during shaping), the daily
-health digest (Phase 4), and anything Year in Review reads the time zone for.
+Out of scope: channel promotion and the daily health digest (both Phase 4), and anything Year in
+Review reads the time zone for.
 
 ## Decisions
 
@@ -44,10 +44,6 @@ health digest (Phase 4), and anything Year in Review reads the time zone for.
   deploying. I don't want design being too adversely affected by overly strict budget. With the
   addition of offices, this tool starts moving towards a public service." `infra/budget` was
   amended in Task 1 to match.
-- **Public Release goes on the roadmap as a side effort**, parallel to Year in Review rather than
-  a sequential phase: README links, trusted Telegram directories, weather forums, pinned messages
-  describing each office, and how to interact with the bot. It takes over Phase 4's promotion
-  items for the offices already running.
 
 - **DLH (Duluth) joins as a fifth office.** The roadmap's four leave about eight far-northwest
   counties (Douglas, Bayfield, Ashland, Iron, Burnett, Washburn, Sawyer, Price) uncovered; the user

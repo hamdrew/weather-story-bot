@@ -62,10 +62,6 @@ rest.
 - **`infra/budget` is amended:** per-office cost is allowed when `cost.md` estimates it and the
   user approves it before deploying. Shared alarms on aggregates stay the default; per-office
   *visibility* still comes from queries.
-- **Out of scope, but added to the roadmap:** a "Public release" side effort that runs in
-  parallel with Year in Review, not as a sequential phase. It covers channel links in the README,
-  listings in Telegram directories and weather forums, pinned "about this office" messages and
-  interacting with the bot.
 - **Per-office invocation comes before `misconfigured`** (reordered after review). Once the
   office arrives in the event, a hand invocation with a bogus office or chat id tests
   `misconfigured` without deploying bad config. And `cost.md`, which prices the new alarm, is
@@ -85,8 +81,7 @@ profile, and report times in America/Chicago.
 
 Create the spec folder with `plan.md` (this plan), `shape.md`, `standards.md` (the full text of the
 standards below), `references.md` and no `visuals/` (none were provided). Also:
-- `roadmap.md`: add the **Public release** side effort, marked parallel to Phase 3, and mark
-  Phase 2.2 in progress
+- `roadmap.md`: mark Phase 2.2 in progress
 - `infra/budget` and `global/principles`: the amendment above (estimate + approval before deploy)
 
 ## Stage 1: Atomic post record
