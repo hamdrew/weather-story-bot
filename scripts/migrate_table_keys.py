@@ -4,7 +4,7 @@ Before: the MVP table `weather-story-bot-posted` holds one item per story, keyed
 `office_id` (partition) and `image_id = story#<story_key>` (sort).
 
 After: the state table `weather-story-bot-state` holds the same records under
-`PK = OFFICE#<id>`, `SK = STORY#<start_utc_iso>#<story_key>` (backend/dynamodb-schema), with
+`PK = OFFICE#<id>`, `SK = STORY#<start_utc_iso>#<story_key>`, with
 `schema_version`, `story_key` and every other attribute copied verbatim. `telegram_message_id`,
 `posted_at`, `fingerprint` and `archive_prefix` come across unchanged, so after the flip the
 Lambda skips live stories instead of reposting them, and deletes the right message on an update.
@@ -16,15 +16,14 @@ Lambda skips live stories instead of reposting them, and deletes the right messa
    the flip the Lambda writes them, and the old table is stale.
 
 Never deletes anything. The old table is the rollback until the state table has soaked, then it
-is removed as a whole through Terraform (backend/dynamodb-schema): deletion protection off, then
+is removed as a whole through Terraform: deletion protection off, then
 the resource. PITR keeps a free 35-day system backup of a deleted table, so deleting its items
 one by one first would add nothing.
 
 Prints the plan and changes nothing unless --apply is given. Every step is idempotent.
 
 Pause the schedule first, so no run writes the old table between the copy and the deploy that
-flips STATE_TABLE (Phase 1.2 deploy gate 3; the pause command is in the 2026-09-15 spec's
-Verification section):
+flips STATE_TABLE (`mise run pause <env>`):
     uv run python scripts/migrate_table_keys.py            # review the plan
     uv run python scripts/migrate_table_keys.py --apply
     mise run build && mise run deploy production         # flips STATE_TABLE, re-enables schedule

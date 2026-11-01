@@ -1,7 +1,7 @@
 name: ci-setup
 description: >-
   The setup every credentialed pipeline job shares: the locked terraform and uv, one environment's
-  backend config and tfvars, and AWS credentials from one OIDC role (infra/pipeline). Check out the
+  backend config and tfvars, and AWS credentials from one OIDC role. Check out the
   repository first. The caller keeps `id-token: write`.
 
 inputs:

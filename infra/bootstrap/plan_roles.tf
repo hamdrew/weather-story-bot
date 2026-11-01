@@ -3,7 +3,7 @@
 # Scan and nothing in ssm. ReadOnlyAccess would include ssm:GetParameter, and the aws/ssm key lets
 # any principal in the account decrypt it, which would hand the Telegram token to a pull request.
 # Granting s3:Get* on a bucket ARN (never bucket/*) reads the bucket's configuration without
-# reading an object. This is the scoped exception to "exact actions" in infra/iam.
+# reading an object. This is the one scoped exception to granting exact actions.
 locals {
   plan_read_statements = concat(
     [

@@ -1,5 +1,5 @@
 # What var.environment derives: names, the metric namespace, the production-only resources and the
-# Environment tag (infra/environments). Runs offline against a mock provider, so it needs no AWS
+# Environment tag. Runs offline against a mock provider, so it needs no AWS
 # credentials, and a mocked policy document's .json is a placeholder (iam.tftest.hcl asserts on
 # the documents' inputs instead).
 

@@ -149,7 +149,8 @@ def cost_table(scan: Mapping[str, Any]) -> str:
     costs: dict[str, dict[str, float]] = {}
     for project in scan["projects"]:
         for resource in project["resources"]:
-            # Unsupported means unpriced, not free (the scheduler: see the spec's cost record).
+            # Unsupported means unpriced, not free: Infracost cannot price the scheduler, so its
+            # cost is left out rather than shown as zero.
             if resource.get("is_free") or resource.get("is_supported") is False:
                 continue
             costs.setdefault(resource["name"], {})[project["project_name"]] = _cost(resource)

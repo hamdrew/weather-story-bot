@@ -1,5 +1,5 @@
 # The artifacts bucket: private, TLS-only, never overwritten, and everything in it is derived data
-# that may expire (infra/data-retention). Runs offline against a mock provider.
+# that may expire. Runs offline against a mock provider.
 
 mock_provider "aws" {
   # Resources validate the policy JSON they are given, and a mock would generate a random string.

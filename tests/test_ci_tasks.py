@@ -1,4 +1,4 @@
-"""The CI-only mise tasks (infra/pipeline), run for real with fake terraform and aws on PATH."""
+"""The CI-only mise tasks, run for real with fake terraform and aws on PATH."""
 
 import json
 import os

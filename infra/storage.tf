@@ -28,7 +28,7 @@ resource "aws_dynamodb_table" "posted" {
   }
 }
 
-# Replaces aws_dynamodb_table.posted (see backend/dynamodb-schema). posted stays untouched as the
+# Replaces aws_dynamodb_table.posted. posted stays untouched as the
 # rollback until the new keys have soaked, then goes away deliberately.
 # Items under PK = OFFICE#<id>, each carrying schema_version:
 #   STORY#<start_utc_iso>#<story_key>                current story
@@ -36,7 +36,7 @@ resource "aws_dynamodb_table" "posted" {
 #   RUN#<at_utc_iso>                                 run record (append-only)
 #   LEASE                                            office lease
 resource "aws_dynamodb_table" "state" {
-  #checkov:skip=CKV_AWS_119:Encrypted at rest with the AWS owned key; a customer managed key costs $1/month and is one more thing to protect (infra/data-retention)
+  #checkov:skip=CKV_AWS_119:Encrypted at rest with the AWS owned key; a customer managed key costs $1/month and is one more thing to protect
   name         = "${local.name}-state"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "PK"
@@ -53,7 +53,7 @@ resource "aws_dynamodb_table" "state" {
   }
 
   # No secondary indexes: keys serve the bot's own access patterns, and analytics reads a native
-  # export to S3 instead (backend/dynamodb-schema). Never add an LSI: it can only be created with
+  # export to S3 instead. Never add an LSI: it can only be created with
   # the table and caps each office partition at 10 GB. A GSI can be added later and backfills from
   # ordinary attributes such as event_at.
 
@@ -73,7 +73,7 @@ resource "aws_dynamodb_table" "state" {
 
 resource "aws_s3_bucket" "archive" {
   #checkov:skip=CKV2_AWS_62:Nothing consumes events from this bucket
-  #checkov:skip=CKV_AWS_144:Replication doubles storage and adds transfer cost; versioning and the 35-day undo window are the protection (infra/data-retention)
+  #checkov:skip=CKV_AWS_144:Replication doubles storage and adds transfer cost; versioning and the 35-day undo window are the protection
   #checkov:skip=CKV_AWS_145:SSE-S3 (AES256); a customer managed key costs $1/month and needs a grant for every reader
   #checkov:skip=CKV_AWS_18:Object-level access logs need a second bucket, which a bucket with a single writer does not justify
   bucket = "${local.name}-archive-${data.aws_caller_identity.current.account_id}"
@@ -124,7 +124,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "archive" {
     }
 
     # Failed uploads leave parts that bill until aborted. This removes no stored object, so it is not
-    # the expiration that infra/data-retention forbids.
+    # the expiration that records being permanent forbids.
     abort_incomplete_multipart_upload {
       days_after_initiation = 7
     }

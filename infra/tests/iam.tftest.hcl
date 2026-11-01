@@ -1,5 +1,5 @@
 # The Lambda role's policy: every statement stays on exact ARNs, the Environment tag conditions stay
-# attached to them, and Logs has none (infra/iam). A mocked policy document's .json is a
+# attached to them, and Logs has none. A mocked policy document's .json is a
 # placeholder, so these assert on the document's inputs. Runs offline against a mock provider (see
 # environments.tftest.hcl).
 
@@ -95,7 +95,7 @@ run "production_lambda_policy_conditions_stay_on_exact_arns" {
 
   assert {
     condition     = toset([for s in data.aws_iam_policy_document.lambda.statement : s.sid]) == toset(["Logs", "State", "Archive", "TelegramToken"])
-    error_message = "The Lambda role has exactly these four statements. Review a new one against infra/iam."
+    error_message = "The Lambda role has exactly these four statements. Review a new one for least privilege before adding it."
   }
 
   assert {
@@ -160,7 +160,7 @@ run "staging_lambda_policy_conditions_stay_on_exact_arns" {
 
   assert {
     condition     = toset([for s in data.aws_iam_policy_document.lambda.statement : s.sid]) == toset(["Logs", "State", "Archive", "TelegramToken"])
-    error_message = "The Lambda role has exactly these four statements. Review a new one against infra/iam."
+    error_message = "The Lambda role has exactly these four statements. Review a new one for least privilege before adding it."
   }
 
   assert {

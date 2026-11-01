@@ -2,7 +2,7 @@
 # Per service: read (describe/list/get), create (carries the request tags), manage (changes an
 # existing resource, gated on its Environment tag) and tag (tag writes, gated on the request's tags).
 # No Untag action: an untag request carries no aws:RequestTag, so the tag conditions could never allow it.
-# `conditioned = false` marks a service with no tag condition keys, which is listed in infra/iam.
+# `conditioned = false` marks a service with no tag condition keys (schedules and budgets).
 locals {
   services = {
     lambda = {
@@ -34,7 +34,7 @@ locals {
       ]
       create = ["dynamodb:CreateTable"]
       # No DeleteTable or UpdateContinuousBackups (both denied outright) and no UpdateTimeToLive
-      # (records are permanent, infra/data-retention).
+      # (records are permanent).
       manage = ["dynamodb:UpdateTable"]
       tag    = ["dynamodb:TagResource"]
     }

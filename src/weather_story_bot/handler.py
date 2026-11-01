@@ -179,7 +179,7 @@ def _run_office(
         counts["failed"] += 1
         return None
 
-    # The office catch-all (backend/client-errors), inside the lease so the run is still recorded
+    # The office catch-all, inside the lease so the run is still recorded
     # as one that saw NWS. Per-step catches below keep their own, more specific messages.
     try:
         _act_on_stories(office, stories, services, now, counts)
@@ -330,7 +330,7 @@ def _apply_post_or_update(office: OfficeConfig, decision: Decision, services: Se
             datetime.now(UTC),
         )
 
-    # History goes after the whole chain, never between its steps (backend/side-effect-order).
+    # History goes after the whole chain, never between its steps.
     if replaced is not None and delete_event is not None:
         kind, deleted_at = delete_event
         services.history.record_deletion(story, replaced, kind, at=deleted_at)

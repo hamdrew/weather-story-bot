@@ -250,7 +250,7 @@ def test_record_posted_writes_neither_item_when_the_event_collides(dynamodb: Any
 def test_record_posted_relies_on_botocores_idempotency_token(dynamodb: Any) -> None:
     # botocore fills in a ClientRequestToken for every TransactWriteItems call and reuses it on its
     # own retries, so a retry after a lost response is a no-op, not a cancelled event write. That
-    # is the only re-send there is (backend/retries), so record_posted passes no token of its own.
+    # is the only re-send there is, so record_posted passes no token of its own.
     passed: list[dict[str, Any]] = []
     sent: list[dict[str, Any]] = []
 

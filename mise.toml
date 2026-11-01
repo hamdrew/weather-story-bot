@@ -1,5 +1,4 @@
-# The one source of tool versions for the laptop and every CI job, and of every task (agent-os
-# standard global/tooling). The ranges below say what is allowed; the committed mise.lock says what
+# The one source of tool versions for the laptop and every CI job, and of every task. The ranges below say what is allowed; the committed mise.lock says what
 # is installed, so the laptop and every CI job run the same versions. Dependabot can't bump either
 # file: move them by hand with `mise upgrade`, then `mise lock --platform linux-x64,macos-arm64`.
 min_version = { hard = "2026.10.0" }

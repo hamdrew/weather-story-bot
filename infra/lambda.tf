@@ -1,14 +1,14 @@
 resource "aws_cloudwatch_log_group" "lambda" {
-  #checkov:skip=CKV_AWS_338:30 days is deliberate; retention is a cost decision (infra/budget)
-  #checkov:skip=CKV_AWS_158:Logs hold no secrets (backend/secrets-in-errors) and a customer managed key costs $1/month
+  #checkov:skip=CKV_AWS_338:30 days is deliberate; retention is a cost decision
+  #checkov:skip=CKV_AWS_158:Logs hold no secrets and a customer managed key costs $1/month
   name              = "/aws/lambda/${local.name}"
   retention_in_days = 30
 }
 
 resource "aws_lambda_function" "bot" {
   #checkov:skip=CKV_AWS_50:The structured JSON logs are the trace, and X-Ray bills per trace
-  #checkov:skip=CKV_AWS_117:A VPC needs a NAT gateway, which bills by the hour, to reach NWS and Telegram (infra/budget)
-  #checkov:skip=CKV_AWS_116:Async retries are off; the next scheduled run is the retry (backend/retries)
+  #checkov:skip=CKV_AWS_117:A VPC needs a NAT gateway, which bills by the hour, to reach NWS and Telegram
+  #checkov:skip=CKV_AWS_116:Async retries are off; the next scheduled run is the retry
   #checkov:skip=CKV_AWS_173:The variables hold no credentials (the token is in SSM) and a customer managed key costs $1/month
   #checkov:skip=CKV_AWS_272:No signing pipeline; the zip is built from this repo by mise run build and deployed only after a reviewed plan
   function_name    = local.name

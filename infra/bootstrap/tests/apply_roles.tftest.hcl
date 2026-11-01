@@ -226,7 +226,7 @@ run "an_existing_alarm_can_be_changed" {
 }
 
 run "the_undo_windows_cannot_be_turned_off" {
-  # infra/data-retention: expiring the archive, suspending its versioning or turning off PITR would
+  # Data retention: expiring the archive, suspending its versioning or turning off PITR would
   # undo the delete Deny by other means. Those changes go through the laptop with MFA.
   assert {
     condition = alltrue([

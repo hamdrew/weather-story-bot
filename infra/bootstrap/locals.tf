@@ -8,7 +8,7 @@ locals {
   artifacts_arn = "arn:aws:s3:::${local.artifacts_bucket}"
 
   # Production is unsuffixed and staging is weather-story-bot-staging, so production's names are a
-  # prefix of staging's (infra/environments). Staging therefore matches by prefix, which also
+  # prefix of staging's. Staging therefore matches by prefix, which also
   # covers a resource added later, and production lists exact names: a * pattern would match staging.
   # The one exception is ? (exactly one character), for per-office schedules (below).
   environments = {
@@ -50,13 +50,14 @@ locals {
     # One schedule per office, named <name>-<office id in lower case>. IAM's ? matches exactly one
     # character and office ids are three letters (^[A-Z]{3}$ in config.py and variables.tf), so ???
     # matches production's per-office names and never a staging name, which is always longer. The
-    # unsuffixed name stays until Phase 2.2 Task 9: rolling back the cutover recreates it.
+    # unsuffixed name stays until the closing cleanup task (done once the five-office watch has
+    # passed) removes it: rolling back the cutover recreates it.
     schedule = e.prefix ? ["${e.name}*"] : [e.name, "${e.name}-???"]
     alarm = e.prefix ? ["${e.name}*"] : [
       for a in ["errors", "missed-runs", "quiet", "repost-loop", "nws-ambiguous", "misconfigured"] : "${e.name}-${a}"
     ]
     log_group = e.prefix ? ["/aws/lambda/${e.name}*"] : ["/aws/lambda/${e.name}"]
-    # Production only: the budget covers the whole account (infra/environments).
+    # Production only: the budget covers the whole account.
     budget = e.prefix ? [] : ["${e.name}-monthly"]
   } }
 

@@ -1,7 +1,7 @@
 """Pure decision logic: what to do with each story, and why.
 
 No logging, no I/O, no clock of its own — the handler and the CLI both call this to decide,
-then only the handler acts. See `agent-os/standards/global/principles.md`.
+then only the handler acts, so the decision logic tests without AWS or Telegram.
 """
 
 from __future__ import annotations
