@@ -6,7 +6,7 @@
 #USAGE }
 set -euo pipefail
 
-# The same two local-only files a laptop has (infra/environments), written from the repository's
+# The same two local-only files a laptop has, written from the repository's
 # variables and secrets. Refuses outside Actions so it can never overwrite a laptop's own files.
 # Reads STATE_BUCKET, STATE_KEY, REGION and TFVARS from the environment: values go in through env,
 # never interpolated into the script.

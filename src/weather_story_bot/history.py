@@ -3,8 +3,7 @@
 Best-effort on purpose, and kept out of `state.py`, which is the safety chain. A failed history
 write logs a WARNING and returns; it never raises for AWS errors and never blocks a post. The
 `posted`/`updated` event is the exception: it is written atomically with the post's record, by
-`state.PostedStore.record_posted`, so it isn't here. See `backend/dynamodb-schema` for the item
-keys.
+`state.PostedStore.record_posted`, so it isn't here. The item keys are defined in `state.py`.
 """
 
 from __future__ import annotations
@@ -42,7 +41,7 @@ LAST_SEEN_INTERVAL = timedelta(hours=1)
 
 
 class StoryHistory:
-    """Ledger events, story sightings and run records (backend/dynamodb-schema)."""
+    """Ledger events, story sightings and run records."""
 
     def __init__(self, dynamodb_client: DynamoDBClient, table_name: str) -> None:
         self._client = dynamodb_client

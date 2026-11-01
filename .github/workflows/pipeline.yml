@@ -1,8 +1,8 @@
 # Checks every change, plans both environments for pull requests, and deploys main: staging, then
-# production after approval (infra/pipeline).
+# production after approval.
 #
 # The repository is public, so every log here is world-readable. Tfvars come from secrets and the
-# values that would print are sensitive in Terraform (infra/environments). Saved plans hold them in
+# values that would print are sensitive in Terraform. Saved plans hold them in
 # plain text, so a plan file never becomes a GitHub artifact.
 #
 # AWS access is GitHub OIDC into the roles infra/bootstrap creates, each assumable from one exact
@@ -47,7 +47,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # Tool versions come from mise.toml (global/tooling). The action installs mise itself from
+      # Tool versions come from mise.toml. The action installs mise itself from
       # the newest release at least 7 days old, the same rule mise.toml applies to the tools.
       # mise.lock fixes the tool versions and the action installs --locked, so a stale cache can't
       # change what runs; the key follows both files so a changed lock is a miss. The plan job,

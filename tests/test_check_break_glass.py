@@ -1,4 +1,4 @@
-"""The break-glass guard that keeps production pipeline-only (infra/pipeline)."""
+"""The break-glass guard that keeps production pipeline-only."""
 
 import os
 import subprocess

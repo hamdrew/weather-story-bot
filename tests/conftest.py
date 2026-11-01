@@ -81,7 +81,7 @@ def aws() -> Iterator[None]:
 
 @pytest.fixture
 def dynamodb(aws: None) -> DynamoDBClient:
-    """The state table the Lambda uses (PK/SK keys, backend/dynamodb-schema)."""
+    """The state table the Lambda uses (PK/SK keys)."""
     client = boto3.client("dynamodb")
     _create_table(client, TABLE_NAME, "PK", "SK")
     return client

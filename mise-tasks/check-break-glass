@@ -6,7 +6,7 @@
 #USAGE }
 set -euo pipefail
 
-# Production is pipeline-only (infra/pipeline). The laptop path stays for emergencies, and has to be
+# Production is pipeline-only. The laptop path stays for emergencies, and has to be
 # asked for on the command line: BREAK_GLASS=1 mise run deploy production. Anything but "1" counts as no.
 env=${usage_environment?}
 [[ $env == production ]] || exit 0

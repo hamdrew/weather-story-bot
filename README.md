@@ -92,7 +92,7 @@ Variables already set in your shell take precedence over `.env`.
 
 ## Deploy
 
-Merging to `main` deploys, through `.github/workflows/pipeline.yml` (standard `infra/pipeline`):
+Merging to `main` deploys, through `.github/workflows/pipeline.yml`:
 
 1. `checks` (lint, tests, Terraform tests, scan) passes.
 2. `deploy-staging` plans and applies staging, with no approval.
@@ -214,7 +214,7 @@ sim pr-plan s3:GetObject "arn:aws:s3:::weather-story-bot-staging-archive-$ACCT/s
 sim pr-plan s3:GetObject "arn:aws:s3:::weather-story-bot-archive-$ACCT/stories/x"
 ```
 
-The rest of the checks (`DeleteTable`, `UpdateContinuousBackups`, tagging at create time, `PutMetricAlarm` on an update) are in the spec's Gate 2.
+The rest of the checks (`DeleteTable`, `UpdateContinuousBackups`, tagging at create time, `PutMetricAlarm` on an update) are checked against staging before merge.
 
 ## Staging
 

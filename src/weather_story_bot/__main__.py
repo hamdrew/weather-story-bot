@@ -1,7 +1,7 @@
 """Local dry run: fetch live stories and print each one's decision and caption.
 
 Uses only the public NWS API; no AWS resources, and never Telegram. Local tools are read-only
-(`global/principles.md`) — a write mode needs a new, deliberate flag and a spec change.
+— a write mode needs a new, deliberate flag and a deliberate design change.
 """
 
 from __future__ import annotations

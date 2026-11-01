@@ -7,7 +7,7 @@ resource "aws_iam_openid_connect_provider" "github" {
 
 # One trust policy per role: the audience and an exact subject, both StringEquals. Never StringLike,
 # so no other repository, fork, branch or environment can assume a role. The subject decides which
-# job gets which role (infra/pipeline): pull requests get the read-only role, main gets the
+# job gets which role: pull requests get the read-only role, main gets the
 # plan role, and each apply role is assumable only from its own GitHub environment, which is where
 # production's approval lives.
 data "aws_iam_policy_document" "trust" {

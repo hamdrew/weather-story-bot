@@ -1,6 +1,6 @@
 """DynamoDB record of which stories have been posted, and the message showing each one.
 
-The safety chain's writes (backend/side-effect-order): the current-story record with its
+The safety chain's writes: the current-story record with its
 `posted`/`updated` ledger event, written together, and the office lease. Best-effort history is
 in `history.py`.
 """
@@ -28,7 +28,8 @@ if TYPE_CHECKING:
 def _sha256_json(content: dict[str, str]) -> str:
     # Frozen. This encoding is baked into every stored story_key and content_fingerprint;
     # changing it (even to json.dumps' own defaults) changes every digest, making stored
-    # records unreachable and reposting every active story. See backend/story-identity.md.
+    # records unreachable and reposting every active story. The key must stay stable for a
+    # story's whole life.
     encoded = json.dumps(
         content, sort_keys=True, separators=(", ", ": "), ensure_ascii=True
     ).encode()
@@ -64,7 +65,7 @@ def story_key_for(title: str, start_time: datetime) -> str:
     return _sha256_json({"title": title, "start_time": start_time.astimezone(UTC).isoformat()})
 
 
-# Keys of the state table (backend/dynamodb-schema). Shared with scripts/migrate_table_keys.py,
+# Keys of the state table. Shared with scripts/migrate_table_keys.py,
 # which must write exactly what this module reads.
 SCHEMA_VERSION = 1
 
@@ -110,13 +111,13 @@ def event_item(
     telegram_message_id: int | None = None,
     reasons: Sequence[str] = (),
 ) -> dict[str, AttributeValueTypeDef]:
-    """One immutable ledger event about one revision of a story (backend/dynamodb-schema).
+    """One immutable ledger event about one revision of a story.
 
     Shared by `PostedStore.record_posted`, which writes `posted`/`updated` events in its
     transaction, and `history.StoryHistory.record_event`, which writes `rejected` ones best effort.
     `at` is when the action happened and is part of the key, so read the clock per event. Events
     hold only the revision they are about: what an update changed is derived from consecutive
-    events at analysis time, never stored (`global/principles`).
+    events at analysis time, never stored.
     """
     key = story_key(story)
     item: dict[str, AttributeValueTypeDef] = {
@@ -163,7 +164,7 @@ class PostedRecord:
 
 
 class PostedStore:
-    """One current-story item per posted story in the state table (backend/dynamodb-schema).
+    """One current-story item per posted story in the state table.
 
     Keyed `PK = OFFICE#<office_id>`, `SK = STORY#<start_utc_iso>#<story_key>`, and built from the
     `Story` alone, so a lookup and the write it follows can't disagree about the key. Each record
@@ -280,9 +281,9 @@ LEASE_DURATION = timedelta(seconds=360)
 class OfficeLease:
     """One `LEASE` item per office, so only one run acts on an office at a time.
 
-    Step 0 of backend/side-effect-order, and in the safety chain: a lease that can't be taken
+    The first write of the safety chain: a lease that can't be taken
     means the run does nothing for that office. It expires through a conditional write on
-    `expires_at`, not TTL (backend/dynamodb-schema).
+    `expires_at`, not TTL.
     """
 
     def __init__(self, dynamodb_client: DynamoDBClient, table_name: str) -> None:

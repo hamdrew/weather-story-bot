@@ -40,7 +40,7 @@ def test_record_event_writes_one_immutable_ledger_item(dynamodb: Any) -> None:
     [item] = items(dynamodb, "EVENT#")
     assert item == {
         "PK": {"S": "OFFICE#MKX"},
-        # Pinned: backend/dynamodb-schema's EVENT# key, with a fixed-width UTC event time.
+        # Pinned: the EVENT# key, with a fixed-width UTC event time.
         "SK": {
             "S": f"EVENT#2026-09-12T19:24:00+00:00#{story_key(story)}"
             "#2026-09-25T14:37:12.345678+00:00"
@@ -260,7 +260,7 @@ def test_record_run_writes_one_immutable_run_item(dynamodb: Any) -> None:
     [item] = items(dynamodb, "RUN#")
     assert item == {
         "PK": {"S": "OFFICE#MKX"},
-        # Pinned: backend/dynamodb-schema's RUN# key, with a fixed-width UTC run time.
+        # Pinned: the RUN# key, with a fixed-width UTC run time.
         "SK": {"S": "RUN#2026-09-25T14:37:12.345678+00:00"},
         "schema_version": {"N": "1"},
         "office_id": {"S": "MKX"},

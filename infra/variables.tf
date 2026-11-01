@@ -101,7 +101,7 @@ variable "lambda_max_concurrency" {
   }
 }
 
-# Outside things (infra/environments): both are created by infra/bootstrap, which the pipeline can't
+# Outside things: both are created by infra/bootstrap, which the pipeline can't
 # change, so they are inputs here. Its outputs of the same names print the values.
 variable "artifacts_bucket" {
   description = "Bucket holding the Lambda zips (<environment>/lambda/<hash>.zip), created by infra/bootstrap."

@@ -11,9 +11,13 @@
 
 ## Way of Working
 
-<!-- Project-specific specialisation. Example: -->
-<!-- This monorepo requires package-scoped branch names and a package owner -->
-<!-- review in addition to the team's normal merge policy. -->
+- ALWAYS use the `readonly` AWS profile for read-only AWS work; report a denied read to the owner instead of escalating to another profile.
+
+- ALWAYS leave Terraform and admin AWS work to the owner's MFA profiles, which only the owner can run.
+
+- ALWAYS give a boto3 script that runs under an MFA profile the AWS CLI's cached session.
+
+- ALWAYS report times to the owner in America/Chicago.
 
 ## Walking Skeleton
 

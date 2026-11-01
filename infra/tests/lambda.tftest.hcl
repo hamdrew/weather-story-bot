@@ -1,5 +1,5 @@
 # The Lambda's code comes from the artifacts bucket under a key derived from the zip's hash, and both
-# workload roles carry their environment's permissions boundary (infra/iam). Runs offline against a
+# workload roles carry their environment's permissions boundary. Runs offline against a
 # mock provider (see environments.tftest.hcl).
 
 mock_provider "aws" {

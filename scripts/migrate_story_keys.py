@@ -15,7 +15,7 @@ item per image UUID (a post or a `duplicate_of` marker) plus `content#<fingerpri
 Prints the plan and changes nothing unless --apply is given. Every step is idempotent.
 
 Pause the schedule first, so no run of either Lambda version lands between the backfill and
-deploy (see the spec's Verification section for the pause command):
+deploy (`mise run pause <env>`):
     uv run python scripts/migrate_story_keys.py            # review the plan
     uv run python scripts/migrate_story_keys.py --apply
     mise run deploy production                                 # also re-enables the schedule

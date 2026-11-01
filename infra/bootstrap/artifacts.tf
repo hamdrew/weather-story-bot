@@ -1,6 +1,6 @@
 # Lambda zips (<env>/lambda/<sha256>.zip) and production's saved plans (plans/production/<run>.tfplan).
-# Everything here is derived and rebuildable, so unlike the archive bucket it may expire
-# (infra/data-retention). A saved plan holds tfvars values in plain text, which is why it lives in
+# Everything here is derived and rebuildable, so unlike the archive bucket it may expire.
+# A saved plan holds tfvars values in plain text, which is why it lives in
 # a private bucket and never in a GitHub artifact on a public repository.
 resource "aws_s3_bucket" "artifacts" {
   #checkov:skip=CKV2_AWS_62:Nothing consumes events from this bucket

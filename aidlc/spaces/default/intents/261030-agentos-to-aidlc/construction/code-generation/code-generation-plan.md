@@ -38,7 +38,7 @@ Ground rules for every step:
 
 ### Step 1: Baseline and runner check (NFR1)
 
-- [ ] Run `mise run lint ::: test ::: tftest ::: scan` on the unchanged tree and record
+- [x] Run `mise run lint ::: test ::: tftest ::: scan` on the unchanged tree and record
   in `code-summary.md`: the pytest passed/failed/skipped counts, the number of
   `terraform test` runs per test folder (`infra/tests/`, `infra/bootstrap/tests/`),
   and whether lint and scan passed. This is the "before" result NFR1 compares
@@ -46,14 +46,14 @@ Ground rules for every step:
 
 ### Step 2: Move the roadmap and mission into AI-DLC knowledge (FR3.1, FR3.2)
 
-- [ ] Read `agent-os/product/roadmap.md`, `agent-os/product/mission.md`, and the
+- [x] Read `agent-os/product/roadmap.md`, `agent-os/product/mission.md`, and the
   Phase 2.2 spec `agent-os/specs/2026-10-29-1409-wisconsin-and-minneapolis-offices/plan.md`
   (to learn what Phase 2.2 still has left).
-- [ ] Write `aidlc/spaces/default/knowledge/aidlc-shared/roadmap.md` and
+- [x] Write `aidlc/spaces/default/knowledge/aidlc-shared/roadmap.md` and
   `aidlc/spaces/default/knowledge/aidlc-shared/mission.md` (assumption A1). Keep
   every phase, its status, its settled decisions and its open items. Reword so
   neither file names a standard, an agent-os path, a spec folder or an idea note.
-- [ ] In the Phase 2.2 entry, state what is merged (atomic post recording #29; the
+- [x] In the Phase 2.2 entry, state what is merged (atomic post recording #29; the
   bootstrap for per-office schedules and the `misconfigured` alarm #30;
   generalized office test fixtures #31) and what remains, taken from the Phase 2.2
   spec's unfinished tasks, written so the next piece of work can be planned from
@@ -61,76 +61,83 @@ Ground rules for every step:
 
 ### Step 3: Re-home the four setup facts (FR4.1, FR4.2)
 
-- [ ] Add these four rule lines under `## Way of Working` in
+- [x] Add these four rule lines under `## Way of Working` in
   `aidlc/spaces/default/memory/project.md`, replacing that section's placeholder
   comments and nothing else in the file:
   - ALWAYS use the `readonly` AWS profile for read-only AWS work; report a denied read to the owner instead of escalating to another profile.
   - ALWAYS leave Terraform and admin AWS work to the owner's MFA profiles, which only the owner can run.
   - ALWAYS give a boto3 script that runs under an MFA profile the AWS CLI's cached session.
   - ALWAYS report times to the owner in America/Chicago.
-- [ ] Add nothing else from the deleted private notes (FR4.2).
+- [x] Add nothing else from the deleted private notes (FR4.2).
 
 ### Step 4: Delete agent-os (FR1.1, FR1.2, FR2.1, FR3.3)
 
-- [ ] `git rm -r agent-os .claude/commands/agent-os` (after Step 2 has read what it
+- [x] `git rm -r agent-os .claude/commands/agent-os` (after Step 2 has read what it
   needs). This removes `product/` (roadmap, mission, tech stack), the four idea
   notes, all six specs, the 27 standards and `index.yml`, and the five slash
   commands. Nothing is recreated elsewhere.
 
 ### Step 5: Remove citations in `src/` (FR1.3, FR2.2, FR2.3)
 
-- [ ] `src/weather_story_bot/planner.py:4`: replace "See `agent-os/standards/global/principles.md`." with a one-line reason for keeping decisions pure (the planner decides; only the handler acts, so the decision logic tests without AWS or Telegram).
-- [ ] `src/weather_story_bot/__main__.py:4`: drop "(`global/principles.md`)" and change "a spec change" to "a deliberate design change".
-- [ ] `src/weather_story_bot/handler.py:182,333`: drop "(backend/client-errors)" and "(backend/side-effect-order)".
-- [ ] `src/weather_story_bot/history.py:6,45`: line 6's "See `backend/dynamodb-schema` for the item ..." becomes a self-contained statement of where the item layout is defined (the key constants in `state.py`); line 45 drops the citation.
-- [ ] `src/weather_story_bot/state.py:3,31,67,113,119,166,283,285`: drop each citation; line 31's "See backend/story-identity.md." becomes a one-line reason (why the story key must stay stable); line 283's "Step 0 of backend/side-effect-order" becomes "The first write of the safety chain".
+- [x] `src/weather_story_bot/planner.py:4`: replace "See `agent-os/standards/global/principles.md`." with a one-line reason for keeping decisions pure (the planner decides; only the handler acts, so the decision logic tests without AWS or Telegram).
+- [x] `src/weather_story_bot/__main__.py:4`: drop "(`global/principles.md`)" and change "a spec change" to "a deliberate design change".
+- [x] `src/weather_story_bot/handler.py:182,333`: drop "(backend/client-errors)" and "(backend/side-effect-order)".
+- [x] `src/weather_story_bot/history.py:6,45`: line 6's "See `backend/dynamodb-schema` for the item ..." becomes a self-contained statement of where the item layout is defined (the key constants in `state.py`); line 45 drops the citation.
+- [x] `src/weather_story_bot/state.py:3,31,67,113,119,166,283,285`: drop each citation; line 31's "See backend/story-identity.md." becomes a one-line reason (why the story key must stay stable); line 283's "Step 0 of backend/side-effect-order" becomes "The first write of the safety chain".
 
 ### Step 6: Remove citations in `scripts/`
 
-- [ ] `scripts/migrate_table_keys.py:7,19`: drop "(backend/dynamodb-schema)".
-- [ ] `scripts/migrate_table_keys.py:26`, `scripts/migrate_story_keys.py:18`: replace the pointer to a spec's pause command with the command itself (`mise run pause <env>`).
-- [ ] `scripts/set_run_state.py:4`: drop "(`infra/environments`)".
-- [ ] `scripts/infracost_usage.py:152`: replace "see the spec's cost record" with the reason in plain words (Infracost cannot price the scheduler, so its cost is left out rather than shown as zero).
+- [x] `scripts/migrate_table_keys.py:7,19`: drop "(backend/dynamodb-schema)".
+- [x] `scripts/migrate_table_keys.py:26`, `scripts/migrate_story_keys.py:18`: replace the pointer to a spec's pause command with the command itself (`mise run pause <env>`).
+- [x] `scripts/set_run_state.py:4`: drop "(`infra/environments`)".
+- [x] `scripts/infracost_usage.py:152`: replace "see the spec's cost record" with the reason in plain words (Infracost cannot price the scheduler, so its cost is left out rather than shown as zero).
 
 ### Step 7: Remove citations in `tests/`
 
-- [ ] `tests/conftest.py:84`, `tests/test_check_break_glass.py:1`, `tests/test_ci_tasks.py:1`, `tests/test_history.py:43,263`, `tests/test_state.py:253`: drop each citation from the docstring or comment. On `test_history.py:43,263` "backend/dynamodb-schema's EVENT# key" becomes "the EVENT# key". No assertion, fixture or test name changes.
+- [x] `tests/conftest.py:84`, `tests/test_check_break_glass.py:1`, `tests/test_ci_tasks.py:1`, `tests/test_history.py:43,263`, `tests/test_state.py:253`: drop each citation from the docstring or comment. On `test_history.py:43,263` "backend/dynamodb-schema's EVENT# key" becomes "the EVENT# key". No assertion, fixture or test name changes.
 
 ### Step 8: Remove citations in `infra/` (FR2.2, FR2.4)
 
-- [ ] `infra/lambda.tf:2,3,10,11` (Checkov skips): drop "(infra/budget)", "(backend/secrets-in-errors)", "(backend/retries)"; each reason keeps its remaining text.
-- [ ] `infra/storage.tf:39,76` (Checkov skips): drop "(infra/data-retention)", keeping the reason.
-- [ ] `infra/storage.tf:31,56,127`, `infra/locals.tf:4`, `infra/variables.tf:104`: drop the citation or turn it into the plain rule it stood for (for example "infra/data-retention forbids" becomes "the 35-day undo window forbids", "records are permanent").
-- [ ] `infra/tests/environments.tftest.hcl:2`, `infra/tests/iam.tftest.hcl:2`, `infra/tests/lambda.tftest.hcl:2`: drop the citation.
-- [ ] `infra/tests/iam.tftest.hcl:98,163` (`error_message` text only): "Review a new one against infra/iam." becomes "Review a new one for least privilege before adding it."
+- [x] `infra/lambda.tf:2,3,10,11` (Checkov skips): drop "(infra/budget)", "(backend/secrets-in-errors)", "(backend/retries)"; each reason keeps its remaining text.
+- [x] `infra/storage.tf:39,76` (Checkov skips): drop "(infra/data-retention)", keeping the reason.
+- [x] `infra/storage.tf:31,56,127`, `infra/locals.tf:4`, `infra/variables.tf:104`: drop the citation or turn it into the plain rule it stood for (for example "infra/data-retention forbids" becomes "the 35-day undo window forbids", "records are permanent").
+- [x] `infra/tests/environments.tftest.hcl:2`, `infra/tests/iam.tftest.hcl:2`, `infra/tests/lambda.tftest.hcl:2`: drop the citation.
+- [x] `infra/tests/iam.tftest.hcl:98,163` (`error_message` text only): "Review a new one against infra/iam." becomes "Review a new one for least privilege before adding it."
 
 ### Step 9: Remove citations in `infra/bootstrap/`
 
-- [ ] `apply.tf:4,160,165,175`, `artifacts.tf:3`, `locals.tf:11,59`, `oidc.tf:10`, `plan_roles.tf:6`, `services.tf:5,37`: drop each citation or state the rule it pointed at ("the gaps are listed in infra/iam" becomes "these services have no tag condition keys"; "the scoped exception to 'exact actions' in infra/iam" becomes "the one scoped exception to granting exact actions"). Line 296 of `apply.tf` keeps its real path.
-- [ ] `tests/apply_roles.tftest.hcl:229`, `tests/artifacts.tftest.hcl:2`: drop "infra/data-retention", keeping the sentence whole.
+- [x] `apply.tf:4,160,165,175`, `artifacts.tf:3`, `locals.tf:11,59`, `oidc.tf:10`, `plan_roles.tf:6`, `services.tf:5,37`: drop each citation or state the rule it pointed at ("the gaps are listed in infra/iam" becomes "these services have no tag condition keys"; "the scoped exception to 'exact actions' in infra/iam" becomes "the one scoped exception to granting exact actions"). Line 296 of `apply.tf` keeps its real path.
+- [x] `tests/apply_roles.tftest.hcl:229`, `tests/artifacts.tftest.hcl:2`: drop "infra/data-retention", keeping the sentence whole.
 
 ### Step 10: Remove citations in tooling, CI and the README
 
-- [ ] `mise.toml:1-2`: the header no longer mentions agent-os or "standard global/tooling"; it still says `mise.toml` is the one source of tool versions and tasks, and `mise.lock` the exact versions.
-- [ ] `mise-tasks/check-break-glass:9`, `mise-tasks/write-env-config:9`: drop the citation.
-- [ ] `.github/actions/ci-setup/action.yml:4`, `.github/workflows/pipeline.yml:2,5,50`: drop the citation. Comment lines only; no step, key or value changes.
-- [ ] `README.md:95`: drop "(standard `infra/pipeline`)".
-- [ ] `README.md:217`: replace "are in the spec's Gate 2" with the plain statement that these checks are made against staging before merge.
+- [x] `mise.toml:1-2`: the header no longer mentions agent-os or "standard global/tooling"; it still says `mise.toml` is the one source of tool versions and tasks, and `mise.lock` the exact versions.
+- [x] `mise-tasks/check-break-glass:9`, `mise-tasks/write-env-config:9`: drop the citation.
+- [x] `.github/actions/ci-setup/action.yml:4`, `.github/workflows/pipeline.yml:2,5,50`: drop the citation. Comment lines only; no step, key or value changes.
+- [x] `README.md:95`: drop "(standard `infra/pipeline`)".
+- [x] `README.md:217`: replace "are in the spec's Gate 2" with the plain statement that these checks are made against staging before merge.
 
 ### Step 11: Rewrite `CLAUDE.md` for a pure AI-DLC workflow (FR5.1, FR5.2, NFR4)
 
-- [ ] Line 3: replace "Specs and roadmap are in `agent-os/`." with: AI-DLC (`/aidlc`) is the workflow; the roadmap and mission are in `aidlc/spaces/default/knowledge/aidlc-shared/`.
-- [ ] Remove the `## Standards` section and the whole `## Skills` section (agent-os planning, superpowers skills, stopping points, "agent-os rules win").
-- [ ] In Commands, drop "(standard `global/tooling`; ...)" down to its instructions (keep the `mise upgrade` / `mise lock` how-to), "(see `testing/terraform-tests`)" and "(`infra/pipeline`)".
-- [ ] Keep Commands, Docs (Context7 IDs) and Gotchas otherwise as they are. Check every command named still exists in `mise.toml` or `mise-tasks/`.
+- [x] Line 3: replace "Specs and roadmap are in `agent-os/`." with: AI-DLC (`/aidlc`) is the workflow; the roadmap and mission are in `aidlc/spaces/default/knowledge/aidlc-shared/`.
+- [x] Remove the `## Standards` section and the whole `## Skills` section (agent-os planning, superpowers skills, stopping points, "agent-os rules win").
+- [x] In Commands, drop "(standard `global/tooling`; ...)" down to its instructions (keep the `mise upgrade` / `mise lock` how-to), "(see `testing/terraform-tests`)" and "(`infra/pipeline`)".
+- [x] Keep Commands, Docs (Context7 IDs) and Gotchas otherwise as they are. Check every command named still exists in `mise.toml` or `mise-tasks/`.
 
 ### Step 12: Verify (NFR1, NFR2, NFR4, FR1.3, FR2.2)
 
-- [ ] `git grep -n -I -i -E 'agent-os|agentos|agent_os' -- ':!aidlc/spaces/default/intents' ':!aidlc/spaces/default/codekb'` prints nothing (the codekb is rebuilt by FR6 later).
-- [ ] The 27-short-name grep from `unit-test-instructions.md` prints nothing over project files.
-- [ ] `git grep -n -i -E 'superpowers|shape-spec' -- CLAUDE.md .claude/commands` prints nothing.
-- [ ] `git diff -U0 -- src infra | grep -E 'Telegram message sent|Ambiguous stories from NWS'` prints nothing, and `infra/monitoring.tf` has no diff.
-- [ ] `mise run lint ::: test ::: tftest ::: scan` passes with the same pytest counts and `terraform test` run counts as Step 1; record the "after" result in `code-summary.md`.
+- [x] `git grep -n -I -i -E 'agent-os|agentos|agent_os' -- ':!aidlc/spaces/default/intents' ':!aidlc/spaces/default/codekb'` prints nothing (the codekb is rebuilt by FR6 later).
+- [x] The 27-short-name grep from `unit-test-instructions.md` prints nothing over project files.
+- [x] `git grep -n -i -E 'superpowers|shape-spec' -- CLAUDE.md .claude/commands` prints nothing.
+- [x] `git diff -U0 -- src infra | grep -E 'Telegram message sent|Ambiguous stories from NWS'` prints nothing, and `infra/monitoring.tf` has no diff.
+- [x] `mise run lint ::: test ::: tftest ::: scan` passes with the same pytest counts and `terraform test` run counts as Step 1; record the "after" result in `code-summary.md`.
+
+### Step 13: Name the Phase 2.2 task in the bootstrap comment (change requested at the gate; review note R-01)
+
+- [x] `infra/bootstrap/locals.tf:53`: the comment "until the last Phase 2.2 task" names the
+  task by what it does instead: the closing cleanup task, done once the five-office watch has
+  passed, removes the unsuffixed schedule name. Comment text only. Then re-run
+  `mise run lint ::: tftest` and the Step 12 grep checks; the counts must match Step 1.
 
 ## Traceability
 

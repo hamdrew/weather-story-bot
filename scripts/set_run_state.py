@@ -1,7 +1,7 @@
 """Start or pause an environment: its EventBridge schedule and its alarm actions (2026-10-02).
 
 Terraform creates the schedule DISABLED and the alarms with their actions on, and ignores both
-settings afterwards (`infra/environments`), so this is what changes them. An apply never undoes
+settings afterwards, so this is what changes them. An apply never undoes
 a start or a pause.
 
 - **start** enables the schedule, then the alarm actions. The schedule has no StartDate, so
