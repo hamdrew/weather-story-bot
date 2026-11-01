@@ -1,144 +1,121 @@
-# Architecture: weather-story-bot
+# Architecture
 
 ## Architecture Analysis
 
 ### System Overview
 
-One Python 3.13 Lambda (arm64) on an EventBridge Scheduler `rate(15 minutes)` schedule reads NWS, writes to S3 and DynamoDB, and posts to Telegram. CloudWatch log metric filters and alarms watch it and email through SNS. Two Terraform root modules: the main stack (`infra/`, applied per environment) and the CI-access bootstrap stack (`infra/bootstrap/`, applied by hand). A GitHub Actions pipeline plans pull requests and deploys `main` to staging, then to production after approval.
+A serverless, scheduled batch job. EventBridge Scheduler invokes one Python 3.13 arm64 Lambda every 15 minutes. The Lambda loops over the configured offices, and for each one reads NWS, decides per story, then acts on Telegram, S3 and DynamoDB. There is no inbound API and no server; state lives in one DynamoDB table and one S3 bucket per environment.
 
 ### Architectural Style
 
-Serverless, scheduled batch worker; a single deployable (one zip, one handler). Inside the package: a pure decision core (`planner.py`, no I/O, no clock) between thin injected-client adapters (`nws.py`, `telegram.py`, `state.py`, `history.py`, `archive.py`) and one orchestrator (`handler.py`). Evidence: `Services` dataclass wiring in `handler._build_services`; planner docstring "No logging, no I/O, no clock of its own".
+Serverless, single function, with a functional core and an imperative shell. Evidence: `planner.py` is pure (no logging, I/O or clock) and returns `Decision` values; `handler.py` is the only module that performs side effects; clients (`NwsClient`, `TelegramClient`, `PostedStore`, `OfficeLease`, `StoryHistory`, `StoryArchive`) are built once per cold start and injected through the frozen `Services` dataclass.
 
 ### Component Relationships
 
 ```mermaid
 flowchart LR
-    SCHED[EventBridge Scheduler] -->|invoke| H[handler.lambda_handler]
-    CLI[__main__ dry run] --> NWS
-    CLI --> P
-    H --> CFG[config.Settings]
+    Sched[EventBridge Scheduler] --> H[handler.lambda_handler]
+    H --> Cfg[config.Settings]
     H --> NWS[nws.NwsClient]
     H --> P[planner.decide]
-    H --> ST[state.PostedStore and OfficeLease]
+    H --> TG[telegram.TelegramClient]
+    H --> ST[state.PostedStore + OfficeLease]
     H --> HI[history.StoryHistory]
     H --> AR[archive.StoryArchive]
-    H --> TG[telegram.TelegramClient]
+    P --> M[models.Story]
     P --> ST
-    NWS -->|HTTPS| NWSAPI[(api.weather.gov)]
-    TG -->|HTTPS| TGAPI[(Telegram Bot API)]
+    NWS --> NWSAPI[(api.weather.gov)]
+    TG --> TGAPI[(api.telegram.org)]
     ST --> DDB[(DynamoDB state table)]
     HI --> DDB
     AR --> S3[(S3 archive bucket)]
-    H -->|GetParameter| SSM[(SSM token)]
-    H -->|JSON logs| CWL[(CloudWatch Logs)]
-    CWL --> MF[metric filters] --> AL[alarms] --> SNS[SNS email]
+    H --> SSM[(SSM token parameter)]
+    CLI[__main__ dry run] --> NWS
+    CLI --> P
+    CLI --> TG
 ```
-<!-- Text fallback: The scheduler invokes handler.lambda_handler. The handler loads config, then uses the NWS client (api.weather.gov), the pure planner, the state store and lease (DynamoDB), story history (DynamoDB), the archive (S3) and the Telegram client (Telegram Bot API); it reads the bot token from SSM. The dry-run CLI uses only the NWS client and planner. Handler logs flow to CloudWatch Logs, whose metric filters feed alarms that email through SNS. -->
+
+Text fallback: the scheduler calls the handler; the handler reads settings, then uses the NWS client, the pure planner, the Telegram client, the state store and lease, the history writer and the archive; the dry-run CLI reuses only the NWS client, the planner and caption building.
 
 ### Data Flow
 
-NWS listing JSON → `Story` dataclasses → split expired/active → images downloaded → current `PostedRecord`s read (strongly consistent) → `Decision`s → for post/update: S3 archive pair → Telegram message → DynamoDB transaction (current-story item + ledger event) → optional delete of the replaced message → best-effort history (deletion event, last-seen, run record). Per-office counts become the invocation's return value and the `Run complete` log line. Keys and item shapes are in [api-documentation.md](api-documentation.md#dynamodb-state-table-contract).
-
-Deployment data flow: source → reproducible `build/lambda.zip` (content-addressed by base64 sha256) → artifacts bucket `<env>/lambda/<hash>.zip` → Lambda `s3_key`; production's saved plan travels through the artifacts bucket, never a GitHub artifact.
+1. Settings come from five environment variables set by Terraform (`OFFICES_JSON`, `STATE_TABLE`, `ARCHIVE_BUCKET`, `TELEGRAM_TOKEN_PARAM`, `NWS_USER_AGENT`).
+2. Per office: take the lease; list stories; split active from expired; download images; read each story's `PostedRecord` (consistent reads); plan; act; release the lease; write a `RUN#` record.
+3. Acting on `post` or `update`: archive to S3, send to Telegram, record the revision plus ledger event (one transaction), delete the replaced message, record the deletion event.
+4. The DynamoDB data model is detailed in `api-documentation.md`.
 
 ### Key Design Decisions
 
-| Decision | Rationale and alternative rejected (from code comments and agent-os standards) |
-|---|---|
-| Record after send, delete after record | A failure yields a repost, never a miss; the alternative (record first) can lose a story |
-| Post record + ledger event in one `TransactWriteItems` | State and history cannot drift; rejected keeping the ledger best-effort (Phase 1.2) |
-| Office lease via conditional `PutItem` on `expires_at`, not TTL | Only one run acts per office; TTL deletion is lazy and imprecise |
-| Single-table PK/SK, no indexes, no TTL | Access patterns are per office; analytics via S3 export; LSI rejected (10 GB partition cap) |
-| No platform retries (Lambda async 0, scheduler 0) | The next scheduled run is the retry; at most one in-client retry |
-| Pure planner shared by Lambda and CLI | The dry run previews exactly what the Lambda would decide |
-| Content-addressed reproducible zip, plan-then-apply exact saved plan | What was reviewed is what deploys; rollback is a revert |
-| Bootstrap stack applied by hand with MFA; per-env permissions boundaries; exact OIDC subjects | The pipeline cannot widen its own permissions |
-| Schedule created `DISABLED`, alarms on, both then ignored by Terraform | `start`/`pause` are API operations an apply never undoes |
-
-Security: the Telegram token stays in SSM (never Terraform state), is kept out of logs (httpx loggers raised to WARNING, URLs never in exceptions); IAM is exact-action, tag-conditioned, boundary-limited; public repo means plan-printed variables are `sensitive`.
+- **Per-office lease** (`state.OfficeLease`) rather than relying on reserved concurrency; concurrency is only a spend ceiling (`infra/lambda.tf`). The lease (360 s) outlasts the Lambda timeout (300 s) and is shorter than the 15-minute schedule.
+- **Atomic record plus event** via `transact_write_items`, so a recorded post always has its ledger event.
+- **Best-effort history** kept out of `state.py` so observability can never block posting.
+- **Frozen hashing encoding** (`_sha256_json`): changing it would change every stored key and repost everything.
+- **Log lines as an interface**: metric filters match `"Telegram message sent"` and `"Ambiguous stories from NWS"`.
+- **Failure isolation**: per office, per story; any failure raises `ProcessingError` at the end so Lambda records an error and the errors alarm can fire, while rejections do not fail the run.
+- **Environment from one root**: `local.production` gates production-only resources (legacy `posted` table, budget); production names stay unsuffixed.
+- **Pipeline trust split**: `id-token: write` only on jobs that run no project tests; the bootstrap stack that defines CI roles is applied by hand.
+- **Content-addressed deploy**: reproducible zip, key `<env>/lambda/<hash>.zip`, write-once upload, saved plan applied exactly.
 
 ### Improvement Opportunities
 
-- Finish Phase 2.2: per-office schedules passing the office in the event, a `misconfigured` outcome and alarm, scaled alarm thresholds (bootstrap already allows them).
-- Retire the MVP `posted` table and the two finished migration scripts once the soak ends.
-- Move the standards' rationale (cited by short name across the code) into an AI-DLC home before removing `agent-os/` (see [code-quality-assessment.md](code-quality-assessment.md#agent-os-coupling)).
+- Split `handler.py` (logging setup, wiring, orchestration, deletion) into smaller modules.
+- Enforce the coupled constants (Lambda timeout, lease duration, schedule interval) with a test or a Terraform validation instead of comments.
+- Main infra still creates a single schedule while the bootstrap boundary already allows per-office schedules.
+- Remove the legacy `posted` table and migration scripts once the rollback window ends.
 
 ## Interaction Diagrams
 
-### Scheduled run for one office (post or update)
+### One scheduled run for one office
 
 ```mermaid
 sequenceDiagram
     participant S as Scheduler
-    participant H as handler
-    participant L as OfficeLease
-    participant N as NwsClient
-    participant P as planner
-    participant D as PostedStore
-    participant A as StoryArchive
-    participant T as TelegramClient
-    participant Y as StoryHistory
-    S->>H: invoke
-    H->>L: take(office)
+    participant H as Handler
+    participant D as DynamoDB
+    participant N as NWS
+    participant P as Planner
+    participant A as S3 archive
+    participant T as Telegram
+    S->>H: invoke (event ignored)
+    H->>D: take LEASE (conditional put)
     alt lease held by another run
-        H-->>H: count skipped
+        H-->>S: skipped, no RUN record
     else lease taken
-        H->>N: list_stories(office)
-        H->>P: select_active(stories, now)
-        loop each active story
-            H->>N: download_image(story)
-        end
-        loop each downloaded story
-            H->>D: find_story(story)
-        end
+        H->>N: GET weatherstories
+        N-->>H: stories
+        H->>N: GET download (each active story)
+        H->>D: GetItem STORY (consistent, each story)
         H->>P: decide(downloaded, records)
-        loop each post or update decision
-            H->>A: save(story, image, fingerprint)
-            H->>T: send_photo(chat, image, caption)
-            H->>D: record_posted (item + ledger event, one transaction)
+        P-->>H: post / update / unchanged / rejected
+        loop each post or update
+            H->>A: PutObject .png and .json
+            H->>T: sendPhoto (or sendDocument)
+            T-->>H: message_id
+            H->>D: transact: STORY item + EVENT item
             opt update
-                H->>T: delete_message(old id)
-                H->>Y: record_deletion(deleted or delete_failed)
+                H->>T: deleteMessage (old)
+                H->>D: put deleted or delete_failed EVENT
             end
         end
-        H->>L: release(office, holder)
-        H->>Y: record_run(counts)
+        H->>D: release LEASE
+        H->>D: put RUN record
     end
-    H-->>S: summary, or raise ProcessingError if any failed
+    H-->>S: summary (raises ProcessingError if any failed)
 ```
-<!-- Text fallback: The scheduler invokes the handler, which takes the office lease. If another run holds it the office is counted skipped. Otherwise it lists stories from NWS, drops expired ones, downloads each active image, reads each story's current record, and asks the planner to decide. For each post or update it archives to S3, sends to Telegram, then writes the record and ledger event in one DynamoDB transaction; for an update it deletes the old Telegram message and records a deleted or delete_failed event. It releases the lease, records the run, and returns the summary or raises ProcessingError if anything failed. -->
 
-### Rejection and alerting path
+Text fallback: take the lease, list and download, read posted records, decide, then for each post or update archive, send, record atomically and delete the replaced message, finally release the lease and write the run record.
+
+### Deploy path
 
 ```mermaid
 flowchart LR
-    D[decide finds shared image id, title and start, or image bytes] --> R[all colliding stories REJECTED]
-    R --> LOG[ERROR log: Ambiguous stories from NWS]
-    R --> EV[best-effort rejected ledger events]
-    LOG --> MF[metric filter AmbiguousStories]
-    MF --> AL[nws-ambiguous alarm]
-    AL --> SNS[SNS email to owner]
+    PR[Pull request] --> C[checks: lint, test, tftest, scan, build twice]
+    PR --> PL[plan staging and production, read-only role]
+    M[Merge to main] --> C2[checks]
+    C2 --> DS[deploy staging: plan, apply if changes]
+    DS --> PP[plan production, saved to artifacts bucket]
+    PP --> AP{owner approves}
+    AP --> DP[apply exactly that plan]
 ```
-<!-- Text fallback: When decide finds stories sharing an image id, a title and start time, or image bytes, every colliding story is rejected. The handler logs one ERROR "Ambiguous stories from NWS" line and writes best-effort rejected ledger events. The AmbiguousStories metric filter counts the log line and the nws-ambiguous alarm emails the owner through SNS. Rejections do not fail the run. -->
 
-### Deploy from main
-
-```mermaid
-sequenceDiagram
-    participant GH as GitHub Actions
-    participant ST as ci-apply-staging
-    participant PL as ci-plan
-    participant PR as ci-apply-production
-    participant B as artifacts bucket
-    GH->>GH: checks (lint, test, tftest, scan, build twice)
-    GH->>ST: OIDC, plan staging, deploy if changed
-    ST->>B: put zip (if-none-match)
-    GH->>PL: OIDC, plan production
-    PL->>B: save plan plans/production/run.tfplan
-    GH->>GH: wait for owner approval
-    GH->>PR: OIDC, download plan, rebuild, compare hash
-    PR->>B: put zip (if-none-match)
-    PR->>PR: terraform apply saved plan
-```
-<!-- Text fallback: On a push to main, the checks job lints, tests, runs Terraform tests and Checkov, and builds the zip twice to confirm it is reproducible. The staging job assumes ci-apply-staging, plans and deploys if anything changed, uploading the zip to the artifacts bucket. The production plan job assumes ci-plan and saves the plan to the artifacts bucket. After the owner approves, the production job assumes ci-apply-production, downloads the plan, rebuilds and checks the zip hash, uploads the zip and applies the saved plan. -->
+Text fallback: pull requests run checks and read-only plans; a merge runs checks, deploys staging, saves production's plan, and after approval applies exactly that plan.

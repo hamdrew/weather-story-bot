@@ -1,40 +1,48 @@
-# Business Overview: weather-story-bot
+# Business Overview
 
 ## Purpose
 
-A personal tool that pushes National Weather Service (NWS) Weather Stories to Telegram. Weather Stories are the forecast graphics a local NWS office publishes ahead of notable weather; on weather.gov they are easy to miss and hard to read on an iPhone. The bot checks each configured office every 15 minutes and posts each new or changed story's image and description to that office's Telegram channel (`agent-os/product/mission.md`, `README.md`).
+weather-story-bot watches the National Weather Service (NWS) "Weather Stories" for one or more forecast offices and posts each new or changed story, as an image with a caption, to a Telegram channel per office. People get the graphics on their phone without checking weather.gov.
 
-- **Users**: the owner only today ("Just me"). The roadmap's Phase 4 considers opening the channels to the public, staying clearly unofficial.
-- **Live since**: 2026-09-13 (MKX, Milwaukee/Sullivan). Staging and a GitHub Actions deploy pipeline followed (Phases 2.0 and 2.1).
+## Business Context
+
+- **Owner and users**: a single owner (`@hamdrew`, `.github/CODEOWNERS`); readers are the subscribers of the Telegram channels.
+- **Source of truth**: `api.weather.gov/offices/{id}/weatherstories`. NWS data is treated as untrusted: ambiguous listings are rejected, not posted.
+- **Offices**: configured as a map of three-letter office id to Telegram chat id and name (`OFFICES_JSON`). Production started with `MKX`; the README documents adding offices, and the cost model prices 1, 6 and 122 offices.
+- **Environments**: `production` and `staging`, each with its own bot, channel, state table, archive bucket, alarms and permissions boundary.
 
 ## Key Functionality
 
-| Capability | What it does |
-|---|---|
-| Detect | Lists an office's active stories from `api.weather.gov`; ignores stories past their `endTime` |
-| Validate | Rejects every story in a listing that shares an image ID, a title + start time, or identical image bytes with another; alerts by email instead of posting |
-| Decide | Identifies a story by title + start time (`story_key`) and its content by image bytes + description (`content_fingerprint`); outcomes `post`, `update`, `unchanged`, `expired`, `rejected` |
-| Archive | Saves image + raw NWS JSON to S3, one folder per story, one file pair per content revision; kept forever |
-| Deliver | Posts to Telegram (`sendPhoto`, falling back to `sendDocument`); a changed story is reposted with a "🔄 Updated:" prefix and the old message deleted |
-| Record | Records the post in DynamoDB only after Telegram accepts it, atomically with a ledger event; also records rejections, deletions, run records and last-seen times |
-| Alert | Email (never Telegram) via CloudWatch alarms: errors, missed runs, quiet, repost loop, NWS ambiguity; plus an account-wide AWS Budget |
-| Preview | `--dry-run` CLI prints each live story's decision and caption without AWS or Telegram |
+| Capability | Behaviour | Where |
+|---|---|---|
+| Fetch | List active stories per office and download each image | `nws.py` |
+| Filter | Ignore stories past `endTime`; take no action on them | `planner.select_active` |
+| Validate | Reject stories that share an image id, a title and start time, or identical image bytes | `planner._find_ambiguous` |
+| Decide | `post` (new), `update` (content changed), `unchanged`, `expired`, `rejected` | `planner.decide` |
+| Post | Send the image with an HTML caption; an update gets a "Updated:" prefix and the old message is deleted | `handler.py`, `telegram.py` |
+| Remember | Record the posted revision and a ledger event in one DynamoDB transaction | `state.py` |
+| Archive | Save each revision's image and raw metadata to S3 | `archive.py` |
+| Observe | Per-run records, story sightings, structured JSON logs, five CloudWatch alarms | `history.py`, `infra/monitoring.tf` |
+| Operate | Start or pause an environment's schedule and alarm actions | `scripts/set_run_state.py` |
 
-## Business Rules (load-bearing)
+## Business Rules and Invariants
 
-- **A repost is acceptable; a missed story is not.** State is written only after Telegram accepts a message; an old message is deleted only after its replacement is recorded.
-- **Don't trust NWS data.** Ambiguous listings are rejected wholesale, and the identity/fingerprint deliberately ignore NWS-volatile fields (image UUID, `updateTime`).
-- **History is permanent.** No TTL on the table or archive; 35-day undo windows (PITR, S3 noncurrent versions).
-- **Production deploys go through the pipeline** with human approval; laptop production deploys need `BREAK_GLASS=1`.
-- **Local tools are read-only.** Only deployed code and explicitly named `scripts/` tools write.
+1. A story is recorded as posted only after Telegram accepts it. A repost is acceptable; a missed story is not.
+2. A story's identity is its title plus start time (`story_key`), not its image id, because NWS re-issues stories under new image ids. Content identity is the image bytes plus the description (`content_fingerprint`).
+3. An old Telegram message is deleted only after its replacement is recorded. Telegram cannot delete messages older than 48 hours, so an update to an older story leaves both messages and logs a warning.
+4. Only one run acts on an office at a time (a DynamoDB lease per office).
+5. History writes (rejections, sightings, run records, deletion events) are best effort and never block a post.
+6. Records and archive files are permanent: no table TTL and no S3 expiration of current objects; deleted or replaced data is recoverable for 35 days.
+7. The Telegram token lives only in a per-environment SSM parameter, never in Terraform variables or state.
 
-## Domain Vocabulary
+## Operational Model
 
-- **Office**: an NWS forecast office, three uppercase letters (MKX, GRB, ARX, DLH, MPX). The unit of isolation, lease and (soon) invocation.
-- **Story / revision**: a story is title + start time; each distinct image + description is a revision.
-- **Ledger**: append-only `EVENT#` items (`posted`, `updated`, `rejected`, `deleted`, `delete_failed`) in the state table.
-- **Environment**: `production` (unsuffixed names) or `staging` (`-staging` suffix), each with its own bot, channel, table, bucket and alarms.
+- A 15-minute EventBridge schedule invokes the Lambda. Terraform creates the schedule DISABLED; the owner starts it with `mise run start <env>`.
+- Merges to `main` deploy staging, then production after the owner approves the saved plan.
+- Alerts go to an SNS email topic; a monthly AWS Budget (production only) covers the account.
 
-## Current Direction
+See `architecture.md` for the structure and flow, and `component-inventory.md` for the parts.
 
-The planning record lives in `agent-os/` (see [component-inventory.md](component-inventory.md#agent-os-planning-record)). Phase 2.2 (five offices, one invocation per office, a `misconfigured` outcome) is in progress; Phases 2.3 (dashboard and weekly digest), 3 (Year in Review) and 4 (more offices, public channels) follow. The active intent replaces agent-os with AI-DLC as the planning workflow; see [code-quality-assessment.md](code-quality-assessment.md#agent-os-coupling) for where the codebase depends on it.
+## Sources
+
+- `README.md` (What it does, Deploy, Alerts), `src/weather_story_bot/handler.py`, `planner.py`, `state.py`, `infra/*.tf`, `aidlc/active-memory/team.md` (Deployment).

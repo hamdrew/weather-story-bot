@@ -1,55 +1,58 @@
-# Code Quality Assessment: weather-story-bot
-
-## Summary
-
-High quality for a single-owner project: complete offline test suites for Python and Terraform, strict linting and type checking, a blocking security scan, SHA-pinned and audited CI, reproducible builds, and unusually thorough rationale in comments. Main debt is transitional (Phase 2.2 mid-flight, MVP rollback artifacts) plus tight coupling of comments and agent instructions to the `agent-os/` standards.
-
-## Tests
-
-| Suite | Files | Cases | Notes |
-|---|---|---|---|
-| pytest (`tests/`) | 16 modules + `conftest.py` | ~223 | Offline: respx (HTTP), moto (AWS); real captured NWS listings (MKX 2026-09-13, MPX 2026-10-29); `make_story` builder; bash tasks run for real with fake `terraform`/`aws` on PATH |
-| terraform test (`infra/tests/`) | 4 | 30 runs | `mock_provider "aws"`; variable validations, IAM, Lambda, environment differences |
-| terraform test (`infra/bootstrap/tests/`) | 4 | 31 runs | Trust, plan roles, apply roles, artifacts bucket |
-
-Coverage: configured (branch) but opt-in (`mise run coverage`), no enforced floor; kept out of `addopts` so debugger breakpoints work. Test baseline was not run by this scan (read-only).
-
-## Linting and Static Analysis
-
-ruff check (E,F,W,I,B,UP,SIM,RUF; line 100) and ruff format; ty; `terraform fmt -check`; actionlint + zizmor (online in CI); Checkov blocking with 18 inline skips, each with a reason. No `noqa`, `ty: ignore`, TODO or FIXME markers found.
-
-## CI/CD
-
-`pipeline.yml`: checks (lint, test, tftest, scan, build twice and compare) on every change; credentialed jobs run no tests or linters; PR plans per environment with the read-only role; main deploys staging, saves production's plan to S3, applies after approval; one deploy at a time. Dependabot weekly across five ecosystems. CODEOWNERS routes reviews to the owner.
-
-## Documentation
-
-`README.md` covers setup, local dev, deploy, bootstrap, staging, start/pause, alerts runbook, cost, data recovery, adding an office. Module and function docstrings explain why, citing standards. `CLAUDE.md` gives commands, standards pointer and gotchas. Alarm descriptions are runbooks.
+# Code Quality Assessment
 
 ## Quick Ratings
 
-| Aspect | Rating | Note |
+| Dimension | Rating | Evidence |
 |---|---|---|
-| Naming clarity | good | Descriptive, domain vocabulary consistent |
-| Function size | good | Small single-purpose functions; `handler.py` module is 420 lines but cohesive |
-| Error handling | good | One error type per client; one catch-all boundary; per-office/story isolation; history failures warn |
-| Test presence | good | Every module and script has a test file |
-| Duplication | fair | `event_item` and `StoryHistory.record_deletion` build similar items; `_is_condition_failure` exists in both `state.py` and `history.py` |
-| Dead code | fair | Two completed migration scripts and the MVP table/output kept on purpose; `decide` keeps unused params |
+| Naming clarity | good | descriptive snake_case names; tests named `test_<behaviour>` |
+| Function size | fair | most functions short; `handler.py` is 420 lines and `_apply_post_or_update` is long |
+| Error handling | good | one error type per client, no swallowed exceptions, explicit best-effort paths with warnings |
+| Test presence | good | one test module per source module; every script and bash task has tests |
+| Duplication | good | key builders and `event_item` shared between `state.py` and `history.py` |
+| Dead code | good | only `planner.decide`'s unused `office_id` and `now` (deleted explicitly) |
 
-## Technical Debt
+## Tests
 
-1. **Phase 2.2 in flight**: bootstrap already permits per-office schedules (`weather-story-bot-???`) and a `misconfigured` alarm (`infra/bootstrap/locals.tf:50-57`), but the main stack still has one schedule, `OFFICES_JSON` (4 KB env cap), and `handler.run` loops all offices in one invocation.
-2. **MVP rollback leftovers**: `aws_dynamodb_table.posted` (production), `mvp_table_name` output, `-posted` in bootstrap name lists, `scripts/migrate_*.py` with tests and launch configs.
-3. **Small duplication** noted above.
-4. **Single global `quiet` alarm** cannot see one silent office (acknowledged in roadmap Phase 2.2/4).
+- **Python**: 17 modules under `tests/`, 223 test functions (more once parametrized), offline: respx for HTTP, moto for AWS, an autouse fixture that fakes AWS credentials and removes Telegram variables. Bash tasks are tested by running them with fake `terraform` and `aws` on `PATH` (`test_ci_tasks.py`, `test_check_break_glass.py`).
+- **Terraform**: 30 runs in `infra/tests/`, 31 in `infra/bootstrap/tests/`, using `mock_provider "aws"`.
+- **Fixtures**: two real NWS captures (`mkx`, `mpx`) plus the `make_story` builder.
+- **Coverage**: configured for branch coverage in `pyproject.toml` and opt-in through `mise run coverage`. The team record states 99% branch coverage of `src/weather_story_bot/` against an 80% floor; this scan did not run it. No CI coverage step exists yet.
+- **Gaps**: no live integration suite (staging is the live check); no contract test pins the log messages that metric filters match; no test pins timeout, lease and schedule relationships.
 
-## Agent OS Coupling
+## Static Analysis and Policy
 
-What the active intent (remove agent-os, continue in AI-DLC) must handle:
+| Tool | Scope | Gate |
+|---|---|---|
+| ruff check and format | Python, rules `E,F,W,I,B,UP,SIM,RUF`, line length 100 | `mise run lint` |
+| ty | Python, `ty check` | `mise run lint`; no `# ty: ignore` in the tree |
+| terraform fmt | `infra/` recursive | `mise run lint` |
+| Checkov | `infra/` and `infra/bootstrap/`, blocking | `mise run scan`; 18 inline skips, each with a reason, enforced by a grep step |
+| actionlint, shellcheck, zizmor | workflows and local action | `mise run lint-actions`; 7 inline zizmor ignores, each with a reason |
+| Reproducibility | build twice and compare hashes | `checks` job |
 
-- **Direct path references**: `CLAUDE.md` lines 3 (specs and roadmap location), 22 ("Read `agent-os/standards/index.yml` … before changing …"), 29 and 37 (agent-os planning workflow, shape-spec, plan.md, gates); `mise.toml:1`; `src/weather_story_bot/planner.py:4`.
-- **Indirect references by standard short name** (≈60 sites): `backend/*`, `infra/*`, `global/*`, `testing/*` in `src/` (state, handler, history, planner, `__main__`), `scripts/`, `tests/`, `infra/*.tf`, `infra/bootstrap/*.tf`, both tftest folders, `mise-tasks/`, `.github/workflows/pipeline.yml`, `.github/actions/ci-setup/action.yml`, `README.md:95`.
-- **Tracked agent-os tooling** outside `agent-os/`: `.claude/commands/agent-os/{discover-standards,index-standards,inject-standards,plan-product,shape-spec}.md`.
-- **In-flight work**: `agent-os/specs/2026-10-29-1409-wisconsin-and-minneapolis-offices/` (Phase 2.2, Task 5 onward pending) and roadmap Phases 2.3, 3, 4 plus four idea notes.
-- **Invariants that live only in the standards** (must be preserved wherever they move): frozen hash encoding (`story-identity`), side-effect order, log contracts, IAM shape, data retention, environments, pipeline rules, CLI read-only rule, testing conventions.
+## CI/CD
+
+A single `pipeline` workflow. Notable controls: actions pinned to SHAs with the version in a comment; `persist-credentials: false`; `permissions: contents: read` by default; `id-token: write` only on jobs that run no project tests; public-repository safe logging (sensitive Terraform variables, saved plans stored in the artifacts bucket, never as artifacts); deploy jobs serialized by a concurrency group; production approval through a GitHub environment.
+
+## Documentation
+
+`README.md` is thorough and operational (setup, deploy, bootstrap, staging, alerts, cost, recovery, adding an office). Docstrings explain why, not what. No TODO or FIXME markers exist.
+
+## Technical Debt and Risks
+
+| # | Item | Location | Impact |
+|---|---|---|---|
+| 1 | Log messages double as an alarm interface | `telegram.py`, `handler.py`, `infra/monitoring.tf` | a rename silently disables an alarm |
+| 2 | Frozen hash encoding | `state._sha256_json` | any change reposts every active story |
+| 3 | Coupled timing constants enforced only by comments | `infra/lambda.tf`, `state.LEASE_DURATION`, `variables.tf` | a slow run's lease could expire mid-run |
+| 4 | Bootstrap ahead of main stack (per-office schedule names, `misconfigured` alarm) | `infra/bootstrap/locals.tf` vs `infra/scheduler.tf`, `monitoring.tf` | work in flight; verify before relying on either |
+| 5 | Legacy `posted` table and migration tooling | `infra/storage.tf`, `scripts/migrate_*.py` | extra surface until removed |
+| 6 | Large handler module and test module | `handler.py`, `tests/test_handler.py` | harder review and change |
+| 7 | Substring match on Telegram error text | `telegram._PHOTO_REJECTION_MARKERS` | wording changes would skip the document fallback |
+| 8 | Lambda imports botocore at module load | `state.py`, `history.py`, `handler.py` | fine on the Lambda runtime; needs boto3 in any other host |
+| 9 | CI coverage step missing | `pipeline.yml` | 80% floor checked by hand |
+| 10 | Real-capture fixtures can age | `tests/fixtures/` | payload drift is found only when fixtures are refreshed |
+
+## Conventions Observed in Code
+
+Match the written rules in `aidlc/active-memory/team.md` (Code Style) and `project.md` (Forbidden, Mandated): tooling-enforced style, frozen slotted dataclasses, injected clients, a pure planner, structured logs with a fixed message, comments that explain why, tests named by behaviour, and every suppression carrying a reason.

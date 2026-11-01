@@ -1,54 +1,38 @@
-# Dependencies: weather-story-bot
+# Dependencies
 
-## External Dependencies
+## External Runtime Dependencies
 
-### Runtime (shipped in `build/lambda.zip`)
+| Dependency | Source | Used by | Notes |
+|---|---|---|---|
+| httpx 0.28.1 | PyPI, `[project].dependencies` | `nws.py`, `telegram.py`, `handler.py`, `__main__.py` | the only vendored package; arm64 manylinux wheels required by `mise run build` (`--only-binary :all:`) |
+| boto3 / botocore | Lambda runtime | `state.py`, `history.py`, `handler.py` (botocore errors at import; boto3 lazy) | dev-only locally; must not be added to `dependencies` |
+| NWS API | network | `NwsClient` | public, needs a descriptive User-Agent |
+| Telegram Bot API | network | `TelegramClient` | token from SSM |
+| SSM, DynamoDB, S3 | AWS | handler wiring, stores | per-environment resources |
 
-- `httpx` and its transitive set (`httpcore`, `h11`, `anyio`, `certifi`, `idna`). Must ship arm64 manylinux binary wheels (`--only-binary :all:`), or the build fails. boto3 is deliberately not a runtime dependency.
+Note: `state.py`, `history.py` and `handler.py` import `botocore.exceptions` at module load, so the Lambda relies on the runtime-provided botocore even for a path that never calls AWS.
 
-### Development
+## Development and Tooling Dependencies
 
-Listed with versions in [technology-stack.md](technology-stack.md#python-libraries). `tools/checkov/` is a separate uv project because Checkov pins boto3 exactly.
+See `technology-stack.md` for versions. Relationships: moto and respx back all AWS and HTTP tests; `types-boto3[...]` extras must match the AWS services used (a new service needs its extra); `tools/checkov` is isolated because Checkov pins boto3 exactly.
 
-### External Services
+## Internal Module Dependencies
 
-| Service | Used by | Failure effect |
-|---|---|---|
-| api.weather.gov | NWS Client | Office counted failed; run recorded with `nws_failed` |
-| Telegram Bot API | Telegram Client | Story counted failed; retried next run (repost acceptable) |
-| AWS DynamoDB / S3 / SSM | State Store, Story History, Story Archive, Lambda Handler | Lease/record/archive failures fail the story or office; history failures only warn |
-| GitHub OIDC | CI/CD Pipeline | No deploys |
+Listed in `code-structure.md` (Module Import Graph). No cycles. `handler.py` is the only fan-in point; `scripts/migrate_story_keys.py` imports `archive`, `models` and `state` from the package, so those three modules' key and path functions are a contract with the migration tools.
 
-### Out-of-band prerequisites (not in Terraform)
+## Infrastructure Dependencies
 
-SSM SecureString `/<name>/telegram-token` tagged `Environment=<env>`; S3 Terraform state bucket; per-environment `infra/envs/<env>.backend.hcl` and `<env>.tfvars` (gitignored; CI writes them from secrets); GitHub environments `staging`/`production`, variables `AWS_ACCOUNT_ID`, `AWS_REGION`, `TF_STATE_BUCKET`, secrets `STAGING_TFVARS`, `PRODUCTION_TFVARS`; local AWS profiles `weather-deploy` (MFA) and `readonly`.
+- The runtime stack takes `artifacts_bucket` and `permissions_boundary_arn` from the bootstrap stack's outputs (variables, not remote state).
+- `infra/monitoring.tf` depends on two exact log messages emitted by `telegram.py` and `handler.py`.
+- `infra/lambda.tf` comments tie the 300 s timeout to `state.LEASE_DURATION` (360 s) and the schedule interval.
+- `scripts/set_run_state.py` depends on the Terraform outputs `schedule_name`, `alarm_names`, `region`.
+- `deploy` depends on the plan's variables and the output `lambda_s3_key`.
+- Bootstrap IAM name patterns assume the naming scheme in `infra/locals.tf` (production unsuffixed, others `-<env>`) and three-letter office ids.
 
-## Internal Dependencies
+## Pipeline Dependencies
 
-Python module graph: see [code-structure.md](code-structure.md#internal-import-graph). Cross-component dependencies:
+`checks` gates `plan`, `deploy-staging`; `deploy-staging` gates `plan-production`; `plan-production` gates `deploy-production` (skipped when the plan has no changes). Required repository settings: variables `AWS_ACCOUNT_ID`, `AWS_REGION`, `TF_STATE_BUCKET`; secrets `STAGING_TFVARS`, `PRODUCTION_TFVARS`.
 
-```mermaid
-flowchart TD
-    BOOT[Bootstrap Stack] -->|artifacts_bucket, boundary ARNs| MAIN[Main Infrastructure Stack]
-    BOOT -->|OIDC roles| CICD[CI/CD Pipeline]
-    TASKS[Task Runner] --> MAIN
-    TASKS --> BOOT
-    CICD --> TASKS
-    TASKS -->|build zip| PKG[weather_story_bot package]
-    MAIN -->|deploys| PKG
-    MAIN -->|terraform output| SCRIPTS[Operator Scripts]
-    PKG -->|log contracts| MAIN
-    AOS[Agent OS Planning Record] -.->|cited by comments and CLAUDE.md| PKG
-    AOS -.-> MAIN
-    AOS -.-> TASKS
-```
-<!-- Text fallback: The bootstrap stack provides the artifacts bucket and boundary ARNs to the main stack and the OIDC roles to the pipeline. The task runner drives both stacks and builds the package zip; the pipeline calls the task runner. The main stack deploys the package and feeds Terraform outputs to the operator scripts; the package's log messages are contracts the main stack's metric filters depend on. The agent-os planning record has no runtime dependency but is cited by comments, CLAUDE.md and mise.toml across the package, infra and tasks. -->
+## Dependency Hygiene
 
-## Coupling Constraints to Preserve
-
-- Office id regex in `config.py` and `infra/variables.tf` (and the `???` IAM pattern in `infra/bootstrap/locals.tf`).
-- `state.LEASE_DURATION` (360 s) > Lambda timeout (300 s) < schedule interval (900 s).
-- Log message text ↔ `infra/monitoring.tf` metric filter patterns.
-- `infra/iam.tf` role policy ↔ `infra/bootstrap/apply.tf` boundary policy ↔ `infra/bootstrap/locals.tf` resource name patterns.
-- Terraform `required_version` ↔ mise `terraform` range.
-- `state.py` key builders ↔ `scripts/migrate_table_keys.py`.
+Dependabot weekly across five ecosystems; mise tools and `mise.lock` are moved by hand; a 7-day release-age rule applies to mise installs.
