@@ -1,6 +1,6 @@
 # Product Roadmap
 
-Phases 1 through 2.1 are done; Phase 2.2 is in progress. Each phase keeps the
+Phases 1 through 2.1 are done; Phase 2.2 was dropped. Each phase keeps the
 decisions it settled and the items still open.
 
 ## Phase 1: MVP
@@ -73,8 +73,9 @@ starts writing append-only items that never expire.
     run's outcome counts. Outages and daily totals are derived from these, so they don't depend on
     the schedule's cadence.
 
-  These were best effort at first: a failed write logs a warning and never blocks a post. Phase
-  2.2 moves the posted and updated events into the safety chain.
+  These were best effort at first: a failed write logs a warning and never blocks a post. The atomic
+  post record (#29, groundwork for Phase 2.2) moved the posted and updated events into the
+  safety chain.
 - **Redesign the DynamoDB keys now, once** (moved here from Phase 2.2 during shaping). A new
   table with generic `PK`/`SK` names, sortable sort-key values (`STORY#`, `EVENT#`, `RUN#`) and a
   `schema_version` on every item. The migration is cheaper now than it will ever be again: the
@@ -180,15 +181,20 @@ changes nothing); the laptop path stays as `BREAK_GLASS=1`.
 
 ## Phase 2.2: Wisconsin and Minneapolis Offices
 
-The bot has posted MKX's Weather Stories since 2026-09-13. This phase grows it to
+Dropped on 2026-11-01, during market research. There is no evidence anyone else wants
+Weather Stories for more offices on Telegram: the bot is a personal project, and each NWS office
+already posts its graphics on its own X and Facebook accounts. The bot stays on MKX. The groundwork
+that already merged (#29, #30, #31) stays in place.
+
+The plan was: the bot has posted MKX's Weather Stories since 2026-09-13. This phase grows it to
 five offices: MKX, GRB (Green Bay), ARX (La Crosse), DLH (Duluth) and MPX (Twin Cities/Chanhassen,
 where my brother and sister live). Each office posts to its own channel and has its own schedule
 and Lambda invocation.
 
 ## Phase 2.3: Dashboard and Weekly Warning Digest
 
-Deliberately after the offices, so the queries get built once against the shape they'll actually
-run on.
+Originally planned after the offices, so the queries would be built once against a multi-office
+shape. With Phase 2.2 dropped, they are built against MKX alone.
 
 - **A CloudWatch dashboard** to look at on demand, not an alerting surface, managed in Terraform,
   with saved queries for warnings and recent run summaries.
@@ -200,7 +206,7 @@ run on.
   own failure alarm; the bot's error alarm needs two consecutive 15-minute failures, which a
   weekly job would never trip.
 - **Refresh the list of log messages the digest groups by before shaping,** since Phases 1.2
-  through 2.2 change them.
+  through 2.1 changed them.
 
 ## Phase 3: Year in Review
 
@@ -301,13 +307,13 @@ Absorbs the old "story archive" item, which the S3 archive plus a derived datase
 Opening the channels to a wider audience only makes sense alongside covering more of the country,
 so these travel together.
 
-- **Grow past the five offices,** regionally and then toward national coverage. The code should
-  already handle it after Phase 2.2: offices live in Terraform rather than an environment
-  variable, each gets its own invocation, lease and time zone, and the schedules are staggered. The
-  things that actually bite at scale aren't in the code.
+- **Grow past MKX,** regionally and then toward national coverage. Phase 2.2 was dropped, so the
+  per-office work it planned (each office with its own channel, schedule and invocation) is not
+  built yet and comes first. The things that actually bite at scale aren't in the code.
 - **Make onboarding cheap.** Every office needs a Telegram channel created, the bot made an admin,
-  a tfvars entry and a check. That's fine for five and painful for forty. The checklist and check
-  script from Phase 2.2 are the starting point; at some point it wants to be one command.
+  a tfvars entry and a check. That's fine for a few and painful for forty. Phase 2.2 planned an
+  add-an-office checklist and check script; neither was built, so they are the starting point, and
+  at some point it wants to be one command.
 - **A daily health digest instead of per-office quiet alarms.** The global "gone quiet" alarm can't
   see one silent office, and a per-office version would be noisy, because some offices rarely
   publish at all. Build the digest from the run records, comparing each office against its

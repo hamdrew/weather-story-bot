@@ -44,11 +44,8 @@
 - **Construction Iteration**: unit-major
 - **Construction Execution**: serial
 
-- **Parked**: 2026-11-01T20:45:50Z
 
-- **Parked At Stage**: market-research
 
-- **Parked By**: person
 
 ## Phase Progress
 <!-- Status values: Pending, Active, Verified, Skipped -->
@@ -109,8 +106,10 @@
 - **Lifecycle Phase**: IDEATION
 - **Current Stage**: market-research
 - **Next Stage**: feasibility
-- **Status**: Running
-- **Last Updated**: 2026-11-01T20:45:50Z
+- **Status**: Archived
+- **Last Updated**: 2026-11-01T20:57:10Z
+
+- **Archived From**: Running
 
 ## Session Resume Point
 - **Last Completed Stage**: intent-capture
