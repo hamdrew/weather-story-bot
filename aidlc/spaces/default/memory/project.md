@@ -102,3 +102,4 @@
 
 <!-- Project-specific corrections from human feedback. -->
 <!-- Format: NEVER/ALWAYS [behavior] (learned [date]) -->
+- ALWAYS read the job states of a pipeline run that stops at the production approval gate (`gh run view <id> --json jobs`) and NEVER wait on it with `gh run watch`, which does not return until the approval. (learned 2026-11-01) <!-- cid:261030-agentos-to-aidlc:deployment-execution:f483c56db69bba27fdfdef7ce407aa72c494b590f477f5bb4654d8c1984d19f5 -->
