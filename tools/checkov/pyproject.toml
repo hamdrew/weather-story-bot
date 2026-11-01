@@ -10,3 +10,8 @@ dependencies = [
 [tool.uv]
 # Only a lockfile and an environment, nothing to build.
 package = false
+# Checkov pins asteval==1.0.6 exactly (still so in 3.4.0), but asteval below 1.0.9 has sandbox
+# escapes (GHSA-89v8-rhwq-hf77, GHSA-9w56-46f6-3qhx), and Checkov runs it on Terraform expressions.
+# Checkov only uses asteval's Interpreter and its errors, which 1.0.9 keeps. Drop this override
+# once Checkov's own pin allows a patched asteval (https://github.com/bridgecrewio/checkov/issues/7504).
+override-dependencies = ["asteval>=1.0.9"]
