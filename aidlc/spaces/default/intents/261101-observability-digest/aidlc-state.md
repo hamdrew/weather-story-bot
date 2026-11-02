@@ -49,11 +49,25 @@
 
 - **Skeleton Stance**: off
 
-- **Parked**: 2026-11-02T01:32:26Z
 
-- **Parked At Stage**: functional-design
 
-- **Parked By**: person
+
+
+
+
+
+
+
+
+
+
+
+
+
+- **Construction Verification Command**: mise run lint ::: test
+
+
+
 
 ## Phase Progress
 <!-- Status values: Pending, Active, Verified, Skipped -->
@@ -115,7 +129,9 @@
 - **Current Stage**: functional-design
 - **Next Stage**: nfr-requirements
 - **Status**: Running
-- **Last Updated**: 2026-11-02T01:32:26Z
+- **Last Updated**: 2026-11-02T16:50:21Z
+
+- **Construction Autonomy Mode**: autonomous
 
 ## Session Resume Point
 - **Last Completed Stage**: units-generation

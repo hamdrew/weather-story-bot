@@ -1,0 +1,12 @@
+{
+  "stage": "nfr-design",
+  "unit": "u1-logging-review",
+  "upstream_ids": ["NFR4.1", "NFR4.2", "NFR5.1", "NFR5.3", "NFR5.2"],
+  "coverage": [
+    { "id": "NFR4.1", "status": "OK", "target": "Parametrized leak test through the shipped LogFormatter over every handled Telegram failure" },
+    { "id": "NFR4.2", "status": "OK", "target": "run.slow test with patched time.monotonic; mise run coverage confirms the 80% floor" },
+    { "id": "NFR5.1", "status": "OK", "target": "No URL, request or environment passed to a log call; exception text from type or Telegram description" },
+    { "id": "NFR5.2", "status": "OK", "target": "configure_logging keeps httpx and httpcore at WARNING, with a test" },
+    { "id": "NFR5.3", "status": "OK", "target": "Only log calls, field names and one timing check change; existing suites stay green" }
+  ]
+}
