@@ -1,0 +1,28 @@
+{
+  "stage": "code-generation",
+  "unit": "u1-logging-review",
+  "upstream_ids": ["FR6.1","FR6.2","NFR4.1","NFR4.2","NFR5.1","NFR5.3","NFR5.2","BR1.1","BR1.2","BR1.3","BR1.4","BR1.5","BR2.1","BR2.2","BR2.3","BR2.4","BR3.1","BR3.2","BR3.3","BR4.1","BR4.2"],
+  "coverage": [
+    { "id": "FR6.1", "status": "OK", "target": "docs/logging-review.md" },
+    { "id": "FR6.2", "status": "OK", "target": "docs/logging-review.md" },
+    { "id": "NFR4.1", "status": "Deferred", "target": "u2-log-events code generation builds the token leak test; this unit records it in docs/logging-review.md" },
+    { "id": "NFR4.2", "status": "Deferred", "target": "u2-log-events code generation builds the run.slow test; this unit records it in docs/logging-review.md" },
+    { "id": "NFR5.1", "status": "OK", "target": "docs/logging-review.md" },
+    { "id": "NFR5.3", "status": "OK", "target": "docs/logging-review.md" },
+    { "id": "NFR5.2", "status": "Deferred", "target": "u2-log-events code generation keeps the httpx and httpcore cap and tests it; this unit records it in docs/logging-review.md" },
+    { "id": "BR1.1", "status": "OK", "target": "docs/logging-review.md" },
+    { "id": "BR1.2", "status": "OK", "target": "tests/test_logging_review.py" },
+    { "id": "BR1.3", "status": "OK", "target": "docs/logging-review.md" },
+    { "id": "BR1.4", "status": "OK", "target": "docs/logging-review.md" },
+    { "id": "BR1.5", "status": "OK", "target": "docs/logging-review.md" },
+    { "id": "BR2.1", "status": "OK", "target": "docs/logging-review.md" },
+    { "id": "BR2.2", "status": "OK", "target": "docs/logging-review.md" },
+    { "id": "BR2.3", "status": "OK", "target": "docs/logging-review.md" },
+    { "id": "BR2.4", "status": "OK", "target": "tests/test_logging_review.py" },
+    { "id": "BR3.1", "status": "OK", "target": "docs/logging-review.md" },
+    { "id": "BR3.2", "status": "OK", "target": "docs/logging-review.md" },
+    { "id": "BR3.3", "status": "Deferred", "target": "u2-log-events code generation builds the token leak test; this unit records it in docs/logging-review.md" },
+    { "id": "BR4.1", "status": "Deferred", "target": "u2-log-events code generation adds the run.slow check; this unit designs it in docs/logging-review.md" },
+    { "id": "BR4.2", "status": "OK", "target": "docs/logging-review.md" }
+  ]
+}
