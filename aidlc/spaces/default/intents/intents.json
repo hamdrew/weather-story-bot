@@ -14,5 +14,13 @@
     "scope": "feature",
     "status": "archived",
     "request": "8446543e"
+  },
+  {
+    "uuid": "01a19949-528e-723b-a1f2-fd5725bedc43",
+    "slug": "observability-digest",
+    "dirName": "261101-observability-digest",
+    "scope": "classic",
+    "status": "in-flight",
+    "request": "fb77814d"
   }
 ]
