@@ -24,8 +24,6 @@ We work trunk-based on `main` through short-lived branches and pull requests. On
 - **Pull request size**: one revertible slice of work per pull request, deployed and watched before
   the next slice builds on it. The pull request body records what changed, how it was tested, the
   review result, and what to check after merge.
-- **Review**: before merge, a fresh-context code review runs and its findings are fixed or
-  explicitly deferred in the pull request body.
 - **AI-DLC Bolts**: base `main`, target `main`, squash merge, one pull request per Bolt.
 
 ## Walking Skeleton
