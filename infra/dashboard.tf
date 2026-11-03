@@ -98,18 +98,16 @@ locals {
   # the two verdict alarms and this key. No date, clock time or environment name appears in any text.
   key_markdown = join("\n", [
     "# Weather Story Bot",
-    "**Reading the verdict.** UNKNOWN if the `unknown` row is not OK (it wins). Otherwise NOT HEALTHY if the `not-healthy` row is not OK. Otherwise HEALTHY. Warnings never change it.",
-    "",
-    "**Signals that are off** is empty when all four signals are fine.",
-    "",
-    "If the verdict is UNKNOWN, the tiles below may show 0 because the bot did not report.",
-    "",
-    "A story posted recently goes off only after ${var.quiet_alarm_days} day(s) with no post.",
+    "**Reading the verdict.** Both verdict rows green: **HEALTHY**. The `unknown` row not green: **UNKNOWN** (it wins). Otherwise the `not-healthy` row not green: **NOT HEALTHY**. Warnings never change it.",
   ])
 
   detail_markdown = join("\n", [
     "## Detail",
     "Each chart is its alarm's own metric with the alarm's threshold. A chart with no line has no data in this range. Set the time zone control at the top of this page to Local to read times in Chicago time.",
+    "",
+    "If the verdict is UNKNOWN, the tiles may show 0 because the bot did not report.",
+    "",
+    "A story posted recently goes off only after ${var.quiet_alarm_days} day(s) with no post.",
   ])
 
   # Alarm lists. The verdict list is unfiltered. "Signals that are off" shows only what is not fine.
@@ -117,7 +115,7 @@ locals {
   verdict_widget = {
     type = "alarm"
     properties = {
-      title  = "Verdict alarms"
+      title  = "Verdict: both green means HEALTHY"
       alarms = [aws_cloudwatch_composite_alarm.unknown.arn, aws_cloudwatch_composite_alarm.not_healthy.arn]
       sortBy = "stateUpdatedTimestamp"
     }
@@ -125,7 +123,7 @@ locals {
   signals_off_widget = {
     type = "alarm"
     properties = {
-      title  = "Signals that are off"
+      title  = "Signals that are off (empty when all four are fine)"
       alarms = [for s in local.health_signals : s.alarm.arn]
       states = ["ALARM", "INSUFFICIENT_DATA"]
       sortBy = "stateUpdatedTimestamp"
@@ -141,16 +139,16 @@ locals {
   }
 
   # Rows top to bottom. A row has a height in grid units and widgets with widths on a 24-column
-  # grid. The verdict area (the first three rows) is 11 units tall so the verdict is on the first
+  # grid. The verdict area (the first three rows) is 9 units tall so the verdict is on the first
   # screen, and later units add up to 3 more units of totals under it.
   dashboard_rows = concat(
     [
-      { height = 5, widgets = [{ width = 24, widget = { type = "text", properties = { markdown = local.key_markdown } } }] },
+      { height = 3, widgets = [{ width = 24, widget = { type = "text", properties = { markdown = local.key_markdown } } }] },
       { height = 3, widgets = [{ width = 24, widget = local.verdict_widget }] },
       { height = 3, widgets = [{ width = 24, widget = local.signals_off_widget }] },
       { height = 4, widgets = [for s in local.health_signals : { width = 6, widget = local.tile_widgets[s.key] }] },
       { height = 3, widgets = [{ width = 24, widget = local.signals_state_widget }] },
-      { height = 3, widgets = [{ width = 24, widget = { type = "text", properties = { markdown = local.detail_markdown } } }] },
+      { height = 5, widgets = [{ width = 24, widget = { type = "text", properties = { markdown = local.detail_markdown } } }] },
     ],
     # Two charts to a row, in signal order.
     [for i in range(0, length(local.health_signals), 2) : {

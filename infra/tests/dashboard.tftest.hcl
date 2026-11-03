@@ -250,15 +250,15 @@ run "the_thirteen_widgets_sit_on_the_grid_in_reading_order" {
 
   assert {
     condition = jsonencode([for w in jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets : [w.x, w.y, w.width, w.height]]) == jsonencode([
-      [0, 0, 24, 5],
-      [0, 5, 24, 3],
-      [0, 8, 24, 3],
-      [0, 11, 6, 4],
-      [6, 11, 6, 4],
-      [12, 11, 6, 4],
-      [18, 11, 6, 4],
-      [0, 15, 24, 3],
-      [0, 18, 24, 3],
+      [0, 0, 24, 3],
+      [0, 3, 24, 3],
+      [0, 6, 24, 3],
+      [0, 9, 6, 4],
+      [6, 9, 6, 4],
+      [12, 9, 6, 4],
+      [18, 9, 6, 4],
+      [0, 13, 24, 3],
+      [0, 16, 24, 5],
       [0, 21, 12, 6],
       [12, 21, 12, 6],
       [0, 27, 12, 6],
@@ -494,33 +494,35 @@ run "staging_page_has_no_time_zone_date_environment_or_token" {
 run "the_key_and_heading_say_how_to_read_the_page_in_order" {
   command = apply
 
-  # The reading order comes first, then what an empty list means, then zeros under UNKNOWN, then the quiet signal.
+  # The key is short and reads the verdict first; the detail text below the tiles carries the rest.
   assert {
     condition = alltrue([
-      length(split("Reading the verdict", jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[0].properties.markdown)[0]) < length(split("Signals that are off", jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[0].properties.markdown)[0]),
-      length(split("Signals that are off", jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[0].properties.markdown)[0]) < length(split("tiles below may show 0", jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[0].properties.markdown)[0]),
-      length(split("tiles below may show 0", jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[0].properties.markdown)[0]) < length(split("with no post", jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[0].properties.markdown)[0]),
+      strcontains(jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[0].properties.markdown, "Both verdict rows green: **HEALTHY**. The `unknown` row not green: **UNKNOWN** (it wins). Otherwise the `not-healthy` row not green: **NOT HEALTHY**."),
+      strcontains(jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[0].properties.markdown, "Warnings never change it"),
+      !strcontains(jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[0].properties.markdown, "day(s) with no post"),
     ])
-    error_message = "The key must give the reading order first, then the empty-list, zero-when-UNKNOWN and quiet sentences."
+    error_message = "The key must give the reading order and nothing else."
   }
 
   assert {
     condition = alltrue([
-      strcontains(jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[0].properties.markdown, "UNKNOWN if the `unknown` row is not OK (it wins). Otherwise NOT HEALTHY if the `not-healthy` row is not OK. Otherwise HEALTHY."),
-      strcontains(jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[0].properties.markdown, "is empty when all four signals are fine"),
-      strcontains(jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[0].properties.markdown, "may show 0 because the bot did not report"),
-      strcontains(jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[0].properties.markdown, "${var.quiet_alarm_days} day(s) with no post"),
+      jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[1].properties.title == "Verdict: both green means HEALTHY",
+      jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[2].properties.title == "Signals that are off (empty when all four are fine)",
     ])
-    error_message = "The key must carry each sentence of the reading order and the empty and no-data cases."
+    error_message = "The verdict list says what green means and the signals-off list says it is empty when all is fine."
   }
 
+  # The detail text: what no line means, how to show local time, zeros under UNKNOWN, then the quiet signal.
   assert {
     condition = alltrue([
       strcontains(jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[8].properties.markdown, "A chart with no line has no data in this range"),
       strcontains(jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[8].properties.markdown, "time zone control"),
       strcontains(jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[8].properties.markdown, "Local"),
+      strcontains(jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[8].properties.markdown, "may show 0 because the bot did not report"),
+      strcontains(jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[8].properties.markdown, "${var.quiet_alarm_days} day(s) with no post"),
+      length(split("may show 0", jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[8].properties.markdown)[0]) < length(split("with no post", jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[8].properties.markdown)[0]),
     ])
-    error_message = "The detail heading must say what no line means and how to show local time."
+    error_message = "The detail text must say what no line means, how to show local time, that tiles may show 0 under UNKNOWN, and when the quiet signal goes off."
   }
 }
 
