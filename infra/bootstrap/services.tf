@@ -109,8 +109,25 @@ locals {
       manage      = ["budgets:ModifyBudget"]
       tag         = []
     }
+    # The health dashboard. A dashboard has no tags, so it takes no tag condition and no tag action;
+    # it is named like the alarms (staging by prefix, production exactly), and PutDashboard both
+    # creates and updates it.
+    dashboards = {
+      sid         = "Dashboard"
+      kind        = "dashboard"
+      conditioned = false
+      read        = ["cloudwatch:GetDashboard"]
+      create      = ["cloudwatch:PutDashboard"]
+      manage      = ["cloudwatch:PutDashboard", "cloudwatch:DeleteDashboards"]
+      tag         = []
+    }
   }
 
   # Actions with no resource-level permissions, so they can only be granted on *.
   no_resource_level_reads = ["cloudwatch:DescribeAlarms", "logs:DescribeLogGroups", "logs:DescribeMetricFilters"]
+
+  # AWS requires * for PutCompositeAlarm, so it cannot be scoped to an alarm ARN or an Environment
+  # tag. Staging can therefore rewrite production's two verdict composites, and a composite can carry
+  # actions; the guard against that is that the dashboard's composites carry none (tested).
+  no_resource_level_writes = ["cloudwatch:PutCompositeAlarm"]
 }

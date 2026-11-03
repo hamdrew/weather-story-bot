@@ -1,0 +1,32 @@
+## Review
+
+**Verdict:** READY
+**Reviewer:** aidlc-architecture-reviewer-agent
+**Date:** 2026-11-02T17:27:09Z
+**Iteration:** 1
+**Verdict Dictated:** no
+
+### Findings
+
+| ID | Severity | Location | Finding | Required action | Status |
+|---|---|---|---|---|---|
+| R-01 | Major | aidlc/spaces/default/intents/261101-observability-digest/construction/u3-health-dashboard/infrastructure-design/infrastructure-specification.md > Policy sizes (measured), closing paragraph; Shared Infrastructure > Apply-role policy size | The text says the tightest group (production writes, 4,437) "leaves room for about ten more production alarm names across U4 and U5". That is measured against IAM's 6,144 hard limit, but the same section sets a 5,000-character test budget that fails the bootstrap tests above it. Each production alarm name appears twice in writes (Creates and Changes), about 80 characters per ARN, so the 563 characters left under 5,000 fit about three names. U5 alone is said to add two alarms, and U4 recreates some. The next unit is likely to trip the size test and need another regroup. | Restate the headroom against the 5,000 budget (about three production alarm names in writes, fewer for anything else that adds ARNs). Either say that U4 and U5 must regroup or raise the budget with a stated margin, so the owner does not plan on ten. | New |
+| R-02 | Minor | aidlc/spaces/default/intents/261101-observability-digest/construction/u3-health-dashboard/infrastructure-design/infrastructure-specification.md > Shared Infrastructure, `*`-scoped PutCompositeAlarm row, and Owner checks item 3 | "Display-only effect" is stronger than the evidence. The statement has no tag or name condition, so the staging apply role can create or overwrite any composite alarm, including production's two verdict alarms. A composite can also carry alarm actions to any topic or SSM action that accepts CloudWatch. Drift on production's own composites would show in `terraform plan` only after the fact. | Reword to state both exposures (staging can rewrite production's verdict, and a composite can carry actions), and say they are accepted because the owner is the only principal using the roles. Add them to the pull request note for slice 1. | New |
+| R-03 | Minor | aidlc/spaces/default/intents/261101-observability-digest/construction/u3-health-dashboard/infrastructure-design/cicd-pipeline.md > Rollback, third row; Order item 2 | "Nothing was created by the failed apply" is not supported. Terraform applies independent resources in parallel, so if the `unknown` rule is rejected, `not-healthy` can already exist, with state saved. The AccessDenied case in item 2 likewise leaves a partial apply. Re-running completes it, so the damage is small, but the claim is wrong. | Say that a rejected rule can leave the other composite created and that the re-run or the unquoted-form fix converges on it. | New |
+| R-04 | Minor | aidlc/spaces/default/intents/261101-observability-digest/construction/u3-health-dashboard/infrastructure-design/cicd-pipeline.md > Rollback; monitoring-design.md > First staging checklist, item 1 | Two gaps. (a) Slice 1 can be reverted while slice 2 is live, and the plan roles then lose the read the refresh needs; the revert order (slice 2 first) is not written down. The regroup moves two statements between managed policies, and the policies update in parallel, so the owner should apply it when no pipeline run is active. (b) Checklist item 1 allows "skipped as no-change" for production, which cannot happen for slice 2 because its plan adds resources. | State the revert order and the quiet-pipeline precondition for `bootstrap-deploy`. Drop "or skipped as no-change" from item 1. | New |
+| R-05 | Minor | aidlc/spaces/default/intents/261101-observability-digest/construction/u3-health-dashboard/infrastructure-design/traceability.json > coverage targets NFR1.4, NFR5.5, NFR6.8 | Some targets name sections that do not exist as headings. NFR1.4 cites "Cost and Owner checks" (Cost is a row in the Deployment table; the section is "Owner checks before the bootstrap apply"). NFR6.8 cites "composite alarms: rules well under 1,000 characters", which is in the Sizing row, not Infrastructure Services. NFR5.5 cites "no filter or token", which no heading carries. | Point each target at the exact section or table row that holds the evidence. | New |
+
+### Validation Tool Results
+
+| Tool | Result | Interpretation |
+|---|---|---|
+| Existing bootstrap measurement in scratch `boot/` (out.txt) | production access 4,171, roles-tags 4,039, writes 4,437; staging 3,145 / 2,986 / 3,147; plan-read 4,420; 31 existing tests pass (only the scratch measure test fails by design) | Matches the figures in the specification. |
+| Diff of scratch `boot/` against `infra/bootstrap` | Differences are exactly those in the change table: the `dashboards` service, `no_resource_level_writes`, names and arns for dashboards, two production alarm names, the `CompositeAlarmWrite` statement, and the regrouping | The change fits how `apply.tf`, `services.tf` and `locals.tf` are built. `plan_roles.tf` needs no edit because its loop picks up the new read. |
+| Search for group names | The group names `access`, `roles-tags` and `writes` appear only in `apply.tf`; no test, script or workflow refers to them | The regrouping is safe. Policy names are unchanged; only which statements sit in which policy changes. |
+| Layout and metric checks | Monitoring-design rows match functional-spec widths and heights (5, 3, 3, 4, 3, 3, 6); thresholds and periods match `infra/monitoring.tf` | No discrepancy. |
+| Pipeline comparison | The pull-request plan matrix, apply-first ordering, production approval and the `gh run view` rule all match `.github/workflows/pipeline.yml` and the project rules | No unsupported claim about the workflow apart from the findings above. |
+| `PutCompositeAlarm` `*` scope | Not re-checked: the docs lookup tool failed in this session | The specification cites the CloudWatch permissions reference; take that source as it stands. |
+
+### Summary
+
+The design is implementable. The bootstrap edits fit how the Terraform is built, and the measurements are reproducible. The one finding that matters is the overstated U4 and U5 headroom, which is about three names under the test's own 5,000 budget, not ten. The rest are wording corrections and missing rollback details. 1 Major, 4 Minor, 0 Critical.

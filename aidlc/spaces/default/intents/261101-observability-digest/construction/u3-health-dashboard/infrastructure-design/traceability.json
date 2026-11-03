@@ -1,0 +1,41 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u3-health-dashboard",
+  "upstream_ids": [
+    "NFR1.3", "NFR1.4",
+    "NFR2.1", "NFR2.2", "NFR2.4", "NFR2.5", "NFR2.6", "NFR2.7", "NFR2.9", "NFR2.10",
+    "NFR4.1", "NFR4.2",
+    "NFR5.1", "NFR5.2", "NFR5.3", "NFR5.4", "NFR5.5",
+    "NFR6.1", "NFR6.2", "NFR6.3", "NFR6.4", "NFR6.5", "NFR6.6", "NFR6.7", "NFR6.8", "NFR6.9", "NFR6.10", "NFR6.14"
+  ],
+  "coverage": [
+    { "id": "NFR1.3", "status": "OK", "target": "infrastructure-specification.md Infrastructure Services: one dashboard per environment, 8 metrics, no Logs Insights widget" },
+    { "id": "NFR1.4", "status": "OK", "target": "infrastructure-specification.md Cost and Owner checks: two of three free dashboards, owner confirms the account count" },
+    { "id": "NFR2.1", "status": "OK", "target": "monitoring-design.md Dashboard specification: verdict rows 1 to 3 = 11 grid units" },
+    { "id": "NFR2.2", "status": "OK", "target": "monitoring-design.md row 1: reading order first in the key; staging checklist item 2" },
+    { "id": "NFR2.4", "status": "OK", "target": "monitoring-design.md row 4 tiles; infrastructure-specification.md Verification: both fill branches built" },
+    { "id": "NFR2.5", "status": "OK", "target": "infrastructure-specification.md dashboard_body: start -P7D, periodOverride inherit" },
+    { "id": "NFR2.6", "status": "OK", "target": "monitoring-design.md rows 1 and 6: the empty, zero and no-data sentences" },
+    { "id": "NFR2.7", "status": "OK", "target": "monitoring-design.md rows 7 and 8: each chart has its alarm's metric and a threshold line (amended form); staging checklist item 5" },
+    { "id": "NFR2.9", "status": "OK", "target": "monitoring-design.md row 4: FILL(m1, 0) single value with sparkline" },
+    { "id": "NFR2.10", "status": "OK", "target": "monitoring-design.md Metrics and KPIs: every chart and tile reads the alarm resource's own attributes (amended from annotation-only)" },
+    { "id": "NFR4.1", "status": "OK", "target": "infrastructure-specification.md Verification: provider-free builders proven; dashboard.tftest.hcl is built in code generation" },
+    { "id": "NFR4.2", "status": "OK", "target": "infrastructure-specification.md bootstrap tests row and Verification: 31 of 31 pass with the two sid exemptions" },
+    { "id": "NFR5.1", "status": "OK", "target": "cicd-pipeline.md Stage to gate: the slice 2 plan shows only additions" },
+    { "id": "NFR5.2", "status": "OK", "target": "infrastructure-specification.md composite alarms: no actions; monitoring-design.md Alerts" },
+    { "id": "NFR5.3", "status": "OK", "target": "cicd-pipeline.md Rollback: revert and redeploy, no data" },
+    { "id": "NFR5.4", "status": "OK", "target": "monitoring-design.md staging checklist item 3: paused staging reads UNKNOWN" },
+    { "id": "NFR5.5", "status": "OK", "target": "cicd-pipeline.md Secrets: none added; infrastructure-specification.md: no filter or token" },
+    { "id": "NFR6.1", "status": "OK", "target": "cicd-pipeline.md Slices: two revertible pull requests" },
+    { "id": "NFR6.2", "status": "OK", "target": "infrastructure-specification.md Bootstrap change; cicd-pipeline.md Order item 3: the first pipeline run proves it" },
+    { "id": "NFR6.3", "status": "OK", "target": "infrastructure-specification.md: GetDashboard through the existing read loop, plan_roles.tf unchanged; plan_roles test row" },
+    { "id": "NFR6.4", "status": "OK", "target": "infrastructure-specification.md locals.tf row and the corrected PutCompositeAlarm `*` scope; names and arns for dashboard" },
+    { "id": "NFR6.5", "status": "OK", "target": "cicd-pipeline.md Slices: the owner applies with MFA, an agent asks first" },
+    { "id": "NFR6.6", "status": "OK", "target": "infrastructure-specification.md Policy sizes (measured): regrouped, tightest group 4,437 of 6,144; 5,000-character test budget" },
+    { "id": "NFR6.7", "status": "OK", "target": "infrastructure-specification.md Shared Infrastructure: dashboard.tf extension points" },
+    { "id": "NFR6.8", "status": "OK", "target": "infrastructure-specification.md composite alarms: rules well under 1,000 characters" },
+    { "id": "NFR6.9", "status": "OK", "target": "infrastructure-specification.md composite alarms: rules built from the alarm resources; cicd-pipeline.md Rollback: unquoted fallback" },
+    { "id": "NFR6.10", "status": "OK", "target": "cicd-pipeline.md Stage to gate: staging on merge, production after approval, unchanged" },
+    { "id": "NFR6.14", "status": "OK", "target": "infrastructure-specification.md Bootstrap change table (corrected: PutCompositeAlarm is a separate `*`-scoped statement, see D-S1)" }
+  ]
+}

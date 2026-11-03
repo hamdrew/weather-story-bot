@@ -147,3 +147,42 @@ run "the_read_policy_reads_every_offices_schedule" {
     error_message = "The read policy must read both environments' schedules, per office."
   }
 }
+
+run "the_read_policy_reads_each_dashboard_and_cannot_write_one" {
+  assert {
+    condition = toset(one([
+      for s in data.aws_iam_policy_document.plan_read.statement : s.resources if s.sid == "DashboardRead"
+      ])) == toset([
+      "arn:aws:cloudwatch::123456789012:dashboard/weather-story-bot",
+      "arn:aws:cloudwatch::123456789012:dashboard/weather-story-bot-staging*",
+    ])
+    error_message = "The plan roles read both environments' dashboards."
+  }
+
+  assert {
+    condition = jsonencode(one([
+      for s in data.aws_iam_policy_document.plan_read.statement : tolist(s.actions) if s.sid == "DashboardRead"
+    ])) == jsonencode(["cloudwatch:GetDashboard"])
+    error_message = "A plan role may only read a dashboard."
+  }
+
+  assert {
+    condition = !anytrue([
+      for s in data.aws_iam_policy_document.plan_read.statement : anytrue([
+        for a in s.actions : can(regex("^cloudwatch:(Put|Delete)", a))
+      ])
+    ])
+    error_message = "The read policy must not write or delete anything in cloudwatch."
+  }
+}
+
+# The inline policy shares IAM's limit with the role's other inline policy; same proxy and budget as
+# the apply groups (see apply_roles.tftest.hcl). Measured at 4,420.
+run "the_read_policy_stays_under_the_size_budget" {
+  assert {
+    condition = length(jsonencode([
+      for s in local.plan_read_statements : { Effect = "Allow", Sid = s.sid, Action = s.actions, Resource = s.resources }
+    ])) + 45 < 5000
+    error_message = "The plan read policy passed the 5,000-character budget."
+  }
+}

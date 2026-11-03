@@ -58,6 +58,19 @@ locals {
         resources  = ["*"] # These actions support no resource-level permissions.
         conditions = []
       },
+      # PutCompositeAlarm supports no resource-level permissions, so it is allowed on * with no
+      # condition. It is the only write action on *, so staging's role could rewrite production's two
+      # verdict composites, and a composite can carry actions; the dashboard's composites carry none.
+      # Roll back by reverting the dashboard change before this one (the permission must outlive the
+      # resources), and run bootstrap-deploy when no pipeline run is active. A failed first apply can
+      # leave one composite created; PutCompositeAlarm overwrites by name, so a retry replaces it.
+      {
+        effect     = "Allow"
+        sid        = "CompositeAlarmWrite"
+        actions    = local.no_resource_level_writes
+        resources  = ["*"]
+        conditions = []
+      },
       # Roles: created and changed only under this environment's boundary, so a role the pipeline
       # makes can never be given more than the Lambda and Scheduler roles are allowed to do.
       {
@@ -217,8 +230,8 @@ locals {
 
 # One role policy would pass IAM's 10,240-character limit on inline policies, so each role gets
 # three customer managed policies (6,144 characters each), grouped by what they do. Production's
-# access, roles-tags and writes are about 3.4, 3.8 and 4.5 KB (read live after Phase 2.2 Gate 2);
-# a statement that pushes one over fails at apply, so move it to a lighter group (apply_group_of is
+# access, roles-tags and writes are 4,171, 4,039 and 4,437 characters (measured offline after the
+# dashboard and composite alarms were added); the tests hold each under 5,000. A statement that pushes one over fails at apply, so move it to a lighter group (apply_group_of is
 # exhaustive, so an unassigned statement fails the plan).
 locals {
   apply_group_of = {
@@ -228,6 +241,7 @@ locals {
     Zips                       = "access"
     Plans                      = "access"
     NoResourceLevelReads       = "access"
+    CompositeAlarmWrite        = "access"
     Reads                      = "access"
     RoleCreate                 = "roles-tags"
     RolePolicies               = "roles-tags"
@@ -238,7 +252,7 @@ locals {
     Creates                    = "writes"
     Changes                    = "writes"
     Tags                       = "roles-tags"
-    WritesWithoutTagConditions = "writes"
+    WritesWithoutTagConditions = "access" # moved so "writes" stays under the size budget
     DenyDeletes                = "writes"
     DenyRetentionChanges       = "writes"
   }
