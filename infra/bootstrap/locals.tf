@@ -54,8 +54,10 @@ locals {
     # passed) removes it: rolling back the cutover recreates it.
     schedule = e.prefix ? ["${e.name}*"] : [e.name, "${e.name}-???"]
     alarm = e.prefix ? ["${e.name}*"] : [
-      for a in ["errors", "missed-runs", "quiet", "repost-loop", "nws-ambiguous", "misconfigured"] : "${e.name}-${a}"
+      for a in ["errors", "missed-runs", "quiet", "repost-loop", "nws-ambiguous", "misconfigured", "unknown", "not-healthy"] : "${e.name}-${a}"
     ]
+    # Named like the stack itself (infra/dashboard.tf): staging by prefix, production exactly.
+    dashboard = e.prefix ? ["${e.name}*"] : [e.name]
     log_group = e.prefix ? ["/aws/lambda/${e.name}*"] : ["/aws/lambda/${e.name}"]
     # Production only: the budget covers the whole account.
     budget = e.prefix ? [] : ["${e.name}-monthly"]
@@ -70,6 +72,8 @@ locals {
     topic    = flatten([for x in n.topic : ["arn:aws:sns:${var.region}:${local.account_id}:${x}", "arn:aws:sns:${var.region}:${local.account_id}:${x}:*"]])
     schedule = [for x in n.schedule : "arn:aws:scheduler:${var.region}:${local.account_id}:schedule/default/${x}"]
     alarm    = [for x in n.alarm : "arn:aws:cloudwatch:${var.region}:${local.account_id}:alarm:${x}"]
+    # A dashboard's ARN has an empty region field.
+    dashboard = [for x in n.dashboard : "arn:aws:cloudwatch::${local.account_id}:dashboard/${x}"]
     # A log group's ARN is used with and without the trailing :* depending on the action.
     log_group = flatten([for x in n.log_group : ["arn:aws:logs:${var.region}:${local.account_id}:log-group:${x}", "arn:aws:logs:${var.region}:${local.account_id}:log-group:${x}:*"]])
     budget    = [for x in n.budget : "arn:aws:budgets::${local.account_id}:budget/${x}"]

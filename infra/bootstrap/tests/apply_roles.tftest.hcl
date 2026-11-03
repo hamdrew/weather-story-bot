@@ -35,7 +35,7 @@ run "the_staging_role_names_only_staging_resources" {
     condition = alltrue(flatten([
       for s in({ for env in ["staging", "production"] : env => flatten([for k, doc in data.aws_iam_policy_document.apply : doc.statement if startswith(k, "${env}-")]) })["staging"] : [
         for r in s.resources : strcontains(r, "staging")
-      ] if s.effect == "Allow" && !contains(["NoResourceLevelReads", "StateList"], s.sid)
+      ] if s.effect == "Allow" && !contains(["NoResourceLevelReads", "StateList", "CompositeAlarmWrite"], s.sid)
     ]))
     error_message = "Every staging resource must name staging: no production ARN or state key."
   }
@@ -49,7 +49,7 @@ run "the_production_role_uses_no_prefix_pattern" {
     condition = alltrue(flatten([
       for s in({ for env in ["staging", "production"] : env => flatten([for k, doc in data.aws_iam_policy_document.apply : doc.statement if startswith(k, "${env}-")]) })["production"] : [
         for r in s.resources : !strcontains(r, "staging") && !can(regex("weather-story-bot[^:/]*\\*", r)) && (!strcontains(r, "?") || startswith(r, "arn:aws:scheduler:"))
-      ] if s.effect == "Allow" && !contains(["NoResourceLevelReads", "StateList"], s.sid)
+      ] if s.effect == "Allow" && !contains(["NoResourceLevelReads", "StateList", "CompositeAlarmWrite"], s.sid)
     ]))
     error_message = "Production's names are a prefix of staging's, so no production name may use * or (outside schedules) ?: it could match staging."
   }
@@ -375,5 +375,115 @@ run "each_environment_creates_its_own_misconfigured_alarm" {
       "production" = ["weather-story-bot-errors", "weather-story-bot-misconfigured"]
     })
     error_message = "Each environment creates its own misconfigured alarm, and never the other's alarms."
+  }
+}
+
+# A dashboard has no tags and its ARN has an empty region field. Each role reaches its own dashboard
+# by name (staging by prefix, production exactly), and neither reaches the other's.
+run "each_environment_manages_only_its_own_dashboard" {
+  assert {
+    condition = jsonencode({
+      for env, d in local.apply_statements : env => {
+        for action in ["cloudwatch:PutDashboard", "cloudwatch:DeleteDashboards", "cloudwatch:GetDashboard"] : action => [
+          for name in ["weather-story-bot", "weather-story-bot-staging"] : name if anytrue(flatten([
+            for s in d : [
+              for r in s.resources : can(regex("^${replace(replace(replace(r, ".", "\\."), "*", ".*"), "?", ".")}$", "arn:aws:cloudwatch::123456789012:dashboard/${name}"))
+            ] if s.effect == "Allow" && contains(s.actions, action)
+          ]))
+        ]
+      }
+      }) == jsonencode({
+      for env, own in { "staging" = "weather-story-bot-staging", "production" = "weather-story-bot" } : env => {
+        for action in ["cloudwatch:PutDashboard", "cloudwatch:DeleteDashboards", "cloudwatch:GetDashboard"] : action => [own]
+      }
+    })
+    error_message = "Each apply role writes and reads its own dashboard and never the other environment's."
+  }
+}
+
+run "the_verdict_composite_alarms_are_inside_each_roles_alarm_names" {
+  assert {
+    condition = jsonencode({
+      for env, d in local.apply_statements : env => [
+        for name in ["weather-story-bot-unknown", "weather-story-bot-not-healthy", "weather-story-bot-staging-unknown", "weather-story-bot-staging-not-healthy"] : name if alltrue([
+          for sid in ["Creates", "Changes", "Tags"] : anytrue(flatten([
+            for s in d : [
+              for r in s.resources : can(regex("^${replace(replace(replace(r, ".", "\\."), "*", ".*"), "?", ".")}$", "arn:aws:cloudwatch:us-east-2:123456789012:alarm:${name}"))
+            ] if s.sid == sid
+          ]))
+        ])
+      ]
+      }) == jsonencode({
+      "staging"    = ["weather-story-bot-staging-unknown", "weather-story-bot-staging-not-healthy"]
+      "production" = ["weather-story-bot-unknown", "weather-story-bot-not-healthy"]
+    })
+    error_message = "Each role creates, changes and tags its own two verdict composites and never the other environment's."
+  }
+
+  assert {
+    condition = alltrue([
+      for r in local.names["production"].alarm : !strcontains(r, "*")
+    ]) && contains(local.names["production"].alarm, "weather-story-bot-unknown") && contains(local.names["production"].alarm, "weather-story-bot-not-healthy")
+    error_message = "Production names its alarms exactly, composites included."
+  }
+}
+
+# PutCompositeAlarm supports only *, so the one place a role may write on * is that action. Anything
+# else added to a * statement would be a new account-wide write.
+run "put_composite_alarm_is_the_only_write_on_star" {
+  assert {
+    condition = alltrue([
+      for env, d in local.apply_statements : length([for s in d : s if s.effect == "Allow" && contains(s.actions, "cloudwatch:PutCompositeAlarm")]) == 1
+    ])
+    error_message = "PutCompositeAlarm must appear in exactly one statement per role."
+  }
+
+  assert {
+    condition = alltrue([
+      for env, d in local.apply_statements : jsonencode(flatten([
+        for s in d : s.resources if s.effect == "Allow" && contains(s.actions, "cloudwatch:PutCompositeAlarm")
+      ])) == jsonencode(["*"])
+    ])
+    error_message = "PutCompositeAlarm is granted on * and nowhere else."
+  }
+
+  assert {
+    condition = alltrue([
+      for env, d in local.apply_statements : jsonencode(sort(flatten([
+        for s in d : s.actions if s.effect == "Allow" && contains(s.resources, "*") && !contains(["NoResourceLevelReads"], s.sid)
+      ]))) == jsonencode(["cloudwatch:PutCompositeAlarm"])
+    ])
+    error_message = "Apart from the no-resource-level reads, PutCompositeAlarm is the only action either role is allowed on *."
+  }
+
+  assert {
+    condition = alltrue([
+      for env, d in local.apply_statements : alltrue([
+        for s in d : length(s.conditions) == 0 if s.sid == "CompositeAlarmWrite"
+      ])
+    ])
+    error_message = "The composite alarm statement carries no conditions: no condition key applies to it."
+  }
+}
+
+# The tests cannot read .json (the mock returns {}), so this is an upper-bound proxy over the
+# statements: compact JSON plus the document wrapper. The real document merges one-element arrays
+# into strings, so it is a little smaller. Production's three groups measure 4,171, 4,039 and 4,437.
+run "each_apply_policy_group_stays_under_the_size_budget" {
+  assert {
+    condition = alltrue([
+      for k, p in local.apply_policies : length(jsonencode([
+        for s in p.statements : merge(
+          { Effect = s.effect, Sid = s.sid, Action = s.actions, Resource = s.resources },
+          length(s.conditions) == 0 ? {} : { Condition = { for t in distinct([for c in s.conditions : c.test]) : t => { for c in s.conditions : c.variable => c.values if c.test == t } } }
+        )
+      ])) + 45 < 5000
+    ])
+    error_message = "A policy group passed the 5,000-character budget (IAM's limit is 6,144). Regroup statements or raise the budget with a stated margin."
+  }
+
+  assert {
+    condition     = length(local.apply_policies) == 6
+    error_message = "Two roles, three groups each."
   }
 }

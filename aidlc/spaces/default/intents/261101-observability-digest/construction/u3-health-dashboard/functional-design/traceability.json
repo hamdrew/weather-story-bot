@@ -1,0 +1,77 @@
+{
+  "stage": "functional-design",
+  "unit": "u3-health-dashboard",
+  "upstream_ids": [
+    "FR1.1",
+    "FR1.2",
+    "FR1.3",
+    "FR1.5",
+    "FR1.6",
+    "FR1.7",
+    "FR1.8"
+  ],
+  "coverage": [
+    {
+      "id": "FR1.1",
+      "status": "OK",
+      "target": "BR1.1, BR1.2, BR1.3, BR1.4, BR1.5, BR1.6"
+    },
+    {
+      "id": "FR1.2",
+      "status": "OK",
+      "target": "BR2.2"
+    },
+    {
+      "id": "FR1.3",
+      "status": "OK",
+      "target": "BR2.1, BR2.2, BR2.3"
+    },
+    {
+      "id": "FR1.5",
+      "status": "OK",
+      "target": "BR3.1"
+    },
+    {
+      "id": "FR1.6",
+      "status": "OK",
+      "target": "BR4.1, BR4.2"
+    },
+    {
+      "id": "FR1.7",
+      "status": "OK",
+      "target": "BR5.1"
+    },
+    {
+      "id": "FR1.8",
+      "status": "OK",
+      "target": "BR4.5"
+    }
+  ],
+  "reverse": [
+    {
+      "id": "BR1.7",
+      "status": "N/A",
+      "target": "keeps the five existing alarms unchanged (FR5.3) and out of alarm_names; no upstream ID of this unit"
+    },
+    {
+      "id": "BR4.3",
+      "status": "N/A",
+      "target": "the 7-day default range FR1.4 sets for U5's area; the dashboard that carries it is built here"
+    },
+    {
+      "id": "BR4.4",
+      "status": "N/A",
+      "target": "NFR3 time zone policy (Q1 A)"
+    },
+    {
+      "id": "BR6.1",
+      "status": "N/A",
+      "target": "NFR1 cost limit"
+    },
+    {
+      "id": "BR6.2",
+      "status": "N/A",
+      "target": "ADR-004 placement of the Terraform"
+    }
+  ]
+}

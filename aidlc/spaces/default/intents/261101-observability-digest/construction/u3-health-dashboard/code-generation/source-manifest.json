@@ -1,0 +1,14 @@
+{
+  "stage": "code-generation",
+  "unit": "u3-health-dashboard",
+  "version": 1,
+  "writes": [
+    { "path": "infra/dashboard.tf" },
+    { "path": "infra/tests/dashboard.tftest.hcl" },
+    { "path": "infra/bootstrap/services.tf" },
+    { "path": "infra/bootstrap/locals.tf" },
+    { "path": "infra/bootstrap/apply.tf" },
+    { "path": "infra/bootstrap/tests/apply_roles.tftest.hcl" },
+    { "path": "infra/bootstrap/tests/plan_roles.tftest.hcl" }
+  ]
+}
