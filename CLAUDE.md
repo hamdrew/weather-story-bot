@@ -1,6 +1,6 @@
 # weather-story-bot
 
-Python 3.13 Lambda (arm64) that posts NWS Weather Stories to Telegram. Infra is Terraform in `infra/`. AI-DLC (`/aidlc`) is the workflow; the roadmap and mission are in `aidlc/spaces/default/knowledge/aidlc-shared/`.
+Python 3.13 Lambda (arm64) that posts NWS Weather Stories to Telegram. Infra is Terraform in `infra/`. The mission is in `docs/mission.md` and the roadmap in `docs/roadmap.md`. The in-progress observability unit U2 is described in `docs/handoff-u2-log-events.md`.
 
 ## Commands
 Every task is a mise task (`mise.toml`, and bash file tasks in `mise-tasks/`); `mise tasks` lists them and `mise.toml` holds the tool version ranges and the committed `mise.lock` the exact versions (move them with `mise upgrade`, then `mise lock --platform linux-x64,macos-arm64`). Run several with `:::` (`mise run lint ::: test`): without it, mise hands the second name to the first as an argument.
@@ -30,3 +30,14 @@ Every task is a mise task (`mise.toml`, and bash file tasks in `mise-tasks/`); `
 - Keep each environment's Telegram token in its own SSM parameter (`/weather-story-bot/telegram-token`, `/weather-story-bot-staging/telegram-token`), never in Terraform vars or state
 - `infra/envs/*.backend.hcl`, `*.tfvars` and `.env` are gitignored and local-only; the `*.example` files are the templates
 - Only mark a story as posted in DynamoDB after Telegram accepts it (a repost is OK, a missed story is not)
+
+## Rules
+- Use the `readonly` AWS profile for read-only AWS work; report a denied read to the owner instead of escalating to another profile.
+- Terraform and admin AWS work belong to the owner's MFA profiles, which only the owner can run. A boto3 script that runs under an MFA profile uses the AWS CLI's cached session.
+- Report times to the owner in America/Chicago.
+- Never force-push to or delete `main`. Land every change through a pull request whose `checks` job passes.
+- Never upload a saved Terraform plan as a GitHub artifact (plans hold sensitive values and the repository is public), and never give a job that runs project tests or linters AWS credentials (`id-token: write`).
+- Never apply the bootstrap stack from the pipeline; the owner applies it by hand with MFA.
+- Pin every GitHub Action to a full commit SHA; give each Checkov skip and zizmor ignore an inline reason.
+- A pipeline run that stops at the production approval gate: read its job states (`gh run view <id> --json jobs`); never wait on it with `gh run watch`, which does not return until the approval.
+- Commit only when the owner asks.
