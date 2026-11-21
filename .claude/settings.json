@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(npx @coldtea/pr-lens-cli@latest *)"
-    ]
-  }
-}
