@@ -30,6 +30,11 @@ on:
 permissions:
   contents: read
 
+# Every terraform init in CI uses only the committed .terraform.lock.hcl: it fails rather than
+# rewriting the lock file, so the "provider dependency selections" notice never appears.
+env:
+  TF_CLI_ARGS_init: -lockfile=readonly
+
 # A newer push to a pull request replaces its running checks. Every other run gets a group of its
 # own, so checks on main are never held up or cancelled. Deploys serialize on their own group, set
 # on the deploy jobs below.
