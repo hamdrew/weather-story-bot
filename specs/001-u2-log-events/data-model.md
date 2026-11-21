@@ -46,8 +46,8 @@ One logger call in `src/weather_story_bot/`, L01 to L19 in table 1.
 | event | required at WARNING, ERROR and CRITICAL, and on L14; forbidden on every other call |
 
 **Field changes U2 makes**: L18 `status` → `http_status`; L15 `message_id` → `telegram_message_id`; L13 `reason` →
-`error`; L07, L11, L19 `error` from `str(exc)` to `repr(exc)`; L19 always carries `image_id` (null on the `run`
-write) instead of spreading it.
+`error`; L07, L11, L19 `error` from `str(exc)` to `repr(exc)`; L19 lists `image_id` in its literal instead of spreading it
+(absent from the line on the `run` write: the runtime drops null fields).
 
 ## OfficeContext
 

@@ -170,3 +170,20 @@ run "staging_refuses_productions_boundary" {
 
   expect_failures = [var.permissions_boundary_arn]
 }
+
+run "lambda_writes_json_logs_at_info" {
+  assert {
+    condition     = aws_lambda_function.bot.logging_config[0].log_format == "JSON"
+    error_message = "log_format must be JSON: the runtime, not the handler, writes the log lines."
+  }
+
+  assert {
+    condition     = aws_lambda_function.bot.logging_config[0].application_log_level == "INFO"
+    error_message = "application_log_level must be INFO, the same as the root level configure_logging() sets."
+  }
+
+  assert {
+    condition     = aws_lambda_function.bot.logging_config[0].system_log_level == "INFO"
+    error_message = "system_log_level must be INFO so the REPORT lines are kept."
+  }
+}

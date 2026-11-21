@@ -89,13 +89,24 @@ class TelegramClient:
         try:
             result = self._call("sendPhoto", data, {"photo": (filename, image_bytes, "image/png")})
         except _PhotoRejectedError as exc:
-            logger.warning("Photo rejected, sending as document", extra={"reason": str(exc)})
+            logger.warning(
+                "Photo rejected, sending as document",
+                extra={"event": "telegram.photo_rejected", "error": repr(exc)},
+            )
             result = self._call(
                 "sendDocument", data, {"document": (filename, image_bytes, "image/png")}
             )
         # Logged before anything else can fail: the StoriesPosted metric filter counts this exact
-        # message, so the repost-loop alarm sees every delivered post, even ones never recorded.
-        logger.info("Telegram message sent", extra={"chat_id": chat_id, "image_filename": filename})
+        # message (and the event `telegram.message_sent`), so the repost-loop alarm sees every
+        # delivered post, even ones never recorded.
+        logger.info(
+            "Telegram message sent",
+            extra={
+                "event": "telegram.message_sent",
+                "chat_id": chat_id,
+                "image_filename": filename,
+            },
+        )
         try:
             return int(result["message_id"])
         except (KeyError, TypeError, ValueError) as exc:
@@ -110,7 +121,8 @@ class TelegramClient:
         with contextlib.suppress(_MessageNotFoundError):
             self._call("deleteMessage", data, {})
         logger.info(
-            "Telegram message deleted", extra={"chat_id": chat_id, "message_id": message_id}
+            "Telegram message deleted",
+            extra={"chat_id": chat_id, "telegram_message_id": message_id},
         )
 
     def _call(self, method: str, data: dict[str, str], files: dict[str, Any]) -> Any:
@@ -139,7 +151,11 @@ class TelegramClient:
                 if retry_after is not None and retry_after <= MAX_RETRY_AFTER_SECONDS:
                     logger.warning(
                         "Telegram rate limited, retrying",
-                        extra={"method": method, "retry_after": retry_after},
+                        extra={
+                            "event": "telegram.rate_limited",
+                            "method": method,
+                            "retry_after": retry_after,
+                        },
                     )
                     self._sleep(retry_after)
                     retried = True

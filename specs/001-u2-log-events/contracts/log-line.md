@@ -14,11 +14,11 @@ The function uses Lambda's JSON log format. The runtime writes each record as on
 | `level` | yes | Python's level name: `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`; the `WARNING` spelling (not `WARN`) is unverified until a real warning line is seen |
 | `logger` | yes | logger name; the bot's own lines start with `weather_story_bot` |
 | `event` | yes | the kind of line (catalogue below); present only where the catalogue says |
-| `timestamp` | yes | when the record was made, written by the runtime |
+| `timestamp` | yes | when the record was made, written by the runtime; whole seconds only, so it cannot order lines within one second: sort on CloudWatch's `@timestamp` (millisecond precision) for that |
 | `requestId` | yes | the invocation's request id, written by the runtime |
 | `office` | yes | present on lines written while an office is being processed; absent otherwise |
 | `message` | until U4 | human text; today's two message-based metric filters (`Telegram message sent`, `Ambiguous stories from NWS`), which feed three alarms, still match it, and U4 moves them to `event` |
-| stack-trace keys | no | written by the runtime for errors logged with a stack trace; their names and content are not a contract |
+| stack-trace keys | no | written by the runtime for errors logged with a stack trace; their names and content are not a contract. The runtime writes the raised exception's own frames and text only, not the chained cause (`raise ... from exc`), so the inner frames the old formatter printed are gone |
 | any other key | no | per-call detail (for example `title`, `error`, `http_status`); for people, not filters |
 
 Key order is not part of the contract.

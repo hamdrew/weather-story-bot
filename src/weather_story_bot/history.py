@@ -179,8 +179,15 @@ def _is_condition_failure(exc: Exception) -> bool:
     )
 
 
-def _log_failure(write: str, exc: Exception, **extra: str) -> None:
-    # `office` comes from handler's log record factory, which fails on a caller-supplied one.
+def _log_failure(write: str, exc: Exception, image_id: str | None = None) -> None:
+    # `office` comes from handler's office record factory (`_record_with_office`), which fails on a
+    # caller-supplied one.
     logger.warning(
-        "History write failed", extra={"history_write": write, "error": str(exc), **extra}
+        "History write failed",
+        extra={
+            "event": "history.write_failed",
+            "history_write": write,
+            "error": repr(exc),
+            "image_id": image_id,
+        },
     )

@@ -171,7 +171,7 @@ names written out in the checks.
 
 - **FR-007**: The NWS server-error retry call MUST name its HTTP code `http_status`, and the Telegram message-deleted call MUST name its id `telegram_message_id`.
 - **FR-008**: A warning that logs a caught exception MUST put it under `error` as the exception's full representation (class and arguments), not its bare text. The photo-rejected call's `reason` field becomes `error`.
-- **FR-009**: No call may pass an extra field whose name is a standard log-record attribute or a name the line already owns: `timestamp`, `level`, `logger`, `message`, `requestId`, `office`, plus Python's reserved `asctime`. Every extra field name MUST be lowercase snake_case.
+- **FR-009**: No call may pass an extra field whose name is a standard log-record attribute or a name the line already owns: `timestamp`, `level`, `logger`, `message`, `requestId`, `location` (the runtime reserves it and drops an extra of that name), `office`, plus Python's reserved `asctime`. Every extra field name MUST be lowercase snake_case.
 
 **Secrets**
 
@@ -180,7 +180,7 @@ names written out in the checks.
 
 **Drift check**
 
-- **FR-012**: An automated check MUST fail, naming the module, line and message, when a WARNING, ERROR or CRITICAL call (or the message-sent call) in `src/weather_story_bot/` has no fixed event literal, when another INFO call has one, or when a call passes a forbidden extra field name (FR-009). It MUST also fail on a log call it cannot read (a non-constant message, `logger.log(...)`, or a call on the `logging` module), so that no call escapes it. A WARNING, ERROR or CRITICAL call, and the message-sent call, MUST pass `extra=` as a dict literal with constant string keys and no `**` spread; anything else counts as unreadable. An INFO call without an event may pass a dict built elsewhere (today only "Story posted", L10); the check cannot read its keys, so its own unit test pins them. The history-write call (L19) therefore lists its fields in the literal instead of spreading them.
+- **FR-012**: An automated check MUST fail, naming the module, line and message, when a WARNING, ERROR or CRITICAL call (or the message-sent call) in `src/weather_story_bot/` has no fixed event literal, when another INFO call has one, or when a call passes a forbidden extra field name (FR-009). The check is a guardrail, not a proof: it reads `logger.<level>("constant message", extra={...})` calls only, and it does not try to catch a call written in another form (a non-constant message, `logger.log(...)`, a call on the `logging` module); a reviewer reads those. A WARNING, ERROR or CRITICAL call, and the message-sent call, MUST pass `extra=` as a dict literal whose `"event"` value is a string constant; with any other `extra=`, the call counts as having no event. An INFO call without an event may pass a dict built elsewhere (today only "Story posted", L10); the check cannot read its keys, so its own unit test pins them. The history-write call (L19) lists its fields in the literal instead of spreading them.
 - **FR-013**: An automated check MUST fail, naming the difference, when the set of events in the code differs from `docs/logging-review.md` table 1, or when an event name does not match `^(nws|telegram|office|story|store|history|run)\.[a-z_]+$`.
 - **FR-014**: The two signal events MUST be proven on their real paths, with the names written out in the checks rather than borrowed from the code.
 

@@ -23,7 +23,7 @@ from weather_story_bot.history import StoryHistory
 from weather_story_bot.models import Story
 from weather_story_bot.nws import NwsClient
 from weather_story_bot.state import OfficeLease, PostedStore
-from weather_story_bot.telegram import TelegramClient
+from weather_story_bot.telegram import TelegramClient, TelegramError
 
 TOKEN = "123:secret-token"
 MKX = OfficeConfig("MKX", "-100111", "Milwaukee/Sullivan")
@@ -36,7 +36,8 @@ REISSUED_DOWNLOAD = "https://api.weather.gov/offices/MKX/weatherstories/download
 EPOCH = "1970-01-01T00:00:00+00:00"
 # Both fixture stories are active: they end at 19:24 and 19:34 on 2026-09-13.
 NOW = datetime(2026, 9, 13, 0, 0, tzinfo=UTC)
-# A real Lambda context always has aws_request_id; lambda_handler reads it for every log line.
+# A real Lambda context always has aws_request_id; lambda_handler passes it to the run history
+# record.
 LAMBDA_CONTEXT = SimpleNamespace(aws_request_id="test-request-id")
 
 
@@ -422,6 +423,7 @@ def test_ambiguous_stories_are_all_rejected_and_logged(
     assert posted_record(services, listed) is None
     [logged] = [r for r in caplog.records if r.getMessage() == "Ambiguous stories from NWS"]
     assert logged.levelno == logging.ERROR
+    assert vars(logged)["event"] == "nws.ambiguous_stories"
     assert vars(logged)["office"] == "MKX"
     stories = vars(logged)["stories"]
     assert len(stories) == 2
@@ -702,14 +704,13 @@ def test_lambda_handler_end_to_end(
     run_records = history_items(boto3.client("dynamodb"), "RUN#")
     assert [r["aws_request_id"]["S"] for r in run_records] == ["test-request-id"] * 2
 
-    # aws_request_id comes from the Lambda context, not a caller-supplied extra.
     complete = [r for r in caplog.records if r.getMessage() == "Run complete"]
-    assert all(vars(r)["aws_request_id"] == "test-request-id" for r in complete)
     sent = [r for r in caplog.records if r.getMessage() == "Telegram message sent"]
     assert len(sent) == 2
-    assert all(vars(r)["aws_request_id"] == "test-request-id" for r in sent)
     # Run complete spans every office, so it carries no single office's id.
     assert all("office" not in vars(r) for r in complete)
+    assert complete
+    assert all("event" not in vars(r) for r in complete)
 
     # Ambiguous NWS data alarms through its own metric filter, not a failed invocation.
     mkx_payload["stories"].append(sibling(mkx_payload, download=REISSUED_DOWNLOAD))
@@ -720,49 +721,6 @@ def test_lambda_handler_end_to_end(
     api.get(MKX_URL).respond(503)
     with pytest.raises(handler.ProcessingError):
         handler.lambda_handler({}, LAMBDA_CONTEXT)
-
-
-def test_aws_request_id_does_not_leak_into_a_later_bare_run(
-    services: handler.Services,
-    api: Any,
-    mkx_payload: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """A ContextVar reset, not a leftover attribute: it must not survive past its invocation."""
-    boto3.client("ssm").put_parameter(
-        Name="/weather-story-bot/telegram-token", Value=TOKEN, Type="SecureString"
-    )
-    monkeypatch.setattr(handler, "_services", None)
-    for name, value in {
-        "OFFICES_JSON": json.dumps({"MKX": {"chat_id": MKX.chat_id, "name": MKX.name}}),
-        "STATE_TABLE": TABLE_NAME,
-        "ARCHIVE_BUCKET": BUCKET_NAME,
-        "TELEGRAM_TOKEN_PARAM": "/weather-story-bot/telegram-token",
-        "NWS_USER_AGENT": "tests",
-    }.items():
-        monkeypatch.setenv(name, value)
-    for story in mkx_payload["stories"]:
-        story["endTime"] = "2999-01-01T00:00:00+00:00"
-    api.get(MKX_URL).respond(json=mkx_payload)
-    caplog.set_level(logging.INFO, logger="weather_story_bot")
-
-    handler.lambda_handler({}, LAMBDA_CONTEXT)
-    caplog.clear()
-    revise(api, mkx_payload, b"PNG-revised")
-    run(services)
-
-    [posted] = [r for r in caplog.records if r.getMessage() == "Story posted"]
-    assert "aws_request_id" not in vars(posted)
-
-
-def test_json_formatter_includes_extra_fields() -> None:
-    record = logging.makeLogRecord(
-        {"name": "x", "levelname": "INFO", "msg": "Story posted", "office": "MKX"}
-    )
-    entry = json.loads(handler.JsonFormatter().format(record))
-    assert entry["message"] == "Story posted"
-    assert entry["office"] == "MKX"
 
 
 def test_overlapping_run_sends_nothing(services: handler.Services, api: Any) -> None:
@@ -985,3 +943,213 @@ def test_failed_history_writes_never_block_a_post(
     assert {r["office"] for r in failed} == {"MKX"}
     # Every run still released its lease.
     assert services.lease.take("MKX", NOW) is not None
+
+
+# Log events (U2): each WARNING and ERROR call names its event (docs/logging-review.md table 1).
+
+
+def logged_once(caplog: pytest.LogCaptureFixture, message: str) -> logging.LogRecord:
+    [record] = [r for r in caplog.records if r.getMessage() == message]
+    return record
+
+
+def assert_event(record: logging.LogRecord, event: str, level: int, *, stack: bool) -> None:
+    assert vars(record)["event"] == event
+    assert record.levelno == level
+    assert (record.exc_info is not None) is stack
+
+
+def throttled_error(operation: str) -> ClientError:
+    return ClientError(
+        {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"}},
+        operation,
+    )
+
+
+def test_lease_failure_logs_office_lease_failed(
+    services: handler.Services,
+    api: Any,
+    dynamodb: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def throttled(**_: Any) -> None:
+        raise throttled_error("PutItem")
+
+    # moto can't throttle; this PutItem is the lease's, the first write of the run.
+    monkeypatch.setattr(dynamodb, "put_item", throttled)
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    run(services)
+
+    record = logged_once(caplog, "Failed to take office lease")
+    assert_event(record, "office.lease_failed", logging.ERROR, stack=True)
+
+
+def test_failed_listing_logs_nws_list_failed(
+    services: handler.Services, api: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    api.get(MKX_URL).respond(404)
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    run(services)
+
+    record = logged_once(caplog, "Failed to list stories")
+    assert_event(record, "nws.list_failed", logging.ERROR, stack=True)
+
+
+def test_office_failure_logs_office_process_failed(
+    services: handler.Services,
+    api: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def broken(*_: Any) -> Any:
+        raise TypeError("a bug, not a client error")
+
+    monkeypatch.setattr(handler, "decide", broken)
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    run(services)
+
+    record = logged_once(caplog, "Failed to process office")
+    assert_event(record, "office.process_failed", logging.ERROR, stack=True)
+
+
+def test_failed_download_logs_nws_image_download_failed(
+    services: handler.Services,
+    api: Any,
+    mkx_payload: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    api.get(mkx_payload["stories"][0]["download"]).respond(404)
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    run(services)
+
+    record = logged_once(caplog, "Failed to download story image")
+    assert_event(record, "nws.image_download_failed", logging.ERROR, stack=True)
+
+
+def test_failed_record_read_logs_store_read_failed(
+    services: handler.Services,
+    api: Any,
+    dynamodb: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def throttled(**_: Any) -> None:
+        raise throttled_error("GetItem")
+
+    # moto can't throttle; GetItem is only find_story's.
+    monkeypatch.setattr(dynamodb, "get_item", throttled)
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    run(services)
+
+    record = logged_once(caplog, "Failed to read posted stories")
+    assert_event(record, "store.read_failed", logging.ERROR, stack=True)
+
+
+def test_failed_release_logs_office_lease_release_failed_with_the_repr(
+    services: handler.Services,
+    api: Any,
+    dynamodb: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    raised: list[ClientError] = []
+
+    def throttled(**_: Any) -> None:
+        raised.append(throttled_error("DeleteItem"))
+        raise raised[-1]
+
+    monkeypatch.setattr(dynamodb, "delete_item", throttled)
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    run(services)
+
+    record = logged_once(caplog, "Office lease release failed")
+    assert_event(record, "office.lease_release_failed", logging.WARNING, stack=False)
+    assert vars(record)["error"] == repr(raised[0])
+
+
+def test_failed_story_logs_story_process_failed(
+    services: handler.Services,
+    api: Any,
+    mkx_payload: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    api.post(PHOTO_URL).mock(
+        side_effect=[
+            httpx.Response(400, json={"ok": False, "description": "Bad Request: chat not found"}),
+            httpx.Response(200, json={"ok": True, "result": {"message_id": 5}}),
+        ]
+    )
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    run(services)
+
+    record = logged_once(caplog, "Failed to process story")
+    assert_event(record, "story.process_failed", logging.ERROR, stack=True)
+
+
+def test_refused_delete_logs_telegram_delete_failed_with_the_repr(
+    services: handler.Services,
+    api: Any,
+    mkx_payload: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    run(services)
+    revise(api, mkx_payload, b"PNG-revised")
+    api.post(DELETE_URL, name="delete").respond(
+        400, json={"ok": False, "description": "Bad Request: message can't be deleted"}
+    )
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+
+    run(services)
+
+    record = logged_once(caplog, "Telegram delete failed, old message kept")
+    assert_event(record, "telegram.delete_failed", logging.WARNING, stack=False)
+    expected = TelegramError(
+        "deleteMessage failed with HTTP 400: Bad Request: message can't be deleted"
+    )
+    assert vars(record)["error"] == repr(expected)
+
+
+def test_info_records_the_catalogue_leaves_unnamed_have_no_event(
+    services: handler.Services, api: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
+    run(services)
+    assert services.lease.take("MKX", NOW) is not None
+    run(services)
+
+    for message in ("Story posted", "Office run already in progress"):
+        records = [r for r in caplog.records if r.getMessage() == message]
+        assert records
+        assert all("event" not in vars(r) for r in records)
+
+
+def test_configure_logging_only_sets_levels_and_is_idempotent() -> None:
+    root = logging.getLogger()
+    capped = [logging.getLogger("httpx"), logging.getLogger("httpcore")]
+    handlers = list(root.handlers)
+    formatters = [h.formatter for h in handlers]
+    levels = [root.level, *(log.level for log in capped)]
+    try:
+        handler.configure_logging()
+        handler.configure_logging()
+
+        # The Lambda runtime's handler and JSON formatter stay as they are (FR-002).
+        assert root.handlers == handlers
+        assert [h.formatter for h in root.handlers] == formatters
+        assert root.level == logging.INFO
+        assert [log.level for log in capped] == [logging.WARNING, logging.WARNING]
+    finally:
+        root.handlers[:] = handlers
+        for h, formatter in zip(handlers, formatters, strict=True):
+            h.setFormatter(formatter)
+        root.setLevel(levels[0])
+        for log, level in zip(capped, levels[1:], strict=True):
+            log.setLevel(level)

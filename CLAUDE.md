@@ -1,6 +1,6 @@
 # weather-story-bot
 
-Python 3.13 Lambda (arm64) that posts NWS Weather Stories to Telegram. Infra is Terraform in `infra/`. The mission is in `docs/mission.md` and the roadmap in `docs/roadmap.md`. The in-progress observability unit U2 is described in `docs/handoff-u2-log-events.md`.
+Python 3.13 Lambda (arm64) that posts NWS Weather Stories to Telegram. Infra is Terraform in `infra/`. The mission is in `docs/mission.md` and the roadmap in `docs/roadmap.md`. The in-progress observability unit U2 is described in `specs/001-u2-log-events/spec.md`.
 
 ## Commands
 Every task is a mise task (`mise.toml`, and bash file tasks in `mise-tasks/`); `mise tasks` lists them and `mise.toml` holds the tool version ranges and the committed `mise.lock` the exact versions (move them with `mise upgrade`, then `mise lock --platform linux-x64,macos-arm64`). Run several with `:::` (`mise run lint ::: test`): without it, mise hands the second name to the first as an argument.
