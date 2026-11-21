@@ -99,12 +99,20 @@ def test_send_photo_uploads_multipart(client: TelegramClient) -> None:
 
 
 @respx.mock
-def test_rate_limit_is_retried_once(client: TelegramClient, sleeps: list[float]) -> None:
+def test_rate_limit_is_retried_once(
+    client: TelegramClient, sleeps: list[float], caplog: pytest.LogCaptureFixture
+) -> None:
     route = respx.post(PHOTO_URL)
     route.side_effect = [error(429, "Too Many Requests", parameters={"retry_after": 3}), ok(8)]
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
 
     assert client.send_photo("-1001", b"x", "c", "a.png") == 8
     assert sleeps == [3]
+    [record] = [r for r in caplog.records if r.getMessage() == "Telegram rate limited, retrying"]
+    assert record.levelno == logging.WARNING
+    assert vars(record)["event"] == "telegram.rate_limited"
+    assert (vars(record)["method"], vars(record)["retry_after"]) == ("sendPhoto", 3)
+    assert record.exc_info is None
 
 
 @respx.mock
@@ -132,13 +140,24 @@ def test_long_retry_after_is_not_waited(client: TelegramClient, sleeps: list[flo
 )
 @respx.mock
 def test_rejected_photo_falls_back_to_document(
-    client: TelegramClient, rejection: httpx.Response
+    client: TelegramClient, rejection: httpx.Response, caplog: pytest.LogCaptureFixture
 ) -> None:
     respx.post(PHOTO_URL).mock(return_value=rejection)
     document = respx.post(DOCUMENT_URL).mock(return_value=ok(9))
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
 
     assert client.send_photo("-1001", b"x", "cap", "a.png") == 9
     assert b'name="document"; filename="a.png"' in document.calls.last.request.content
+    [record] = [
+        r for r in caplog.records if r.getMessage() == "Photo rejected, sending as document"
+    ]
+    assert record.levelno == logging.WARNING
+    assert vars(record)["event"] == "telegram.photo_rejected"
+    # The error is the photo error's repr, which holds Telegram's description and no token.
+    assert vars(record)["error"].startswith("_PhotoRejectedError(")
+    assert TOKEN not in vars(record)["error"]
+    assert "reason" not in vars(record)
+    assert record.exc_info is None
 
 
 @respx.mock
@@ -198,6 +217,10 @@ def test_sent_log_marks_every_accepted_message(
     records = [r for r in caplog.records if r.getMessage() == "Telegram message sent"]
     expected = [("-1001", "a.png")] if sent else []
     assert [(vars(r)["chat_id"], vars(r)["image_filename"]) for r in records] == expected
+    assert all(vars(r)["event"] == "telegram.message_sent" for r in records)
+    assert all(r.levelno == logging.INFO and r.exc_info is None for r in records)
+    # No other INFO record carries an event: only the sent line is a signal.
+    assert all("event" not in vars(r) for r in caplog.records if r not in records)
     assert all(TOKEN not in r.getMessage() for r in caplog.records)
 
 
@@ -216,7 +239,9 @@ def test_delete_message_sends_ids_and_logs(
     assert b"chat_id=-1001" in body
     assert b"message_id=7" in body
     [deleted] = [r for r in caplog.records if r.getMessage() == "Telegram message deleted"]
-    assert (vars(deleted)["chat_id"], vars(deleted)["message_id"]) == ("-1001", 7)
+    assert (vars(deleted)["chat_id"], vars(deleted)["telegram_message_id"]) == ("-1001", 7)
+    assert "message_id" not in vars(deleted)
+    assert "event" not in vars(deleted)
     assert "Telegram message sent" not in [r.getMessage() for r in caplog.records]
 
 

@@ -63,7 +63,12 @@ class NwsClient:
             except httpx.TransportError as exc:
                 if retryable:
                     logger.warning(
-                        "NWS request failed, retrying", extra={"url": url, "error": repr(exc)}
+                        "NWS request failed, retrying",
+                        extra={
+                            "event": "nws.retry_transport_error",
+                            "url": url,
+                            "error": repr(exc),
+                        },
                     )
                     self._sleep(self._retry_delay)
                     continue
@@ -71,7 +76,12 @@ class NwsClient:
 
             if response.is_server_error and retryable:
                 logger.warning(
-                    "NWS server error, retrying", extra={"url": url, "status": response.status_code}
+                    "NWS server error, retrying",
+                    extra={
+                        "event": "nws.retry_server_error",
+                        "url": url,
+                        "http_status": response.status_code,
+                    },
                 )
                 self._sleep(self._retry_delay)
                 continue

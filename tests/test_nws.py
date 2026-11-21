@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
@@ -99,20 +100,37 @@ def test_list_stories_empty(client: NwsClient) -> None:
 
 
 @respx.mock
-def test_retries_once_on_server_error(client: NwsClient, mkx_payload: dict[str, Any]) -> None:
+def test_retries_once_on_server_error(
+    client: NwsClient, mkx_payload: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
     route = respx.get(STORIES_URL)
     route.side_effect = [httpx.Response(503), httpx.Response(200, json=mkx_payload)]
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
 
     assert len(client.list_stories("MKX")) == 2
     assert route.call_count == 2
+    [record] = [r for r in caplog.records if r.getMessage() == "NWS server error, retrying"]
+    assert record.levelno == logging.WARNING
+    assert vars(record)["event"] == "nws.retry_server_error"
+    assert vars(record)["http_status"] == 503
+    assert "status" not in vars(record)
+    assert record.exc_info is None
 
 
 @respx.mock
-def test_retries_once_on_transport_error(client: NwsClient, mkx_payload: dict[str, Any]) -> None:
+def test_retries_once_on_transport_error(
+    client: NwsClient, mkx_payload: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
     route = respx.get(STORIES_URL)
     route.side_effect = [httpx.ConnectTimeout("slow"), httpx.Response(200, json=mkx_payload)]
+    caplog.set_level(logging.INFO, logger="weather_story_bot")
 
     assert len(client.list_stories("MKX")) == 2
+    [record] = [r for r in caplog.records if r.getMessage() == "NWS request failed, retrying"]
+    assert record.levelno == logging.WARNING
+    assert vars(record)["event"] == "nws.retry_transport_error"
+    assert vars(record)["error"] == repr(httpx.ConnectTimeout("slow"))
+    assert record.exc_info is None
 
 
 @respx.mock

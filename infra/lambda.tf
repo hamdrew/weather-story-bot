@@ -39,9 +39,14 @@ resource "aws_lambda_function" "bot" {
   }
 
   logging_config {
-    # The handler formats its own JSON log lines.
-    log_format = "Text"
-    log_group  = aws_cloudwatch_log_group.lambda.name
+    # The runtime writes each log record as one JSON line (timestamp, level, logger, message,
+    # requestId, and a call's `extra` keys). `application_log_level` must equal the root level
+    # `configure_logging()` sets in src/weather_story_bot/handler.py. The system level keeps the
+    # runtime's REPORT lines (per-run duration and memory).
+    log_format            = "JSON"
+    application_log_level = "INFO"
+    system_log_level      = "INFO"
+    log_group             = aws_cloudwatch_log_group.lambda.name
   }
 
   depends_on = [aws_iam_role_policy.lambda]

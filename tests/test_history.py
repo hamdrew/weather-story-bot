@@ -27,6 +27,41 @@ def failures(caplog: pytest.LogCaptureFixture) -> list[dict[str, Any]]:
     return [vars(r) for r in caplog.records if r.getMessage() == "History write failed"]
 
 
+def raised_errors(dynamodb: Any, monkeypatch: pytest.MonkeyPatch) -> list[Exception]:
+    """Collect what the history writes' two DynamoDB calls raise, still raising it."""
+    raised: list[Exception] = []
+
+    def recording(call: Any) -> Any:
+        def wrapper(**kwargs: Any) -> Any:
+            try:
+                return call(**kwargs)
+            except Exception as exc:
+                raised.append(exc)
+                raise
+
+        return wrapper
+
+    for name in ("put_item", "update_item"):
+        monkeypatch.setattr(dynamodb, name, recording(getattr(dynamodb, name)))
+    return raised
+
+
+def assert_write_failed(
+    caplog: pytest.LogCaptureFixture,
+    raised: list[Exception],
+    write: str,
+    image_id: str | None,
+) -> None:
+    [record] = [r for r in caplog.records if r.getMessage() == "History write failed"]
+    assert record.levelno == logging.WARNING
+    assert vars(record)["event"] == "history.write_failed"
+    assert vars(record)["history_write"] == write
+    [exc] = raised
+    assert vars(record)["error"] == repr(exc)
+    assert vars(record)["image_id"] == image_id
+    assert record.exc_info is None
+
+
 # record_event
 
 
@@ -146,15 +181,15 @@ def test_record_event_never_overwrites_an_event(
 
 
 def test_record_event_failure_logs_warning_and_returns(
-    dynamodb: Any, caplog: pytest.LogCaptureFixture
+    dynamodb: Any, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    raised = raised_errors(dynamodb, monkeypatch)
+
     StoryHistory(dynamodb, MISSING_TABLE).record_event(make_story(), EventKind.POSTED, at=NOW)
 
-    [record] = failures(caplog)
-    assert record["levelno"] == logging.WARNING
     # `office` comes from handler's log context; test_handler pins it on these lines.
-    assert (record["history_write"], record["image_id"]) == ("event", "aaaa-1111")
-    assert "ResourceNotFoundException" in record["error"]
+    assert_write_failed(caplog, raised, "event", "aaaa-1111")
+    assert "ResourceNotFoundException" in failures(caplog)[0]["error"]
 
 
 # touch_last_seen
@@ -219,13 +254,13 @@ def test_touch_last_seen_never_creates_a_story_item(
 
 
 def test_touch_last_seen_failure_logs_warning_and_returns(
-    dynamodb: Any, caplog: pytest.LogCaptureFixture
+    dynamodb: Any, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    raised = raised_errors(dynamodb, monkeypatch)
+
     StoryHistory(dynamodb, MISSING_TABLE).touch_last_seen(make_story(), None, now=NOW)
 
-    [record] = failures(caplog)
-    assert record["levelno"] == logging.WARNING
-    assert record["history_write"] == "last_seen"
+    assert_write_failed(caplog, raised, "last_seen", "aaaa-1111")
 
 
 def test_record_posted_clears_last_seen(dynamodb: Any) -> None:
@@ -331,12 +366,12 @@ def test_record_run_never_overwrites_a_run(dynamodb: Any, caplog: pytest.LogCapt
 
 
 def test_record_run_failure_logs_warning_and_returns(
-    dynamodb: Any, caplog: pytest.LogCaptureFixture
+    dynamodb: Any, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    raised = raised_errors(dynamodb, monkeypatch)
+
     StoryHistory(dynamodb, MISSING_TABLE).record_run(
         "MKX", at=NOW, nws_failed=False, stories_seen=3, counts=COUNTS
     )
 
-    [record] = failures(caplog)
-    assert record["levelno"] == logging.WARNING
-    assert record["history_write"] == "run"
+    assert_write_failed(caplog, raised, "run", None)
