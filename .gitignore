@@ -192,3 +192,6 @@ out.json
 .claude/worktrees/
 
 .claude/settings.local.json
+
+# PR Lens writes its previews here. They are rebuilt on demand.
+.pr-lens/

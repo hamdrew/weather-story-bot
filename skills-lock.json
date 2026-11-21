@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "skills": {
+    "eli5": {
+      "source": "coldteadotai/pr-lens",
+      "commit": "239644a57716e2d49b879520b627a39dc2df8a4c",
+      "sourceType": "github",
+      "skillPath": "skills/eli5/SKILL.md",
+      "computedHash": "a22f4e2cb727d0934885ead003d070d2c10e509d8057af90dd100e12673aed09"
+    },
+    "pr-lens": {
+      "source": "coldteadotai/pr-lens",
+      "commit": "239644a57716e2d49b879520b627a39dc2df8a4c",
+      "sourceType": "github",
+      "skillPath": "skills/pr-lens/SKILL.md",
+      "computedHash": "f2c6cf81745e7fe2b998c3322530dd1d54bb296a38c35dde149facba05ea877f"
+    }
+  }
+}
