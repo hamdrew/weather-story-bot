@@ -46,18 +46,18 @@ Rationale: a pure planner is testable and makes the dry run tell the truth.
   mock AWS provider for Terraform) and need no credentials.
 - New behavior and bug fixes MUST ship with tests that fail without the change.
 - Frozen contracts MUST be pinned by tests: the story identity hash encoding (a known-hash test),
-  and any log message an alarm depends on.
+  and any log event an alarm depends on.
 - Fix type errors instead of suppressing them; coverage stays opt-in and out of pytest `addopts`.
 
-Rationale: silent drift in a hash or an alarm string reposts every story or blinds an alarm.
+Rationale: silent drift in a hash or an alarm's event name reposts every story or blinds an alarm.
 
 ### V. Out-of-Band Observability
 
 - Failure, recovery, silent-problem (gone quiet, repost loop, ambiguous NWS data) and cost alerts
   MUST go by email, never through Telegram, since Telegram may be what is broken.
 - Alarms MUST NOT fire on a single flaky run, and MUST send a recovery notice.
-- Log messages that feed metric filters ("Ambiguous stories from NWS", "Telegram message sent")
-  are contracts: they change word for word only in the same change as `infra/monitoring.tf`.
+- Log events that feed metric filters (`nws.ambiguous_stories`, `telegram.message_sent`) are
+  contracts: they change only in the same change as `infra/monitoring.tf`.
 
 Rationale: the owner learns about problems on their phone without relying on the failing path.
 
@@ -107,7 +107,7 @@ runtime development guidance and command details; where the two disagree, amend 
   a new principle or section or materially expanded guidance, PATCH for clarifications.
 - Every `/speckit-plan` MUST include a Constitution Check against these principles; any violation
   MUST be justified in the plan's complexity tracking or the design changed.
-- Reviews MUST confirm that alarm-contract strings, the identity hash and the
+- Reviews MUST confirm that alarm-contract event names, the identity hash and the
   posted-after-accepted ordering are unchanged or deliberately migrated.
 
-**Version**: 1.0.0 | **Ratified**: 2026-11-09 | **Last Amended**: 2026-11-09
+**Version**: 1.1.0 | **Ratified**: 2026-11-09 | **Last Amended**: 2026-11-21

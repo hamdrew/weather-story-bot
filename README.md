@@ -233,7 +233,7 @@ Staging is where real posts get watched: its own bot, a private channel, its own
    cp infra/envs/staging.backend.hcl.example infra/envs/staging.backend.hcl
    cp infra/envs/staging.tfvars.example infra/envs/staging.tfvars
    ```
-4. **Deploy.** The plan should create only `-staging` resources, with no budget, the schedule `DISABLED` and all five alarms on:
+4. **Deploy.** The plan should create only `-staging` resources, with no budget, the schedule `DISABLED` and all six alarms on:
    ```sh
    mise run plan staging
    mise run deploy staging
@@ -285,15 +285,16 @@ aws cloudwatch set-alarm-state --alarm-name weather-story-bot-errors \
 | `weather-story-bot-errors` | Runs failed in 2 consecutive 15-minute periods. One flaky run doesn't alert. Any failed story or office, and any timeout, counts. | The `ERROR` lines in the log group. They name the office and story, plus the NWS, Telegram or AWS error. |
 | `weather-story-bot-missed-runs` | No invocations in the last hour. | The EventBridge Scheduler schedule `weather-story-bot` is enabled, and the scheduler role can still invoke the function. |
 | `weather-story-bot-quiet` | No stories posted for `quiet_alarm_days` days, even though runs aren't failing. | The `Run complete` summaries in the logs. If they show only `skipped` while weather.gov has new stories, NWS may have changed the API. |
-| `weather-story-bot-repost-loop` | More than `repost_alarm_max_posts` stories posted in 3 hours. | The Telegram channel for duplicates, and `Telegram message sent` log lines for the same `image_filename` again and again, without a matching `Story posted` line (for example, DynamoDB writes failing after each post). |
-| `weather-story-bot-nws-ambiguous` | NWS listed active stories that share an image ID, a title and start time, or an identical image, so the bot skipped all of them. Fires on the first run that sees it. | The `Ambiguous stories from NWS` log lines: `stories` lists each rejected story's `image_id`, `title` and `reasons`. Usually NWS fixes its data within a run or two, and the OK email follows. |
+| `weather-story-bot-repost-loop` | More than `repost_alarm_max_posts` stories posted in 3 hours. | The Telegram channel for duplicates, and `telegram.message_sent` log lines for the same `image_filename` again and again, without a matching `Story posted` line (for example, DynamoDB writes failing after each post). |
+| `weather-story-bot-nws-ambiguous` | NWS listed active stories that share an image ID, a title and start time, or an identical image, so the bot skipped all of them. Fires on the first run that sees it. | The `nws.ambiguous_stories` log lines: `stories` lists each rejected story's `image_id`, `title` and `reasons`. Usually NWS fixes its data within a run or two, and the OK email follows. |
+| `weather-story-bot-slow-runs` | The slowest run took more than 60 seconds in 2 consecutive 15-minute periods. | Each run's `record.metrics.durationMs` on `platform.report` log lines, against the function's 300-second limit. |
 | `weather-story-bot-monthly` (budget) | Actual account spend passes 80% of `monthly_budget_usd`, or forecasted spend passes 100%. | AWS Cost Explorer, grouped by service. The budget covers the **whole account**, not just this bot. |
 
 Each alarm email includes the same hints and a link to the log group.
 
-Staging (`weather-story-bot-staging-*`, on its own `weather-story-bot-staging-alerts` topic) has the same five alarms. Every environment's alarms are created with their actions on, and `mise run pause` / `mise run start` switch them off and on with the schedule, so a paused staging doesn't email about the idleness itself. Staging's alarms are on before its first start, so `missed-runs` and `quiet` email until then. Staging's metrics use the `WeatherStoryBot/staging` namespace, so its posts never count toward production's `quiet` and `repost-loop`. The budget is production-only.
+Staging (`weather-story-bot-staging-*`, on its own `weather-story-bot-staging-alerts` topic) has the same six alarms. Every environment's alarms are created with their actions on, and `mise run pause` / `mise run start` switch them off and on with the schedule, so a paused staging doesn't email about the idleness itself. Staging's alarms are on before its first start, so `missed-runs` and `quiet` email until then. Staging's metrics use the `WeatherStoryBot/staging` namespace, so its posts never count toward production's `quiet` and `repost-loop`. The budget is production-only.
 
-`quiet` and `repost-loop` count the Telegram client's `Telegram message sent` log line through a log metric filter (`WeatherStoryBot/StoriesPosted`), so don't change that message text. It's logged as soon as Telegram accepts a message, so posts whose DynamoDB write then fails still count. "Updated" reposts count too. Until a full day of data exists, `quiet` may show `INSUFFICIENT_DATA`. `nws-ambiguous` counts the handler's `Ambiguous stories from NWS` line (`WeatherStoryBot/AmbiguousStories`), so don't change that message text either.
+`quiet` and `repost-loop` count the event `telegram.message_sent` through a log metric filter (`WeatherStoryBot/StoriesPosted`), and `nws-ambiguous` counts the event `nws.ambiguous_stories` (`WeatherStoryBot/AmbiguousStories`). Message text may change, but an event name may not change without the same change in `infra/monitoring.tf`. The sent event is logged as soon as Telegram accepts a message, so posts whose DynamoDB write then fails still count. "Updated" reposts count too. Until a full day of data exists, `quiet` may show `INSUFFICIENT_DATA`.
 
 ### Tuning thresholds
 
@@ -305,7 +306,7 @@ quiet_alarm_days       = 2  # 1-7; CloudWatch can't look back further than 7 day
 repost_alarm_max_posts = 8  # posts per 3 hours
 ```
 
-If you slow the schedule down to less than once an hour, `missed-runs` will fire on every gap. Change its `period` in `infra/monitoring.tf` to match.
+If you slow the schedule down to less than once an hour, `missed-runs` will fire on every gap. Change its `period` in `infra/monitoring.tf` to match. The `slow-runs` alarm needs a run in each of 2 consecutive 15-minute periods, so a plan fails unless `schedule_expression` is `rate(15 minutes)`. To change the schedule, change that alarm's `period` and its precondition too.
 
 ## Cost estimate
 

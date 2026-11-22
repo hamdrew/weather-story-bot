@@ -94,6 +94,35 @@ locals {
     }
   } }
 
+  # The slow-run alarm's metric in seconds, with its threshold. For information only: it is not a
+  # health signal, so it joins neither verdict rule nor either alarm list.
+  duration_chart = {
+    type = "metric"
+    properties = {
+      view   = "timeSeries"
+      region = var.region
+      title  = "Slowest run: seconds per 15 minutes"
+      metrics = [
+        [{ expression = "m1/1000", label = "Slowest run (seconds)", id = "e1" }],
+        [
+          aws_cloudwatch_metric_alarm.slow_runs.namespace,
+          aws_cloudwatch_metric_alarm.slow_runs.metric_name,
+          "FunctionName",
+          aws_cloudwatch_metric_alarm.slow_runs.dimensions["FunctionName"],
+          { stat = aws_cloudwatch_metric_alarm.slow_runs.statistic, period = aws_cloudwatch_metric_alarm.slow_runs.period, id = "m1", visible = false },
+        ],
+      ]
+      annotations = {
+        horizontal = [{
+          label = "Alarm threshold"
+          value = aws_cloudwatch_metric_alarm.slow_runs.threshold / 1000
+          fill  = "above"
+        }]
+      }
+      yAxis = { left = { min = 0 } }
+    }
+  }
+
   # The words on the page. CloudWatch cannot compute one word from alarm states, so the page shows
   # the two verdict alarms and this key. No date, clock time or environment name appears in any text.
   key_markdown = join("\n", [
@@ -107,7 +136,7 @@ locals {
     "",
     "If the verdict is UNKNOWN, the tiles may show 0 because the bot did not report.",
     "",
-    "A story posted recently goes off only after ${var.quiet_alarm_days} day(s) with no post.",
+    "A story posted recently goes off only after ${var.quiet_alarm_days} day(s) with no post. The slowest-run chart is for information and never changes the verdict.",
   ])
 
   # Alarm lists. The verdict list is unfiltered. "Signals that are off" shows only what is not fine.
@@ -155,6 +184,7 @@ locals {
       height  = 6
       widgets = [for s in slice(local.health_signals, i, min(i + 2, length(local.health_signals))) : { width = 12, widget = local.chart_widgets[s.key] }]
     }],
+    [{ height = 6, widgets = [{ width = 12, widget = local.duration_chart }] }],
   )
 
   # x is the width of what sits to its left in the row, y the height of the rows above.

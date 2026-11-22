@@ -152,6 +152,26 @@ run "production_keeps_the_original_metric_namespace" {
     condition     = aws_cloudwatch_metric_alarm.quiet.namespace == "WeatherStoryBot" && aws_cloudwatch_metric_alarm.repost_loop.namespace == "WeatherStoryBot" && aws_cloudwatch_metric_alarm.nws_ambiguous.namespace == "WeatherStoryBot"
     error_message = "Every custom-metric alarm reads the environment's namespace."
   }
+
+  assert {
+    condition     = aws_cloudwatch_log_metric_filter.stories_posted.pattern == "{ $.event = \"telegram.message_sent\" }" && aws_cloudwatch_log_metric_filter.nws_ambiguous.pattern == "{ $.event = \"nws.ambiguous_stories\" }"
+    error_message = "Each filter counts its event and nothing else (FR-007)."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_log_metric_filter.stories_posted.name == "weather-story-bot-stories-posted" && aws_cloudwatch_log_metric_filter.nws_ambiguous.name == "weather-story-bot-nws-ambiguous"
+    error_message = "The filters keep their names (FR-004)."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_log_metric_filter.stories_posted.metric_transformation[0].name == "StoriesPosted" && aws_cloudwatch_log_metric_filter.nws_ambiguous.metric_transformation[0].name == "AmbiguousStories"
+    error_message = "The filters keep their metric names, so the charted history continues (FR-004)."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_log_metric_filter.stories_posted.metric_transformation[0].value == "1" && aws_cloudwatch_log_metric_filter.nws_ambiguous.metric_transformation[0].value == "1"
+    error_message = "Each matching line still counts as 1 (FR-004)."
+  }
 }
 
 run "staging_has_its_own_metric_namespace" {
@@ -174,6 +194,26 @@ run "staging_has_its_own_metric_namespace" {
   assert {
     condition     = aws_cloudwatch_metric_alarm.quiet.namespace == "WeatherStoryBot/staging" && aws_cloudwatch_metric_alarm.repost_loop.namespace == "WeatherStoryBot/staging" && aws_cloudwatch_metric_alarm.nws_ambiguous.namespace == "WeatherStoryBot/staging"
     error_message = "Every custom-metric alarm reads the environment's namespace."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_log_metric_filter.stories_posted.pattern == "{ $.event = \"telegram.message_sent\" }" && aws_cloudwatch_log_metric_filter.nws_ambiguous.pattern == "{ $.event = \"nws.ambiguous_stories\" }"
+    error_message = "Each filter counts its event and nothing else (FR-007)."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_log_metric_filter.stories_posted.name == "weather-story-bot-staging-stories-posted" && aws_cloudwatch_log_metric_filter.nws_ambiguous.name == "weather-story-bot-staging-nws-ambiguous"
+    error_message = "The filters keep their names (FR-004)."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_log_metric_filter.stories_posted.metric_transformation[0].name == "StoriesPosted" && aws_cloudwatch_log_metric_filter.nws_ambiguous.metric_transformation[0].name == "AmbiguousStories"
+    error_message = "The filters keep their metric names, so the charted history continues (FR-004)."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_log_metric_filter.stories_posted.metric_transformation[0].value == "1" && aws_cloudwatch_log_metric_filter.nws_ambiguous.metric_transformation[0].value == "1"
+    error_message = "Each matching line still counts as 1 (FR-004)."
   }
 }
 
@@ -252,5 +292,126 @@ run "the_ceiling_follows_the_variable" {
   assert {
     condition     = aws_lambda_function.bot.reserved_concurrent_executions == 3
     error_message = "The function's reserved concurrency is var.lambda_max_concurrency."
+  }
+}
+
+run "alarm_emails_name_the_event_to_search_for" {
+  assert {
+    condition = alltrue([
+      strcontains(aws_cloudwatch_metric_alarm.repost_loop.alarm_description, "telegram.message_sent"),
+      strcontains(aws_cloudwatch_metric_alarm.repost_loop.alarm_description, "Story posted"),
+      strcontains(aws_cloudwatch_metric_alarm.nws_ambiguous.alarm_description, "nws.ambiguous_stories"),
+    ])
+    error_message = "The repost-loop and nws-ambiguous emails name the event to search for (FR-009)."
+  }
+
+  assert {
+    condition = alltrue([
+      !strcontains(aws_cloudwatch_metric_alarm.repost_loop.alarm_description, "Telegram message sent"),
+      !strcontains(aws_cloudwatch_metric_alarm.nws_ambiguous.alarm_description, "Ambiguous stories from NWS"),
+    ])
+    error_message = "The emails no longer point at message text (FR-009)."
+  }
+
+  assert {
+    condition     = strcontains(aws_cloudwatch_metric_alarm.repost_loop.alarm_description, local.logs_console_url) && strcontains(aws_cloudwatch_metric_alarm.nws_ambiguous.alarm_description, local.logs_console_url)
+    error_message = "Both emails still link to the logs."
+  }
+
+  assert {
+    condition     = strcontains(aws_cloudwatch_metric_alarm.quiet.alarm_description, "Run complete")
+    error_message = "The quiet email still points at the Run complete summaries (FR-009)."
+  }
+}
+
+# Two consecutive breaching periods need a run in each one. On a slower schedule the empty periods
+# count as not breaching, so the alarm could never fire.
+run "the_slow_run_alarm_refuses_a_schedule_it_cannot_see" {
+  command = plan
+
+  variables {
+    schedule_expression = "rate(30 minutes)"
+  }
+
+  expect_failures = [aws_cloudwatch_metric_alarm.slow_runs]
+}
+
+run "production_has_the_slow_run_alarm" {
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.slow_runs.alarm_name == "weather-story-bot-slow-runs" && aws_cloudwatch_metric_alarm.slow_runs.dimensions.FunctionName == aws_lambda_function.bot.function_name && aws_lambda_function.bot.function_name == "weather-story-bot"
+    error_message = "Production's slow-run alarm is named from local.name and reads its own function."
+  }
+
+  assert {
+    condition = alltrue([
+      aws_cloudwatch_metric_alarm.slow_runs.namespace == "AWS/Lambda",
+      aws_cloudwatch_metric_alarm.slow_runs.metric_name == "Duration",
+      aws_cloudwatch_metric_alarm.slow_runs.statistic == "Maximum",
+      aws_cloudwatch_metric_alarm.slow_runs.period == 900,
+      aws_cloudwatch_metric_alarm.slow_runs.evaluation_periods == 2,
+      aws_cloudwatch_metric_alarm.slow_runs.datapoints_to_alarm == 2,
+      aws_cloudwatch_metric_alarm.slow_runs.comparison_operator == "GreaterThanThreshold",
+      aws_cloudwatch_metric_alarm.slow_runs.threshold == 60000,
+      aws_cloudwatch_metric_alarm.slow_runs.treat_missing_data == "notBreaching",
+      aws_cloudwatch_metric_alarm.slow_runs.actions_enabled == true,
+    ])
+    error_message = "The alarm fires when the maximum Duration is above 60,000 ms in 2 consecutive 15-minute periods, and no runs is not breaching (FR-013, FR-014, FR-017)."
+  }
+
+  assert {
+    condition = alltrue([
+      strcontains(aws_cloudwatch_metric_alarm.slow_runs.alarm_description, "60 seconds"),
+      strcontains(aws_cloudwatch_metric_alarm.slow_runs.alarm_description, "300 seconds"),
+      strcontains(aws_cloudwatch_metric_alarm.slow_runs.alarm_description, "record.metrics.durationMs"),
+    ])
+    error_message = "The email states the threshold, the function's time limit and where to read each run's duration (FR-016)."
+  }
+
+  assert {
+    condition     = contains(output.alarm_names, aws_cloudwatch_metric_alarm.slow_runs.alarm_name)
+    error_message = "Start and pause must switch the slow-run alarm (FR-015, FR-017)."
+  }
+}
+
+run "staging_has_its_own_slow_run_alarm" {
+  variables {
+    environment               = "staging"
+    permissions_boundary_arn  = "arn:aws:iam::123456789012:policy/weather-story-bot-staging-boundary"
+    telegram_token_param_name = "/weather-story-bot-staging/telegram-token"
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.slow_runs.alarm_name == "weather-story-bot-staging-slow-runs" && aws_cloudwatch_metric_alarm.slow_runs.dimensions.FunctionName == aws_lambda_function.bot.function_name && aws_lambda_function.bot.function_name == "weather-story-bot-staging"
+    error_message = "Staging's slow-run alarm is named from local.name and reads its own function."
+  }
+
+  assert {
+    condition = alltrue([
+      aws_cloudwatch_metric_alarm.slow_runs.namespace == "AWS/Lambda",
+      aws_cloudwatch_metric_alarm.slow_runs.metric_name == "Duration",
+      aws_cloudwatch_metric_alarm.slow_runs.statistic == "Maximum",
+      aws_cloudwatch_metric_alarm.slow_runs.period == 900,
+      aws_cloudwatch_metric_alarm.slow_runs.evaluation_periods == 2,
+      aws_cloudwatch_metric_alarm.slow_runs.datapoints_to_alarm == 2,
+      aws_cloudwatch_metric_alarm.slow_runs.comparison_operator == "GreaterThanThreshold",
+      aws_cloudwatch_metric_alarm.slow_runs.threshold == 60000,
+      aws_cloudwatch_metric_alarm.slow_runs.treat_missing_data == "notBreaching",
+      aws_cloudwatch_metric_alarm.slow_runs.actions_enabled == true,
+    ])
+    error_message = "The alarm fires when the maximum Duration is above 60,000 ms in 2 consecutive 15-minute periods, and no runs is not breaching (FR-013, FR-014, FR-017)."
+  }
+
+  assert {
+    condition = alltrue([
+      strcontains(aws_cloudwatch_metric_alarm.slow_runs.alarm_description, "60 seconds"),
+      strcontains(aws_cloudwatch_metric_alarm.slow_runs.alarm_description, "300 seconds"),
+      strcontains(aws_cloudwatch_metric_alarm.slow_runs.alarm_description, "record.metrics.durationMs"),
+    ])
+    error_message = "The email states the threshold, the function's time limit and where to read each run's duration (FR-016)."
+  }
+
+  assert {
+    condition     = contains(output.alarm_names, aws_cloudwatch_metric_alarm.slow_runs.alarm_name)
+    error_message = "Start and pause must switch the slow-run alarm (FR-015, FR-017)."
   }
 }

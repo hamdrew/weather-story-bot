@@ -44,14 +44,16 @@ run "the_staging_role_names_only_staging_resources" {
 # A * inside a name (not a :* or /* after it) would be a prefix pattern. ? is allowed on schedules
 # only, where each_environment_creates_its_own_offices_schedules_and_never_the_others checks it
 # against real names: enough of them elsewhere ("????????" matches "-staging") would reach staging.
+# Alarms are the one accepted exception: weather-story-bot-* also matches staging's alarm names, a
+# trade-off the owner accepted (research R5 in specs/002-log-alarm-events).
 run "the_production_role_uses_no_prefix_pattern" {
   assert {
     condition = alltrue(flatten([
       for s in({ for env in ["staging", "production"] : env => flatten([for k, doc in data.aws_iam_policy_document.apply : doc.statement if startswith(k, "${env}-")]) })["production"] : [
-        for r in s.resources : !strcontains(r, "staging") && !can(regex("weather-story-bot[^:/]*\\*", r)) && (!strcontains(r, "?") || startswith(r, "arn:aws:scheduler:"))
+        for r in s.resources : r == "arn:aws:cloudwatch:us-east-2:123456789012:alarm:weather-story-bot-*" || (!strcontains(r, "staging") && !can(regex("weather-story-bot[^:/]*\\*", r)) && (!strcontains(r, "?") || startswith(r, "arn:aws:scheduler:")))
       ] if s.effect == "Allow" && !contains(["NoResourceLevelReads", "StateList", "CompositeAlarmWrite"], s.sid)
     ]))
-    error_message = "Production's names are a prefix of staging's, so no production name may use * or (outside schedules) ?: it could match staging."
+    error_message = "Production's names are a prefix of staging's, so no production name may use * or (outside schedules) ?: it could match staging. The alarm pattern weather-story-bot-* is the one accepted exception."
   }
 }
 
@@ -360,21 +362,21 @@ run "each_environment_creates_its_own_offices_schedules_and_never_the_others" {
   }
 }
 
-run "each_environment_creates_its_own_misconfigured_alarm" {
+run "each_role_reaches_the_alarm_names_it_should" {
   assert {
     condition = jsonencode({
       for env, d in local.apply_statements : env => [
-        for name in ["weather-story-bot-errors", "weather-story-bot-misconfigured", "weather-story-bot-staging-errors", "weather-story-bot-staging-misconfigured"] : name if anytrue(flatten([
+        for name in ["weather-story-bot-errors", "weather-story-bot-misconfigured", "weather-story-bot-slow-runs", "weather-story-bot-staging-errors", "weather-story-bot-staging-misconfigured", "weather-story-bot-staging-slow-runs"] : name if anytrue(flatten([
           for s in d : [
             for r in s.resources : can(regex("^${replace(replace(replace(r, ".", "\\."), "*", ".*"), "?", ".")}$", "arn:aws:cloudwatch:us-east-2:123456789012:alarm:${name}"))
           ] if s.sid == "Creates"
         ]))
       ]
       }) == jsonencode({
-      "staging"    = ["weather-story-bot-staging-errors", "weather-story-bot-staging-misconfigured"]
-      "production" = ["weather-story-bot-errors", "weather-story-bot-misconfigured"]
+      "staging"    = ["weather-story-bot-staging-errors", "weather-story-bot-staging-misconfigured", "weather-story-bot-staging-slow-runs"]
+      "production" = ["weather-story-bot-errors", "weather-story-bot-misconfigured", "weather-story-bot-slow-runs", "weather-story-bot-staging-errors", "weather-story-bot-staging-misconfigured", "weather-story-bot-staging-slow-runs"]
     })
-    error_message = "Each environment creates its own misconfigured alarm, and never the other's alarms."
+    error_message = "Staging reaches only its own alarm names. Production's weather-story-bot-* pattern reaches every alarm name, staging's included (research R5)."
   }
 }
 
@@ -415,16 +417,14 @@ run "the_verdict_composite_alarms_are_inside_each_roles_alarm_names" {
       ]
       }) == jsonencode({
       "staging"    = ["weather-story-bot-staging-unknown", "weather-story-bot-staging-not-healthy"]
-      "production" = ["weather-story-bot-unknown", "weather-story-bot-not-healthy"]
+      "production" = ["weather-story-bot-unknown", "weather-story-bot-not-healthy", "weather-story-bot-staging-unknown", "weather-story-bot-staging-not-healthy"]
     })
-    error_message = "Each role creates, changes and tags its own two verdict composites and never the other environment's."
+    error_message = "Each role creates, changes and tags its own two verdict composites. Staging never reaches production's, and production's pattern also reaches staging's (research R5)."
   }
 
   assert {
-    condition = alltrue([
-      for r in local.names["production"].alarm : !strcontains(r, "*")
-    ]) && contains(local.names["production"].alarm, "weather-story-bot-unknown") && contains(local.names["production"].alarm, "weather-story-bot-not-healthy")
-    error_message = "Production names its alarms exactly, composites included."
+    condition     = jsonencode(local.names["production"].alarm) == jsonencode(["weather-story-bot-*"])
+    error_message = "Production's alarm names are the one accepted prefix pattern (research R5)."
   }
 }
 
@@ -468,7 +468,8 @@ run "put_composite_alarm_is_the_only_write_on_star" {
 
 # The tests cannot read .json (the mock returns {}), so this is an upper-bound proxy over the
 # statements: compact JSON plus the document wrapper. The real document merges one-element arrays
-# into strings, so it is a little smaller. Production's three groups measure 4,171, 4,039 and 4,437.
+# into strings, so it is a little smaller. Production's three groups measured 4,171, 4,039 and 4,437
+# before its alarm names became one pattern, which only shrinks them.
 run "each_apply_policy_group_stays_under_the_size_budget" {
   assert {
     condition = alltrue([

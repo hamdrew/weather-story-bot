@@ -29,7 +29,7 @@ the table in step with the code.
 | BR1.2 | An event name is lowercase, in the form `area.what` (area: nws, telegram, office, story, store, history or run), with one name per call. |
 | BR1.3 | The two signal events are fixed: the message-sent line is `telegram.message_sent` and the ambiguous-stories error is `nws.ambiguous_stories`. Renaming either needs the same change in the alarm filters and both drift tests. |
 | BR1.4 | No INFO call other than the message-sent line gets an event. |
-| BR1.5 | Message text does not change while the events are added, so the message-based alarm filters keep matching until they move to the event. |
+| BR1.5 | Message text did not change while the events were added, and the alarm filters now match the event, so message text can change without affecting an alarm. |
 | BR2.1 | Extra field names are lowercase snake_case, none is a reserved `LogRecord` attribute, and none repeats a name the runtime or the bot owns: `timestamp`, `level`, `logger`, `message`, `requestId`, `location`, `office` or `asctime`. |
 | BR2.2 | One meaning per field name: an HTTP status is `http_status` (`status` stays the story's `new` or `updated`); an exception is `error`, set to `repr(exc)`; a Telegram message id is `telegram_message_id`. |
 | BR2.3 | A caught failure is logged at ERROR with its stack trace; a recoverable condition is logged at WARNING with no stack trace, and with an `error` field when an exception caused it. |
@@ -37,7 +37,7 @@ the table in step with the code.
 | BR3.1 | No log line carries a secret: never a Telegram URL, request object or environment mapping; exception text is built from the exception type or Telegram's description only; `httpx` and `httpcore` stay capped at WARNING. |
 | BR3.2 | No log line carries a full request or response body, a caption or image bytes; fields hold identifiers and short metadata. |
 | BR3.3 | A test proves the token never reaches a log line (see "What U2 must build"). |
-| BR4.1 | Moved to U4: a slow run is caught by an alarm on the Lambda `Duration` metric above 150 seconds, not by a log line. |
+| BR4.1 | Carried out in U4: a slow run is caught by an alarm on the Lambda `Duration` metric above 60 seconds, not by a log line. |
 | BR4.2 | An NWS listing with no active stories gets no new warning. |
 
 ## Table 1. Inventory, with decided event names
@@ -89,7 +89,7 @@ Counts: 7 WARNING, 7 ERROR, 5 INFO (19 calls). The handler's logger is the fixed
 | D2 | F2 | change | u2-log-events | Use `error` = `repr(exc)` in L07, L11, L13 and L19; L13's `reason` becomes `error`; L17 already conforms (BR2.2). The `repr` value includes the exception's class name, so L13's field reads `_PhotoRejectedError('...')`, a private class name; this is accepted, since it is only a label beside Telegram's description. U2 re-checks the tests that read `error`, `reason`, `status` and `message_id` before renaming. |
 | D3 | F3 | change | u2-log-events | Rename L15's `message_id` to `telegram_message_id` (BR2.2). |
 | D4 | F4 | change | u2-log-events | Add the events of table 1 to every WARNING and ERROR call and to L14 (BR1.1, BR1.3). |
-| D5 | F8 | moved | u4-sturdy-alarms | A `Duration` alarm above 150 s replaces the planned `run.slow` warning (BR4.1). U2 adds no slow-run code. |
+| D5 | F8 | done | u4-sturdy-alarms | A `Duration` alarm above 60 s replaces the planned `run.slow` warning (BR4.1). U2 adds no slow-run code. |
 | D6 | F6 | change | u2-log-events | Add the test that the Telegram error paths never log the token (BR3.3). |
 | D7 | F5 | keep | none | Leave L15's text as it is. |
 | D8 | F7 | keep | none | Leave the logger names as they are; kinds come from events (BR1.1). |
@@ -107,9 +107,15 @@ Counts: 7 WARNING, 7 ERROR, 5 INFO (19 calls). The handler's logger is the fixed
 
 ## The slow-run check
 
-The bot no longer logs a slow run. U4 adds an alarm on the Lambda `Duration` metric's maximum above 150 seconds (half
-the unchanged 300-second limit); the runtime's `REPORT` line, kept by the INFO system log level, shows each run's
-duration and memory beside the run's own lines.
+The bot no longer logs a slow run. The `slow-runs` alarm fires when the Lambda `Duration` metric's maximum is above 60
+seconds in 2 consecutive 15-minute periods, under the unchanged 300-second limit. Each run's duration is at
+`record.metrics.durationMs` on `platform.report` lines, which the INFO system log level keeps beside the run's own lines.
+
+## Rollback
+
+A rollback to code from before U2 also requires reverting the change that moved the alarm filters to events, because
+those older lines have no `event`. Otherwise `quiet` raises a false alert while `repost-loop` and `nws-ambiguous` go
+blind.
 
 ## Edge cases
 
@@ -131,12 +137,12 @@ duration and memory beside the run's own lines.
 
 ## What U4 and U5 take from this
 
-- U4 filters on the two signal names: `telegram.message_sent` (for the `quiet` and `repost-loop` alarms) and `nws.ambiguous_stories`.
-- U4 adds the `Duration` alarm above 150 s that replaces `run.slow`.
+- U4 has moved the filters to the two signal names: `telegram.message_sent` (for the `quiet` and `repost-loop` alarms) and `nws.ambiguous_stories`.
+- U4 has added the `Duration` alarm above 60 s that replaces `run.slow`.
 - U4 and U5 count only lines that have an `event`, or a library's `logger` at WARNING or above. The runtime's own lines (`START`, `END`, `REPORT` and its report of an unhandled error) are never counted: failed runs come from the `Errors` metric and slow runs from `Duration`.
 - U5 counts by `level` and shows kinds from `event`. The spelling of `level` for a warning (`WARNING` or `WARN`) is unverified: confirm it from a real WARNING line on staging first.
 
 ## Assumptions
 
-- The Lambda timeout stays 300 s (`infra/lambda.tf`); if it changes, the 150 s threshold in U4's `Duration` alarm is revisited.
-- Normal runs finish well under 150 s, so U4's alarm rarely fires; the first week on staging shows whether the threshold is right.
+- The Lambda timeout stays 300 s (`infra/lambda.tf`); if it changes, the 60 s threshold in U4's `Duration` alarm is revisited.
+- Normal runs finish well under 60 s, so U4's alarm rarely fires; the first week in production shows whether the threshold is right.

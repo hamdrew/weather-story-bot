@@ -468,8 +468,8 @@ def test_one_log_line_per_recorded_post(
     mkx_payload: dict[str, Any],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    # "Story posted" marks a recorded post; the repost-loop runbook compares it with
-    # "Telegram message sent", which is what the StoriesPosted metric filter counts.
+    # "Story posted" marks a recorded post; the repost-loop runbook compares it with lines
+    # carrying the event `telegram.message_sent`, which the StoriesPosted metric filter counts.
     def statuses() -> list[str]:
         return [vars(r)["status"] for r in caplog.records if r.getMessage() == "Story posted"]
 
@@ -539,8 +539,8 @@ def test_post_is_counted_even_when_recording_fails(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The StoriesPosted CloudWatch metric filter matches "Telegram message sent", so the
-    # repost-loop alarm must still see posts whose DynamoDB write fails.
+    # The StoriesPosted CloudWatch metric filter counts the event `telegram.message_sent`, so
+    # the repost-loop alarm must still see posts whose DynamoDB write fails.
     def fail(*_: object, **__: object) -> None:
         raise RuntimeError("PutItem throttled")
 
@@ -551,7 +551,7 @@ def test_post_is_counted_even_when_recording_fails(
 
     assert summary["MKX"]["failed"] == 2
     messages = [r.getMessage() for r in caplog.records]
-    assert messages.count("Telegram message sent") == 2
+    assert sum(vars(r).get("event") == "telegram.message_sent" for r in caplog.records) == 2
     assert "Story posted" not in messages
 
 
@@ -668,7 +668,7 @@ def test_log_lines_carry_their_own_office_and_never_a_stale_one(
     posted = [r for r in caplog.records if r.getMessage() == "Story posted"]
     assert {vars(r)["office"] for r in posted} == {"MKX"}
     # Child modules' loggers get it too, not only handler's.
-    sent = [r for r in caplog.records if r.getMessage() == "Telegram message sent"]
+    sent = [r for r in caplog.records if vars(r).get("event") == "telegram.message_sent"]
     assert sent
     assert {r.name for r in sent} == {"weather_story_bot.telegram"}
     assert {vars(r)["office"] for r in sent} == {"MKX"}
@@ -705,7 +705,7 @@ def test_lambda_handler_end_to_end(
     assert [r["aws_request_id"]["S"] for r in run_records] == ["test-request-id"] * 2
 
     complete = [r for r in caplog.records if r.getMessage() == "Run complete"]
-    sent = [r for r in caplog.records if r.getMessage() == "Telegram message sent"]
+    sent = [r for r in caplog.records if vars(r).get("event") == "telegram.message_sent"]
     assert len(sent) == 2
     # Run complete spans every office, so it carries no single office's id.
     assert all("office" not in vars(r) for r in complete)

@@ -19,13 +19,21 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 REVIEW = ROOT / "docs" / "logging-review.md"
 SRC = ROOT / "src" / "weather_story_bot"
+INFRA = ROOT / "infra"
 
 _LEVELS = {"debug": "DEBUG", "info": "INFO", "warning": "WARNING", "error": "ERROR"}
 _LEVELS |= {"exception": "ERROR", "critical": "CRITICAL"}
 _EVENT = re.compile(r"^(nws|telegram|office|story|store|history|run)\.[a-z_]+$")
 _FIELD = re.compile(r"^[a-z][a-z0-9_]*$")
-_SENT = "Telegram message sent"
+_SENT_EVENT = "telegram.message_sent"
+_SIGNAL_EVENTS = {_SENT_EVENT, "nws.ambiguous_stories"}
 _MUST_HAVE_EVENT = {"WARNING", "ERROR", "CRITICAL"}
+_METRIC_FILTER = re.compile(
+    r'^resource "aws_cloudwatch_log_metric_filter" "([^"]+)" \{\n(.*?)^\}', re.DOTALL | re.MULTILINE
+)
+_FILTER_PATTERN = re.compile(r'^\s*pattern\s*=\s*"((?:[^"\\]|\\.)*)"\s*$', re.MULTILINE)
+# The pattern as HCL writes it, with its inner quotes escaped.
+_EVENT_PATTERN = re.compile(r'\{ \$\.event = \\"([^"\\]+)\\" \}')
 # Names the runtime's line or Python's logging owns (FR-009): every LogRecord attribute, plus
 # the keys the runtime adds (it drops an extra named `location`) and `office`, which the bot's
 # record factory stamps.
@@ -107,11 +115,11 @@ def _problems(calls: list[LogCall]) -> list[str]:
     """One message per broken rule, each naming the module, line and message."""
     problems = []
     for call in calls:
-        needs_event = call.level in _MUST_HAVE_EVENT or call.message == _SENT
+        needs_event = call.level in _MUST_HAVE_EVENT
         if needs_event and call.event is None:
             reason = "event is not a str constant" if call.has_event else "has no event"
             problems.append(f"{call.where}: {reason}")
-        if not needs_event and call.has_event:
+        if not needs_event and call.has_event and call.event != _SENT_EVENT:
             problems.append(f"{call.where}: an event on a call that should have none")
         for key in call.keys:
             if key in _FORBIDDEN_KEYS:
@@ -153,6 +161,24 @@ def _levels_by_message(calls: list[LogCall]) -> dict[str, str]:
     return {call.message: call.level for call in calls}
 
 
+def _filter_events(source: str) -> dict[str, str | None]:
+    """Each metric filter's event, or None unless its pattern is exactly one `$.event` match."""
+    events: dict[str, str | None] = {}
+    for name, body in _METRIC_FILTER.findall(source):
+        pattern = _FILTER_PATTERN.search(body)
+        match = _EVENT_PATTERN.fullmatch(pattern.group(1)) if pattern else None
+        events[name] = match.group(1) if match else None
+    return events
+
+
+def _infra_filter_events() -> dict[str, str | None]:
+    """The events of the metric filters in every Terraform file of the main stack."""
+    events: dict[str, str | None] = {}
+    for path in sorted(INFRA.glob("*.tf")):
+        events |= _filter_events(path.read_text())
+    return events
+
+
 def test_every_log_message_in_src_is_in_the_review():
     calls = _src_calls()
     reviewed = {row["message"] for row in _inventory()}
@@ -176,9 +202,7 @@ def test_warnings_and_errors_have_events_and_only_the_sent_line_among_info_does(
     for row in _inventory():
         if row["level"] in _MUST_HAVE_EVENT:
             assert row["event"], f"{row['id']} ({row['level']}) has no event"
-        elif row["message"] == _SENT:
-            assert row["event"] == "telegram.message_sent"
-        else:
+        elif row["event"] != _SENT_EVENT:
             assert not row["event"], f"{row['id']} ({row['level']}) should have no event"
 
 
@@ -206,6 +230,60 @@ def test_event_constants_in_src_match_table_1():
     assert _event_set_diff(code, table) == ""
 
 
+def test_every_metric_filter_counts_an_event():
+    events = _infra_filter_events()
+    assert events, "no metric filters found in infra/*.tf"
+    missing = sorted(name for name, event in events.items() if event is None)
+    assert not missing, f"metric filters that do not match on $.event alone: {missing}"
+
+
+def test_the_filters_count_exactly_the_signal_events():
+    filtered = {event for event in _infra_filter_events().values() if event}
+    uncounted = sorted(_SIGNAL_EVENTS - filtered)
+    unexpected = sorted(filtered - _SIGNAL_EVENTS)
+    assert filtered == _SIGNAL_EVENTS, (
+        f"signal events no filter in infra/*.tf counts: {uncounted}; "
+        f"filter events that are not signal events: {unexpected}"
+    )
+
+
+@pytest.mark.parametrize("event", sorted(_SIGNAL_EVENTS))
+def test_each_signal_event_is_emitted_and_in_table_1(event: str):
+    assert event in {call.event for call in _src_calls()}, f"{event} is not emitted in src/"
+    assert event in {row["event"] for row in _inventory()}, (
+        f"{event} is not listed in docs/logging-review.md table 1"
+    )
+
+
+@pytest.mark.parametrize("event", sorted(_SIGNAL_EVENTS))
+def test_each_signal_event_has_exactly_one_call(event: str):
+    # A second call would count the same post or rejection twice in the alarm's metric.
+    emitters = [call.where for call in _src_calls() if call.event == event]
+    assert len(emitters) == 1, f"{event} must be emitted by exactly one call: {emitters}"
+
+
+def test_each_call_carries_the_event_of_its_table_1_row():
+    table = {row["message"]: row["event"] for row in _inventory()}
+    mismatched = [
+        f"{call.where}: {call.event!r} in src/, {table[call.message]!r} in table 1"
+        for call in _src_calls()
+        if call.message in table and (call.event or "") != table[call.message]
+    ]
+    assert not mismatched, "\n".join(mismatched)
+
+
+def test_filter_events_reads_only_an_exact_event_pattern():
+    template = (
+        'resource "aws_cloudwatch_log_metric_filter" "sample" {{\n  pattern = "{pattern}"\n}}\n'
+    )
+    by_event = template.format(pattern=r"{ $.event = \"nws.boom\" }")
+    by_message = template.format(pattern=r"{ $.message = \"Boom\" }")
+    by_both = template.format(pattern=r"{ $.event = \"nws.boom\" && $.level = \"ERROR\" }")
+    assert _filter_events(by_event) == {"sample": "nws.boom"}
+    assert _filter_events(by_message) == {"sample": None}
+    assert _filter_events(by_both) == {"sample": None}
+
+
 # One bad sample per rule, so each rule is shown to fail and to name its call.
 
 _GOOD_EVENT = '"event": "nws.boom"'
@@ -223,10 +301,6 @@ def _problems_in(source: str) -> list[str]:
             "sample.py:1 WARNING 'Boom': has no event",
         ),
         ('logger.warning("Boom")', "sample.py:1 WARNING 'Boom': has no event"),
-        (
-            f'logger.info("{_SENT}", extra={{"chat_id": "1"}})',
-            f"sample.py:1 INFO '{_SENT}': has no event",
-        ),
         (
             f'logger.info("Fine", extra={{{_GOOD_EVENT}}})',
             "sample.py:1 INFO 'Fine': an event on a call that should have none",
@@ -260,10 +334,6 @@ def _problems_in(source: str) -> list[str]:
             "logger.warning('Boom', extra=some_dict)",
             "sample.py:1 WARNING 'Boom': has no event",
         ),
-        (
-            f'logger.info("{_SENT}", extra=some_dict)',
-            f"sample.py:1 INFO '{_SENT}': has no event",
-        ),
     ],
 )
 def test_a_broken_rule_is_reported_with_its_call(source: str, expected: str):
@@ -279,6 +349,10 @@ def test_a_well_formed_call_reports_nothing():
         "build = logging.getLogRecordFactory()\n"
     )
     assert _problems_in(source) == []
+
+
+def test_the_sent_event_may_carry_reworded_text():
+    assert _problems_in('logger.info("Reworded", extra={"event": "telegram.message_sent"})') == []
 
 
 def test_an_info_call_may_pass_a_built_dict_without_an_event():

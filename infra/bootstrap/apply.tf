@@ -2,6 +2,8 @@
 # GitHub environment. An apply role reaches only its environment's resources: staging by name
 # prefix, production by exact name or a ? pattern no staging name can match (locals.tf), plus
 # Environment tag conditions where the service supports them (some services have no tag condition keys).
+# The one exception is production's alarm pattern, which also matches staging's alarms (research R5
+# in specs/002-log-alarm-events).
 # Roles it creates or changes must carry the environment's own permissions boundary, and nothing
 # here can change or delete a boundary.
 locals {
@@ -170,8 +172,10 @@ locals {
         sid     = "Tags"
         actions = flatten([for svc, d in local.services : d.tag])
         # Only this environment's names, and only its own Environment value, so a role can't retag a
-        # resource into another environment. No aws:ResourceTag: creating a tagged resource
-        # also authorizes the tag action on it, and a resource that doesn't exist yet has no tags.
+        # resource into another environment. The exception is production's alarm pattern, which lets
+        # its role retag a staging alarm as production (research R5). No aws:ResourceTag: creating a
+        # tagged resource also authorizes the tag action on it, and a resource that doesn't exist yet
+        # has no tags.
         resources  = local.service_resources[env].all
         conditions = [local.tag_conditions[env].request, local.tag_conditions[env].keys]
       },
