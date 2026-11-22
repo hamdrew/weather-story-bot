@@ -207,17 +207,16 @@ def test_sent_log_marks_every_accepted_message(
     response: httpx.Response,
     sent: bool,
 ) -> None:
-    # The StoriesPosted CloudWatch metric filter matches this exact message.
+    # The StoriesPosted CloudWatch metric filter counts the event `telegram.message_sent`.
     respx.post(PHOTO_URL).mock(return_value=response)
     caplog.set_level(logging.INFO, logger="weather_story_bot")
 
     with contextlib.suppress(TelegramError):
         client.send_photo("-1001", b"x", "cap", "a.png")
 
-    records = [r for r in caplog.records if r.getMessage() == "Telegram message sent"]
+    records = [r for r in caplog.records if vars(r).get("event") == "telegram.message_sent"]
     expected = [("-1001", "a.png")] if sent else []
     assert [(vars(r)["chat_id"], vars(r)["image_filename"]) for r in records] == expected
-    assert all(vars(r)["event"] == "telegram.message_sent" for r in records)
     assert all(r.levelno == logging.INFO and r.exc_info is None for r in records)
     # No other INFO record carries an event: only the sent line is a signal.
     assert all("event" not in vars(r) for r in caplog.records if r not in records)
@@ -242,7 +241,7 @@ def test_delete_message_sends_ids_and_logs(
     assert (vars(deleted)["chat_id"], vars(deleted)["telegram_message_id"]) == ("-1001", 7)
     assert "message_id" not in vars(deleted)
     assert "event" not in vars(deleted)
-    assert "Telegram message sent" not in [r.getMessage() for r in caplog.records]
+    assert all(vars(r).get("event") != "telegram.message_sent" for r in caplog.records)
 
 
 @respx.mock

@@ -110,8 +110,8 @@ locals {
       tag         = []
     }
     # The health dashboard. A dashboard has no tags, so it takes no tag condition and no tag action;
-    # it is named like the alarms (staging by prefix, production exactly), and PutDashboard both
-    # creates and updates it.
+    # staging matches it by prefix and production by its exact name, and PutDashboard both creates
+    # and updates it.
     dashboards = {
       sid         = "Dashboard"
       kind        = "dashboard"

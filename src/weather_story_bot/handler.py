@@ -218,8 +218,7 @@ def _apply_decisions(
     """Log and record rejections once per office, then act on every remaining decision."""
     rejected = [d for d in decisions if d.outcome is Outcome.REJECTED]
     if rejected:
-        # The `nws-ambiguous` alarm's metric filter matches this exact ERROR message, and the
-        # event `nws.ambiguous_stories` is the signal that replaces it.
+        # The `nws-ambiguous` alarm's metric filter counts the event `nws.ambiguous_stories`.
         logger.error(
             "Ambiguous stories from NWS",
             extra={

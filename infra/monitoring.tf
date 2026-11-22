@@ -6,12 +6,15 @@ locals {
     aws_cloudwatch_metric_alarm.quiet.alarm_name,
     aws_cloudwatch_metric_alarm.repost_loop.alarm_name,
     aws_cloudwatch_metric_alarm.nws_ambiguous.alarm_name,
+    aws_cloudwatch_metric_alarm.slow_runs.alarm_name,
   ]
   # Per environment: the metric filters have no dimensions, so a shared namespace would pour
   # staging's posts into production's quiet and repost-loop alarms. Production keeps the original
   # namespace so its metric history (and the quiet alarm's data) carries on.
   metric_namespace = local.production ? "WeatherStoryBot" : "WeatherStoryBot/${var.environment}"
   logs_console_url = "https://${var.region}.console.aws.amazon.com/cloudwatch/home?region=${var.region}#logsV2:log-groups/log-group/${replace(aws_cloudwatch_log_group.lambda.name, "/", "$252F")}"
+  # One value for the slow-run alarm's threshold and its email.
+  slow_run_threshold_seconds = 60
 }
 
 # Left unencrypted on purpose: CloudWatch alarms can't publish to a topic encrypted
@@ -29,11 +32,11 @@ resource "aws_sns_topic_subscription" "alerts_email" {
 }
 
 # Counts every message Telegram accepts (new posts and "Updated" reposts), including ones whose
-# DynamoDB record then fails. Depends on the Telegram client's exact "Telegram message sent" message.
+# DynamoDB record then fails. Counts the event telegram.message_sent and does not depend on message text.
 resource "aws_cloudwatch_log_metric_filter" "stories_posted" {
   name           = "${local.name}-stories-posted"
   log_group_name = aws_cloudwatch_log_group.lambda.name
-  pattern        = "{ $.message = \"Telegram message sent\" }"
+  pattern        = "{ $.event = \"telegram.message_sent\" }"
 
   metric_transformation {
     name      = "StoriesPosted"
@@ -123,7 +126,7 @@ resource "aws_cloudwatch_metric_alarm" "quiet" {
 
 resource "aws_cloudwatch_metric_alarm" "repost_loop" {
   alarm_name        = "${local.name}-repost-loop"
-  alarm_description = "More than ${var.repost_alarm_max_posts} stories were posted in 3 hours, so the bot may be reposting the same stories (for example, DynamoDB writes failing after each post). Check the Telegram channel for duplicates and the logs for \"Telegram message sent\" lines with repeated image_filename values that have no matching \"Story posted\" line: ${local.logs_console_url}"
+  alarm_description = "More than ${var.repost_alarm_max_posts} stories were posted in 3 hours, so the bot may be reposting the same stories (for example, DynamoDB writes failing after each post). Check the Telegram channel for duplicates and the logs for lines with event telegram.message_sent and repeated image_filename values that have no matching \"Story posted\" line: ${local.logs_console_url}"
 
   namespace           = local.metric_namespace
   metric_name         = aws_cloudwatch_log_metric_filter.stories_posted.metric_transformation[0].name
@@ -143,12 +146,13 @@ resource "aws_cloudwatch_metric_alarm" "repost_loop" {
   }
 }
 
-# One line per office per run while NWS lists ambiguous stories. Depends on the handler's exact
-# "Ambiguous stories from NWS" message. Rejections don't fail the run, so the errors alarm stays quiet.
+# One line per office per run while NWS lists ambiguous stories. Counts the event
+# nws.ambiguous_stories and does not depend on message text. Rejections don't fail the run, so the
+# errors alarm stays quiet.
 resource "aws_cloudwatch_log_metric_filter" "nws_ambiguous" {
   name           = "${local.name}-nws-ambiguous"
   log_group_name = aws_cloudwatch_log_group.lambda.name
-  pattern        = "{ $.message = \"Ambiguous stories from NWS\" }"
+  pattern        = "{ $.event = \"nws.ambiguous_stories\" }"
 
   metric_transformation {
     name      = "AmbiguousStories"
@@ -159,7 +163,7 @@ resource "aws_cloudwatch_log_metric_filter" "nws_ambiguous" {
 
 resource "aws_cloudwatch_metric_alarm" "nws_ambiguous" {
   alarm_name        = "${local.name}-nws-ambiguous"
-  alarm_description = "NWS listed active stories that share an image ID, a title and start time, or an identical image, so the bot skipped all of them. No action is needed if NWS fixes its data; the OK email follows once a run sees a clean listing. Check the \"stories\" and \"reasons\" fields of \"Ambiguous stories from NWS\" lines in the logs and compare with each office's weather.gov weatherstory page: ${local.logs_console_url}"
+  alarm_description = "NWS listed active stories that share an image ID, a title and start time, or an identical image, so the bot skipped all of them. No action is needed if NWS fixes its data; the OK email follows once a run sees a clean listing. Check the \"stories\" and \"reasons\" fields of lines with event nws.ambiguous_stories in the logs and compare with each office's weather.gov weatherstory page: ${local.logs_console_url}"
 
   namespace           = local.metric_namespace
   metric_name         = aws_cloudwatch_log_metric_filter.nws_ambiguous.metric_transformation[0].name
@@ -177,6 +181,40 @@ resource "aws_cloudwatch_metric_alarm" "nws_ambiguous" {
 
   lifecycle {
     ignore_changes = [actions_enabled]
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "slow_runs" {
+  alarm_name        = "${local.name}-slow-runs"
+  alarm_description = "The slowest run took more than ${local.slow_run_threshold_seconds} seconds in 2 consecutive 15-minute periods. The function's time limit is ${aws_lambda_function.bot.timeout} seconds, so runs are slowing down before they start to fail. Read each run's duration in the record.metrics.durationMs field of platform.report lines in the logs: ${local.logs_console_url}"
+
+  namespace   = "AWS/Lambda"
+  metric_name = "Duration"
+  dimensions = {
+    FunctionName = aws_lambda_function.bot.function_name
+  }
+  statistic           = "Maximum"
+  period              = 900
+  evaluation_periods  = 2
+  datapoints_to_alarm = 2
+  comparison_operator = "GreaterThanThreshold"
+  # Duration is in milliseconds.
+  threshold          = local.slow_run_threshold_seconds * 1000
+  treat_missing_data = "notBreaching"
+
+  actions_enabled = true
+  alarm_actions   = [aws_sns_topic.alerts.arn]
+  ok_actions      = [aws_sns_topic.alerts.arn]
+
+  lifecycle {
+    ignore_changes = [actions_enabled]
+
+    # Two consecutive breaching periods need a run in each. On a slower schedule the empty periods
+    # count as not breaching, so the alarm could never fire.
+    precondition {
+      condition     = var.schedule_expression == "rate(15 minutes)"
+      error_message = "The slow-run alarm assumes schedule_expression is rate(15 minutes). Change the alarm's period with the schedule."
+    }
   }
 }
 

@@ -96,9 +96,9 @@ class TelegramClient:
             result = self._call(
                 "sendDocument", data, {"document": (filename, image_bytes, "image/png")}
             )
-        # Logged before anything else can fail: the StoriesPosted metric filter counts this exact
-        # message (and the event `telegram.message_sent`), so the repost-loop alarm sees every
-        # delivered post, even ones never recorded.
+        # Logged before anything else can fail: the StoriesPosted metric filter counts the event
+        # `telegram.message_sent`, so the repost-loop alarm sees every delivered post, even ones
+        # never recorded.
         logger.info(
             "Telegram message sent",
             extra={

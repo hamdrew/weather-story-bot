@@ -8,9 +8,12 @@ locals {
   artifacts_arn = "arn:aws:s3:::${local.artifacts_bucket}"
 
   # Production is unsuffixed and staging is weather-story-bot-staging, so production's names are a
-  # prefix of staging's. Staging therefore matches by prefix, which also
-  # covers a resource added later, and production lists exact names: a * pattern would match staging.
-  # The one exception is ? (exactly one character), for per-office schedules (below).
+  # prefix of staging's. Staging therefore matches by prefix, which also covers a resource added
+  # later, and production lists exact names for every kind except alarms: a * pattern would match
+  # staging. Production's alarm pattern weather-story-bot-* does match staging's alarm names, an
+  # owner-accepted trade-off (research R5 in specs/002-log-alarm-events), while staging's role still
+  # cannot write production's alarms. Schedules use ? (exactly one character) for per-office names
+  # (below).
   environments = {
     staging = {
       name         = "weather-story-bot-staging"
@@ -53,9 +56,7 @@ locals {
     # unsuffixed name stays until the closing cleanup task (done once the five-office watch has
     # passed) removes it: rolling back the cutover recreates it.
     schedule = e.prefix ? ["${e.name}*"] : [e.name, "${e.name}-???"]
-    alarm = e.prefix ? ["${e.name}*"] : [
-      for a in ["errors", "missed-runs", "quiet", "repost-loop", "nws-ambiguous", "misconfigured", "unknown", "not-healthy"] : "${e.name}-${a}"
-    ]
+    alarm    = e.prefix ? ["${e.name}*"] : ["${e.name}-*"]
     # Named like the stack itself (infra/dashboard.tf): staging by prefix, production exactly.
     dashboard = e.prefix ? ["${e.name}*"] : [e.name]
     log_group = e.prefix ? ["/aws/lambda/${e.name}*"] : ["/aws/lambda/${e.name}"]

@@ -238,14 +238,19 @@ run "the_five_existing_alarms_are_unchanged" {
   }
 
   assert {
-    condition     = jsonencode(output.alarm_names) == jsonencode(["weather-story-bot-errors", "weather-story-bot-missed-runs", "weather-story-bot-quiet", "weather-story-bot-repost-loop", "weather-story-bot-nws-ambiguous"])
-    error_message = "alarm_names lists exactly the five existing alarms, for start and pause."
+    condition     = jsonencode(output.alarm_names) == jsonencode(["weather-story-bot-errors", "weather-story-bot-missed-runs", "weather-story-bot-quiet", "weather-story-bot-repost-loop", "weather-story-bot-nws-ambiguous", "weather-story-bot-slow-runs"])
+    error_message = "alarm_names lists exactly the six alarms, for start and pause."
+  }
+
+  assert {
+    condition     = jsonencode(tolist(aws_cloudwatch_metric_alarm.slow_runs.alarm_actions)) == jsonencode([aws_sns_topic.alerts.arn]) && jsonencode(tolist(aws_cloudwatch_metric_alarm.slow_runs.ok_actions)) == jsonencode([aws_sns_topic.alerts.arn])
+    error_message = "The slow-run alarm emails the alerts topic on ALARM and OK (FR-014)."
   }
 }
 
-# [x, y, width, height] of the 13 widgets, in the order they are read top to bottom and, on a phone,
+# [x, y, width, height] of the 14 widgets, in the order they are read top to bottom and, on a phone,
 # stacked in a single column.
-run "the_thirteen_widgets_sit_on_the_grid_in_reading_order" {
+run "the_fourteen_widgets_sit_on_the_grid_in_reading_order" {
   command = apply
 
   assert {
@@ -263,15 +268,16 @@ run "the_thirteen_widgets_sit_on_the_grid_in_reading_order" {
       [12, 21, 12, 6],
       [0, 27, 12, 6],
       [12, 27, 12, 6],
+      [0, 33, 12, 6],
     ])
     error_message = "The widgets must keep the specified grid positions and sizes."
   }
 
   assert {
     condition = jsonencode([for w in jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets : w.type]) == jsonencode([
-      "text", "alarm", "alarm", "metric", "metric", "metric", "metric", "alarm", "text", "metric", "metric", "metric", "metric",
+      "text", "alarm", "alarm", "metric", "metric", "metric", "metric", "alarm", "text", "metric", "metric", "metric", "metric", "metric",
     ])
-    error_message = "The order is key, verdict, signals off, four tiles, signal states, detail heading, four charts."
+    error_message = "The order is key, verdict, signals off, four tiles, signal states, detail heading, four charts, the duration chart."
   }
 
   assert {
@@ -534,7 +540,7 @@ run "the_body_opens_on_seven_days_and_stays_inside_its_budgets" {
     error_message = "The page opens on the last 7 days and each widget keeps its alarm's period."
   }
 
-  # Eight metrics today; 50 is the free allowance, and an expression is not a metric.
+  # Nine metrics today; 50 is the free allowance, and an expression is not a metric.
   assert {
     condition = sum([
       for w in jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets :
@@ -564,5 +570,52 @@ run "the_body_opens_on_seven_days_and_stays_inside_its_budgets" {
       sum([for w in jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets : w.y == sum(concat([0], [for p in slice(local.dashboard_rows, 0, i) : p.height])) ? 1 : 0]) == length(r.widgets)
     ])
     error_message = "Every widget's y is the heights of the rows above it, so a row added to dashboard_rows moves the rows below down."
+  }
+}
+
+run "the_duration_chart_reads_the_alarm_and_stays_out_of_the_verdict" {
+  command = apply
+
+  assert {
+    condition = alltrue([
+      jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[13].properties.view == "timeSeries",
+      jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[13].properties.metrics[0][0].expression == "m1/1000",
+    ])
+    error_message = "The duration chart is a time series that plots seconds."
+  }
+
+  assert {
+    condition = alltrue([
+      jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[13].properties.metrics[1][0] == aws_cloudwatch_metric_alarm.slow_runs.namespace,
+      jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[13].properties.metrics[1][1] == aws_cloudwatch_metric_alarm.slow_runs.metric_name,
+      jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[13].properties.metrics[1][2] == "FunctionName",
+      jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[13].properties.metrics[1][3] == aws_cloudwatch_metric_alarm.slow_runs.dimensions.FunctionName,
+      jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[13].properties.metrics[1][4].id == "m1",
+      jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[13].properties.metrics[1][4].visible == false,
+      jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[13].properties.metrics[1][4].stat == aws_cloudwatch_metric_alarm.slow_runs.statistic,
+      jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[13].properties.metrics[1][4].period == aws_cloudwatch_metric_alarm.slow_runs.period,
+    ])
+    error_message = "The chart's hidden series is the alarm's own metric, function, statistic and period (FR-018)."
+  }
+
+  assert {
+    condition = alltrue([
+      length(jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[13].properties.annotations.horizontal) == 1,
+      jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[13].properties.annotations.horizontal[0].value == aws_cloudwatch_metric_alarm.slow_runs.threshold / 1000,
+      jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[13].properties.annotations.horizontal[0].value == 60,
+      jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[13].properties.annotations.horizontal[0].fill == "above",
+    ])
+    error_message = "The chart has one line at the alarm's threshold in seconds, shaded above (FR-018)."
+  }
+
+  assert {
+    condition = alltrue([
+      !strcontains(aws_cloudwatch_composite_alarm.unknown.alarm_rule, aws_cloudwatch_metric_alarm.slow_runs.alarm_name),
+      !strcontains(aws_cloudwatch_composite_alarm.not_healthy.alarm_rule, aws_cloudwatch_metric_alarm.slow_runs.alarm_name),
+      !contains(local.not_healthy_alarms, aws_cloudwatch_metric_alarm.slow_runs.alarm_name),
+      !contains(jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[2].properties.alarms, aws_cloudwatch_metric_alarm.slow_runs.arn),
+      !contains(jsondecode(aws_cloudwatch_dashboard.health.dashboard_body).widgets[7].properties.alarms, aws_cloudwatch_metric_alarm.slow_runs.arn),
+    ])
+    error_message = "The slow-run alarm stays out of both verdict rules, the not-healthy list and both alarm lists (FR-018)."
   }
 }
